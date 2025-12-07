@@ -32,8 +32,8 @@ signal_groups:
 # === Interpolation ===
 interpolation:
   method: "linear"
-  target_length: 1000
-  start_ms: -1000
+  target_length: 500
+  start_ms: -100
   end_ms: 800
 
 # === Aggregation Modes ===
