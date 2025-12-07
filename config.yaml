@@ -1,6 +1,6 @@
 # === Data Settings ===
 data:
-  input_file: "data/processed_emg_data.csv"
+  input_file: "data/normalized_data.csv"
   features_file: "data/final_dataset.csv"
   id_columns:
     subject: "subject"
