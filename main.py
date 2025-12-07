@@ -8,7 +8,7 @@ def main() -> None:
     config_path = Path(args.config)
     visualizer = AggregatedSignalVisualizer(config_path)
     ensure_output_dirs(visualizer.base_dir, visualizer.config)
-    visualizer.run(modes=args.modes, signal_groups=args.groups)
+    visualizer.run(modes=args.modes, signal_groups=args.groups, sample=args.sample)
 
 
 if __name__ == "__main__":

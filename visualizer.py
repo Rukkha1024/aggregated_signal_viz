@@ -119,11 +119,14 @@ class AggregatedSignalVisualizer:
         self,
         modes: Optional[Iterable[str]] = None,
         signal_groups: Optional[Iterable[str]] = None,
+        sample: bool = False,
     ) -> None:
         selected_modes = set(modes) if modes else None
         selected_groups = set(signal_groups) if signal_groups else None
 
         df = self._load_and_align()
+        if sample:
+            df = self._sample_single_group(df)
         self.target_axis = self._build_target_axis(df)
         self.resampled = self._resample_all(df, selected_groups)
 
@@ -181,6 +184,25 @@ class AggregatedSignalVisualizer:
             ]
         ).sort(group_cols + ["aligned_frame"])
         return df
+
+    def _sample_single_group(self, df: pl.DataFrame) -> pl.DataFrame:
+        subject_col = self.id_cfg["subject"]
+        velocity_col = self.id_cfg["velocity"]
+        trial_col = self.id_cfg["trial"]
+        if df.is_empty():
+            return df
+
+        first_subject, first_velocity, first_trial = df.select(
+            pl.col(subject_col).first(),
+            pl.col(velocity_col).first(),
+            pl.col(trial_col).first(),
+        ).row(0)
+
+        return df.filter(
+            (pl.col(subject_col) == first_subject)
+            & (pl.col(velocity_col) == first_velocity)
+            & (pl.col(trial_col) == first_trial)
+        )
 
     def _build_target_axis(self, df: pl.DataFrame) -> np.ndarray:
         frame_min = df.select(pl.col("aligned_frame").min()).item()
@@ -579,6 +601,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Aggregated signal visualization")
     default_config = Path(__file__).resolve().parent / "config.yaml"
     parser.add_argument("--config", type=str, default=str(default_config), help="Path to YAML config.")
+    parser.add_argument("--sample", action="store_true", help="Run on a single sample (first subject-velocity-trial group).")
     parser.add_argument(
         "--modes",
         type=str,
