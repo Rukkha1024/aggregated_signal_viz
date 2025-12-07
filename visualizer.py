@@ -469,7 +469,6 @@ class AggregatedSignalVisualizer:
                 self.emg_style["line_color"],
                 linewidth=self.emg_style["line_width"],
                 alpha=self.emg_style["line_alpha"],
-                label=ch,
             )
             for name, (start, end) in self.window_norm_ranges.items():
                 label = self._format_window_label(name)
@@ -545,7 +544,6 @@ class AggregatedSignalVisualizer:
                 color=color,
                 linewidth=self.forceplate_style["line_width"],
                 alpha=self.forceplate_style["line_alpha"],
-                label=ch,
             )
             for name, (start, end) in self.window_norm_ranges.items():
                 label = self._format_window_label(name)
@@ -613,7 +611,6 @@ class AggregatedSignalVisualizer:
             color=self.cop_style["background_color"],
             alpha=self.cop_style["background_alpha"],
             s=self.cop_style["background_size"],
-            label="trajectory",
         )
         if x_axis is not None:
             for name, (start, end) in self.window_norm_ranges.items():
