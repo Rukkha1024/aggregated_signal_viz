@@ -1,0 +1,78 @@
+# === Data Settings ===
+data:
+  input_file: "data/processed_emg_data.csv"
+  features_file: "data/final_dataset.csv"
+  id_columns:
+    subject: "subject"
+    velocity: "velocity"
+    trial: "trial_num"
+    frame: "DeviceFrame"
+    mocap_frame: "MocapFrame"
+    onset: "platform_onset"
+    offset: "platform_offset"
+    task: "task"
+  task_filter: "perturb"
+  # Sampling rates and frame ratio (MocapFrame → DeviceFrame)
+  device_sample_rate: 1000
+  mocap_sample_rate: 100
+  frame_ratio: 10
+
+# === Signal Groups ===
+signal_groups:
+  emg:
+    columns: [TA, EHL, MG, SOL, PL, RF, VL, ST, RA, EO, IO, SCM, GM, ESC, EST, ESL]
+    grid_layout: [4, 4]
+  forceplate:
+    columns: [Fx, Fy, Fz]
+    grid_layout: [1, 3]
+  cop:
+    columns: [Cx, Cy]
+    grid_layout: [1, 1]
+
+# === Interpolation ===
+interpolation:
+  enabled: true
+  method: "linear"
+  target_length: 1000
+
+# === Aggregation Modes ===
+aggregation_modes:
+  subject_mean:
+    enabled: true
+    groupby: ["subject"]
+    output_dir: "output/subject_mean"
+    filename_pattern: "{subject}_mean_{signal_group}.png"
+  grand_mean:
+    enabled: true
+    groupby: []
+    output_dir: "output/grand_mean"
+    filename_pattern: "grand_mean_{signal_group}.png"
+  filtered_mean:
+    enabled: true
+    filter:
+      column: "velocity"
+      value: 10.0
+    groupby: ["subject"]
+    output_dir: "output/filtered_mean"
+    filename_pattern: "{subject}_vel10_mean_{signal_group}.png"
+
+# === Window Definitions (relative to platform_onset in ms) ===
+windows:
+  reference_event: "platform_onset"
+  definitions:
+    p1:
+      start_ms: 0
+      end_ms: 200
+    p2:
+      start_ms: 200
+      end_ms: 400
+    p3:
+      start_ms: 400
+      end_ms: 600
+    p4:
+      start_ms: 600
+      end_ms: 800
+
+# === Output Settings ===
+output:
+  base_dir: "output"
