@@ -56,6 +56,82 @@ aggregation_modes:
     output_dir: "output/filtered_mean"
     filename_pattern: "vel10_mean_{signal_group}.png"
 
+# === 플롯 스타일 ===
+plot_style:
+  # 공통
+  common:
+    dpi: 300
+    grid_alpha: 0.3
+    tick_labelsize: 7
+    title_fontsize: 20
+    title_fontweight: "bold"
+    title_pad: 5
+    label_fontsize: 8
+    legend_loc: "best"
+    legend_framealpha: 0.8
+    tight_layout_rect: [0, 0, 1, 0.99]
+    savefig_bbox_inches: "tight"
+    savefig_facecolor: "white"
+    font_family: "Malgun Gothic"
+
+  # EMG 전용
+  emg:
+    subplot_size: [12, 6]
+    line_color: "blue"
+    line_width: 0.8
+    line_alpha: 0.8
+    window_span_alpha: 0.15
+    onset_marker_color: "red"
+    onset_marker_linestyle: "--"
+    onset_marker_linewidth: 1.5
+    max_marker_color: "orange"
+    max_marker_linestyle: "--"
+    max_marker_linewidth: 1.5
+    legend_fontsize: 6
+    x_label: "Frame (normalized)"
+    y_label: "{channel}"
+
+  # Forceplate 전용
+  forceplate:
+    subplot_size: [12, 6]
+    line_colors:
+      Fx: "purple"
+      Fy: "brown"
+      Fz: "green"
+    line_width: 0.8
+    line_alpha: 0.8
+    window_span_alpha: 0.15
+    onset_marker_color: "red"
+    onset_marker_linestyle: "--"
+    onset_marker_linewidth: 1.5
+    legend_fontsize: 6
+    x_label: "Frame (normalized)"
+    y_label: "{channel} Value"
+
+  # COP 전용
+  cop:
+    subplot_size: [8, 8]
+    scatter_size: 8
+    scatter_alpha: 0.7
+    background_color: "lightgray"
+    background_alpha: 0.3
+    background_size: 6
+    window_colors:
+      p1: "#4E79A7"
+      p2: "#F28E2B"
+      p3: "#E15759"
+      p4: "#59A14F"
+    max_marker_color: "#ED1C24"
+    max_marker_size: 80
+    max_marker_symbol: "*"
+    max_marker_edgecolor: "white"
+    max_marker_linewidth: 1
+    max_marker_zorder: 10
+    legend_fontsize: 5
+    x_label: "Cx (R+/L-)"
+    y_label: "Cy (A+)"
+    y_invert: true
+
 # === Window Definitions (relative to platform_onset in ms) ===
 windows:
   reference_event: "platform_onset"

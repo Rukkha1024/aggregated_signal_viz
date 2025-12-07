@@ -11,68 +11,7 @@ import polars as pl
 import yaml
 from scipy.interpolate import interp1d
 
-# --- Plot style constants (kept in code per visualization exclusion rule) ---
 plt.rcParams["axes.unicode_minus"] = False  # Avoid font warnings for minus symbols.
-COMMON_STYLE = {
-    "dpi": 300,
-    "grid_alpha": 0.3,
-    "tick_labelsize": 7,
-    "title_fontsize": 20,
-    "title_fontweight": "bold",
-    "title_pad": 5,
-    "label_fontsize": 8,
-    "legend_loc": "best",
-    "legend_framealpha": 0.8,
-    "tight_layout_rect": [0, 0, 1, 0.99],
-    "savefig_bbox_inches": "tight",
-    "savefig_facecolor": "white",
-}
-
-WINDOW_COLORS = {"p1": "#4E79A7", "p2": "#F28E2B", "p3": "#E15759", "p4": "#59A14F"}
-
-EMG_STYLE = {
-    "figsize": (12, 6),
-    "line_color": "blue",
-    "line_width": 0.8,
-    "line_alpha": 0.8,
-    "window_span_alpha": 0.15,
-    "onset_marker": {"color": "red", "linestyle": "--", "linewidth": 1.5},
-    "max_marker": {"color": "orange", "linestyle": "--", "linewidth": 1.5},
-    "legend_fontsize": 6,
-    "x_label": "Frame (onset=0)",
-}
-
-FORCEPLATE_STYLE = {
-    "figsize": (12, 6),
-    "line_colors": {"Fx": "purple", "Fy": "brown", "Fz": "green"},
-    "line_width": 0.8,
-    "line_alpha": 0.8,
-    "window_span_alpha": 0.15,
-    "onset_marker": {"color": "red", "linestyle": "--", "linewidth": 1.5},
-    "legend_fontsize": 6,
-    "x_label": "Frame (onset=0)",
-}
-
-COP_STYLE = {
-    "figsize": (8, 8),
-    "scatter_size": 8,
-    "scatter_alpha": 0.7,
-    "background_color": "lightgray",
-    "background_alpha": 0.3,
-    "background_size": 6,
-    "max_marker": {
-        "size": 80,
-        "marker": "*",
-        "color": "#ED1C24",
-        "edgecolor": "white",
-        "linewidth": 1,
-        "zorder": 10,
-    },
-    "legend_fontsize": 5,
-    "x_label": "Cx (R+/L-)",
-    "y_label": "Cy (A+)",
-    "y_invert": True,
-}
 
 
 @dataclass
@@ -112,8 +51,131 @@ class AggregatedSignalVisualizer:
         self.interp_method = self.config["interpolation"]["method"]
         self.target_axis: Optional[np.ndarray] = None
         self.resampled: Dict[str, List[AggregatedRecord]] = {}
+        style_cfg = self.config.get("plot_style", {})
+        self.common_style = self._build_common_style(style_cfg.get("common"))
+        self.emg_style = self._build_emg_style(style_cfg.get("emg"))
+        self.forceplate_style = self._build_forceplate_style(style_cfg.get("forceplate"))
+        self.cop_style = self._build_cop_style(style_cfg.get("cop"))
+        self.window_colors = self.cop_style.get("window_colors", {})
+        font_family = self.common_style.get("font_family")
+        if font_family:
+            plt.rcParams["font.family"] = font_family
         self.window_frames = self._compute_window_frames()
         self.features_df: Optional[pl.DataFrame] = self._load_features()
+
+    # All plot style parameters are configured via config.yaml under `plot_style`.
+    # Module-level style constants were removed; do not reintroduce hard-coded styles.
+    def _build_common_style(self, cfg: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        defaults = {
+            "dpi": 300,
+            "grid_alpha": 0.3,
+            "tick_labelsize": 7,
+            "title_fontsize": 20,
+            "title_fontweight": "bold",
+            "title_pad": 5,
+            "label_fontsize": 8,
+            "legend_loc": "best",
+            "legend_framealpha": 0.8,
+            "tight_layout_rect": [0, 0, 1, 0.99],
+            "savefig_bbox_inches": "tight",
+            "savefig_facecolor": "white",
+            "font_family": "Malgun Gothic",
+        }
+        return self._merge_style(defaults, cfg)
+
+    def _build_emg_style(self, cfg: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        defaults = {
+            "subplot_size": (12, 6),
+            "line_color": "blue",
+            "line_width": 0.8,
+            "line_alpha": 0.8,
+            "window_span_alpha": 0.15,
+            "onset_marker_color": "red",
+            "onset_marker_linestyle": "--",
+            "onset_marker_linewidth": 1.5,
+            "max_marker_color": "orange",
+            "max_marker_linestyle": "--",
+            "max_marker_linewidth": 1.5,
+            "legend_fontsize": 6,
+            "x_label": "Frame (normalized)",
+            "y_label": "{channel}",
+        }
+        style = self._merge_style(defaults, cfg)
+        style["subplot_size"] = tuple(style.get("subplot_size", defaults["subplot_size"]))
+        style["onset_marker"] = {
+            "color": style["onset_marker_color"],
+            "linestyle": style["onset_marker_linestyle"],
+            "linewidth": style["onset_marker_linewidth"],
+        }
+        style["max_marker"] = {
+            "color": style["max_marker_color"],
+            "linestyle": style["max_marker_linestyle"],
+            "linewidth": style["max_marker_linewidth"],
+        }
+        return style
+
+    def _build_forceplate_style(self, cfg: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        defaults = {
+            "subplot_size": (12, 6),
+            "line_colors": {"Fx": "purple", "Fy": "brown", "Fz": "green"},
+            "line_width": 0.8,
+            "line_alpha": 0.8,
+            "window_span_alpha": 0.15,
+            "onset_marker_color": "red",
+            "onset_marker_linestyle": "--",
+            "onset_marker_linewidth": 1.5,
+            "legend_fontsize": 6,
+            "x_label": "Frame (normalized)",
+            "y_label": "{channel} Value",
+        }
+        style = self._merge_style(defaults, cfg)
+        style["subplot_size"] = tuple(style.get("subplot_size", defaults["subplot_size"]))
+        style["onset_marker"] = {
+            "color": style["onset_marker_color"],
+            "linestyle": style["onset_marker_linestyle"],
+            "linewidth": style["onset_marker_linewidth"],
+        }
+        return style
+
+    def _build_cop_style(self, cfg: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        defaults = {
+            "subplot_size": (8, 8),
+            "scatter_size": 8,
+            "scatter_alpha": 0.7,
+            "background_color": "lightgray",
+            "background_alpha": 0.3,
+            "background_size": 6,
+            "window_colors": {"p1": "#4E79A7", "p2": "#F28E2B", "p3": "#E15759", "p4": "#59A14F"},
+            "max_marker_color": "#ED1C24",
+            "max_marker_size": 80,
+            "max_marker_symbol": "*",
+            "max_marker_edgecolor": "white",
+            "max_marker_linewidth": 1,
+            "max_marker_zorder": 10,
+            "legend_fontsize": 5,
+            "x_label": "Cx (R+/L-)",
+            "y_label": "Cy (A+)",
+            "y_invert": True,
+        }
+        style = self._merge_style(defaults, cfg)
+        style["subplot_size"] = tuple(style.get("subplot_size", defaults["subplot_size"]))
+        style["max_marker"] = {
+            "size": style["max_marker_size"],
+            "marker": style["max_marker_symbol"],
+            "color": style["max_marker_color"],
+            "edgecolor": style["max_marker_edgecolor"],
+            "linewidth": style["max_marker_linewidth"],
+            "zorder": style["max_marker_zorder"],
+        }
+        style["y_invert"] = bool(style.get("y_invert"))
+        return style
+
+    @staticmethod
+    def _merge_style(defaults: Dict[str, Any], overrides: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        style = defaults.copy()
+        if overrides:
+            style.update({k: v for k, v in overrides.items() if v is not None})
+        return style
 
     def run(
         self,
@@ -358,7 +420,7 @@ class AggregatedSignalVisualizer:
         markers: Dict[str, Any],
     ) -> None:
         rows, cols = self.config["signal_groups"]["emg"]["grid_layout"]
-        fig, axes = plt.subplots(rows, cols, figsize=EMG_STYLE["figsize"], dpi=COMMON_STYLE["dpi"])
+        fig, axes = plt.subplots(rows, cols, figsize=self.emg_style["subplot_size"], dpi=self.common_style["dpi"])
         axes_flat = axes.flatten()
         x = self.target_axis
         channels = self.config["signal_groups"]["emg"]["columns"]
@@ -370,31 +432,54 @@ class AggregatedSignalVisualizer:
             ax.plot(
                 x,
                 y,
-                EMG_STYLE["line_color"],
-                linewidth=EMG_STYLE["line_width"],
-                alpha=EMG_STYLE["line_alpha"],
+                self.emg_style["line_color"],
+                linewidth=self.emg_style["line_width"],
+                alpha=self.emg_style["line_alpha"],
                 label=ch,
             )
             for name, (start, end) in self.window_frames.items():
-                ax.axvspan(start, end, color=WINDOW_COLORS.get(name, "#cccccc"), alpha=EMG_STYLE["window_span_alpha"])
+                ax.axvspan(
+                    start,
+                    end,
+                    color=self.window_colors.get(name, "#cccccc"),
+                    alpha=self.emg_style["window_span_alpha"],
+                )
             marker_info = markers.get(ch, {})
             onset_time = marker_info.get("onset")
             if onset_time is not None:
-                ax.axvline(onset_time, **EMG_STYLE["onset_marker"], label="onset")
+                ax.axvline(onset_time, **self.emg_style["onset_marker"], label="onset")
             max_time = marker_info.get("max")
             if max_time is not None:
-                ax.axvline(max_time, **EMG_STYLE["max_marker"], label="max")
-            ax.set_title(ch, fontsize=COMMON_STYLE["title_fontsize"], fontweight=COMMON_STYLE["title_fontweight"], pad=COMMON_STYLE["title_pad"])
-            ax.grid(True, alpha=COMMON_STYLE["grid_alpha"])
-            ax.tick_params(labelsize=COMMON_STYLE["tick_labelsize"])
-            ax.legend(fontsize=EMG_STYLE["legend_fontsize"], loc=COMMON_STYLE["legend_loc"], framealpha=COMMON_STYLE["legend_framealpha"])
+                ax.axvline(max_time, **self.emg_style["max_marker"], label="max")
+            ax.set_title(
+                ch,
+                fontsize=self.common_style["title_fontsize"],
+                fontweight=self.common_style["title_fontweight"],
+                pad=self.common_style["title_pad"],
+            )
+            ax.grid(True, alpha=self.common_style["grid_alpha"])
+            ax.tick_params(labelsize=self.common_style["tick_labelsize"])
+            ax.legend(
+                fontsize=self.emg_style["legend_fontsize"],
+                loc=self.common_style["legend_loc"],
+                framealpha=self.common_style["legend_framealpha"],
+            )
         for ax in axes_flat[len(channels) :]:
             ax.axis("off")
-        fig.suptitle(self._format_title(signal_group="emg", mode_name=mode_name, group_fields=group_fields, key=key), fontsize=COMMON_STYLE["title_fontsize"], fontweight=COMMON_STYLE["title_fontweight"])
-        fig.supxlabel(EMG_STYLE["x_label"], fontsize=COMMON_STYLE["label_fontsize"])
-        fig.supylabel("Amplitude", fontsize=COMMON_STYLE["label_fontsize"])
-        fig.tight_layout(rect=COMMON_STYLE["tight_layout_rect"])
-        fig.savefig(output_path, bbox_inches=COMMON_STYLE["savefig_bbox_inches"], facecolor=COMMON_STYLE["savefig_facecolor"])
+        fig.suptitle(
+            self._format_title(signal_group="emg", mode_name=mode_name, group_fields=group_fields, key=key),
+            fontsize=self.common_style["title_fontsize"],
+            fontweight=self.common_style["title_fontweight"],
+        )
+        fig.supxlabel(self.emg_style["x_label"], fontsize=self.common_style["label_fontsize"])
+        y_label = self._format_label(self.emg_style.get("y_label", "Amplitude"), channel="Amplitude")
+        fig.supylabel(y_label, fontsize=self.common_style["label_fontsize"])
+        fig.tight_layout(rect=self.common_style["tight_layout_rect"])
+        fig.savefig(
+            output_path,
+            bbox_inches=self.common_style["savefig_bbox_inches"],
+            facecolor=self.common_style["savefig_facecolor"],
+        )
         plt.close(fig)
 
     def _plot_forceplate(
@@ -407,26 +492,58 @@ class AggregatedSignalVisualizer:
         markers: Dict[str, Any],
     ) -> None:
         rows, cols = self.config["signal_groups"]["forceplate"]["grid_layout"]
-        fig, axes = plt.subplots(rows, cols, figsize=FORCEPLATE_STYLE["figsize"], dpi=COMMON_STYLE["dpi"])
+        fig, axes = plt.subplots(
+            rows, cols, figsize=self.forceplate_style["subplot_size"], dpi=self.common_style["dpi"]
+        )
         x = self.target_axis
         for ax, ch in zip(np.ravel(axes), self.config["signal_groups"]["forceplate"]["columns"]):
             y = aggregated[ch]
-            color = FORCEPLATE_STYLE["line_colors"].get(ch, "blue")
-            ax.plot(x, y, color=color, linewidth=FORCEPLATE_STYLE["line_width"], alpha=FORCEPLATE_STYLE["line_alpha"], label=ch)
+            color = self.forceplate_style["line_colors"].get(ch, "blue")
+            ax.plot(
+                x,
+                y,
+                color=color,
+                linewidth=self.forceplate_style["line_width"],
+                alpha=self.forceplate_style["line_alpha"],
+                label=ch,
+            )
             for name, (start, end) in self.window_frames.items():
-                ax.axvspan(start, end, color=WINDOW_COLORS.get(name, "#cccccc"), alpha=FORCEPLATE_STYLE["window_span_alpha"])
+                ax.axvspan(
+                    start,
+                    end,
+                    color=self.window_colors.get(name, "#cccccc"),
+                    alpha=self.forceplate_style["window_span_alpha"],
+                )
             onset_time = markers.get(ch, {}).get("onset")
             if onset_time is not None:
-                ax.axvline(onset_time, **FORCEPLATE_STYLE["onset_marker"], label="onset")
-            ax.set_title(ch, fontsize=COMMON_STYLE["title_fontsize"], fontweight=COMMON_STYLE["title_fontweight"], pad=COMMON_STYLE["title_pad"])
-            ax.grid(True, alpha=COMMON_STYLE["grid_alpha"])
-            ax.tick_params(labelsize=COMMON_STYLE["tick_labelsize"])
-            ax.legend(fontsize=FORCEPLATE_STYLE["legend_fontsize"], loc=COMMON_STYLE["legend_loc"], framealpha=COMMON_STYLE["legend_framealpha"])
-            ax.set_xlabel(FORCEPLATE_STYLE["x_label"], fontsize=COMMON_STYLE["label_fontsize"])
-            ax.set_ylabel(f"{ch} Value", fontsize=COMMON_STYLE["label_fontsize"])
-        fig.suptitle(self._format_title(signal_group="forceplate", mode_name=mode_name, group_fields=group_fields, key=key), fontsize=COMMON_STYLE["title_fontsize"], fontweight=COMMON_STYLE["title_fontweight"])
-        fig.tight_layout(rect=COMMON_STYLE["tight_layout_rect"])
-        fig.savefig(output_path, bbox_inches=COMMON_STYLE["savefig_bbox_inches"], facecolor=COMMON_STYLE["savefig_facecolor"])
+                ax.axvline(onset_time, **self.forceplate_style["onset_marker"], label="onset")
+            ax.set_title(
+                ch,
+                fontsize=self.common_style["title_fontsize"],
+                fontweight=self.common_style["title_fontweight"],
+                pad=self.common_style["title_pad"],
+            )
+            ax.grid(True, alpha=self.common_style["grid_alpha"])
+            ax.tick_params(labelsize=self.common_style["tick_labelsize"])
+            ax.legend(
+                fontsize=self.forceplate_style["legend_fontsize"],
+                loc=self.common_style["legend_loc"],
+                framealpha=self.common_style["legend_framealpha"],
+            )
+            ax.set_xlabel(self.forceplate_style["x_label"], fontsize=self.common_style["label_fontsize"])
+            y_label = self._format_label(self.forceplate_style.get("y_label", "{channel} Value"), channel=ch)
+            ax.set_ylabel(y_label, fontsize=self.common_style["label_fontsize"])
+        fig.suptitle(
+            self._format_title(signal_group="forceplate", mode_name=mode_name, group_fields=group_fields, key=key),
+            fontsize=self.common_style["title_fontsize"],
+            fontweight=self.common_style["title_fontweight"],
+        )
+        fig.tight_layout(rect=self.common_style["tight_layout_rect"])
+        fig.savefig(
+            output_path,
+            bbox_inches=self.common_style["savefig_bbox_inches"],
+            facecolor=self.common_style["savefig_facecolor"],
+        )
         plt.close(fig)
 
     def _plot_cop(
@@ -443,18 +560,25 @@ class AggregatedSignalVisualizer:
         if cx is None or cy is None:
             return
         x_vals = cx
-        y_vals = -cy if COP_STYLE["y_invert"] else cy
-        fig, ax = plt.subplots(1, 1, figsize=COP_STYLE["figsize"], dpi=COMMON_STYLE["dpi"])
-        ax.scatter(x_vals, y_vals, color=COP_STYLE["background_color"], alpha=COP_STYLE["background_alpha"], s=COP_STYLE["background_size"], label="trajectory")
+        y_vals = -cy if self.cop_style["y_invert"] else cy
+        fig, ax = plt.subplots(1, 1, figsize=self.cop_style["subplot_size"], dpi=self.common_style["dpi"])
+        ax.scatter(
+            x_vals,
+            y_vals,
+            color=self.cop_style["background_color"],
+            alpha=self.cop_style["background_alpha"],
+            s=self.cop_style["background_size"],
+            label="trajectory",
+        )
         for name, (start, end) in self.window_frames.items():
             mask = (self.target_axis >= start) & (self.target_axis <= end)
             if mask.any():
                 ax.scatter(
                     x_vals[mask],
                     y_vals[mask],
-                    s=COP_STYLE["scatter_size"],
-                    alpha=COP_STYLE["scatter_alpha"],
-                    color=WINDOW_COLORS.get(name, "#999999"),
+                    s=self.cop_style["scatter_size"],
+                    alpha=self.cop_style["scatter_alpha"],
+                    color=self.window_colors.get(name, "#999999"),
                     label=name,
                 )
         max_time = markers.get("max")
@@ -463,23 +587,35 @@ class AggregatedSignalVisualizer:
             ax.scatter(
                 x_vals[idx],
                 y_vals[idx],
-                s=COP_STYLE["max_marker"]["size"],
-                marker=COP_STYLE["max_marker"]["marker"],
-                color=COP_STYLE["max_marker"]["color"],
-                edgecolor=COP_STYLE["max_marker"]["edgecolor"],
-                linewidth=COP_STYLE["max_marker"]["linewidth"],
-                zorder=COP_STYLE["max_marker"]["zorder"],
+                s=self.cop_style["max_marker"]["size"],
+                marker=self.cop_style["max_marker"]["marker"],
+                color=self.cop_style["max_marker"]["color"],
+                edgecolor=self.cop_style["max_marker"]["edgecolor"],
+                linewidth=self.cop_style["max_marker"]["linewidth"],
+                zorder=self.cop_style["max_marker"]["zorder"],
                 label="max",
             )
-        ax.grid(True, alpha=COMMON_STYLE["grid_alpha"])
-        ax.tick_params(labelsize=COMMON_STYLE["tick_labelsize"])
-        ax.legend(fontsize=COP_STYLE["legend_fontsize"], loc=COMMON_STYLE["legend_loc"], framealpha=COMMON_STYLE["legend_framealpha"])
-        ax.set_xlabel(COP_STYLE["x_label"], fontsize=COMMON_STYLE["label_fontsize"])
-        ax.set_ylabel(COP_STYLE["y_label"], fontsize=COMMON_STYLE["label_fontsize"])
+        ax.grid(True, alpha=self.common_style["grid_alpha"])
+        ax.tick_params(labelsize=self.common_style["tick_labelsize"])
+        ax.legend(
+            fontsize=self.cop_style["legend_fontsize"],
+            loc=self.common_style["legend_loc"],
+            framealpha=self.common_style["legend_framealpha"],
+        )
+        ax.set_xlabel(self.cop_style["x_label"], fontsize=self.common_style["label_fontsize"])
+        ax.set_ylabel(self.cop_style["y_label"], fontsize=self.common_style["label_fontsize"])
         ax.set_aspect("equal", adjustable="box")
-        fig.suptitle(self._format_title(signal_group="cop", mode_name=mode_name, group_fields=group_fields, key=key), fontsize=COMMON_STYLE["title_fontsize"], fontweight=COMMON_STYLE["title_fontweight"])
-        fig.tight_layout(rect=COMMON_STYLE["tight_layout_rect"])
-        fig.savefig(output_path, bbox_inches=COMMON_STYLE["savefig_bbox_inches"], facecolor=COMMON_STYLE["savefig_facecolor"])
+        fig.suptitle(
+            self._format_title(signal_group="cop", mode_name=mode_name, group_fields=group_fields, key=key),
+            fontsize=self.common_style["title_fontsize"],
+            fontweight=self.common_style["title_fontweight"],
+        )
+        fig.tight_layout(rect=self.common_style["tight_layout_rect"])
+        fig.savefig(
+            output_path,
+            bbox_inches=self.common_style["savefig_bbox_inches"],
+            facecolor=self.common_style["savefig_facecolor"],
+        )
         plt.close(fig)
 
     def _compute_window_frames(self) -> Dict[str, Tuple[float, float]]:
@@ -582,6 +718,15 @@ class AggregatedSignalVisualizer:
     @staticmethod
     def _closest_index(arr: np.ndarray, value: float) -> int:
         return int(np.nanargmin(np.abs(arr - value)))
+
+    @staticmethod
+    def _format_label(template: Any, **kwargs: Any) -> str:
+        if not isinstance(template, str):
+            return str(template)
+        try:
+            return template.format(**kwargs)
+        except (KeyError, ValueError):
+            return template
 
     def _load_features(self) -> Optional[pl.DataFrame]:
         features_path = self.config["data"].get("features_file")
