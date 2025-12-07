@@ -56,6 +56,7 @@ class AggregatedSignalVisualizer:
         self.time_start_frame: Optional[float] = None
         self.time_end_frame: Optional[float] = None
         self.window_norm_ranges: Dict[str, Tuple[float, float]] = {}
+        self.window_ms_ranges: Dict[str, Tuple[float, float]] = {}
         self.resampled: Dict[str, List[AggregatedRecord]] = {}
         style_cfg = self.config.get("plot_style", {})
         self.common_style = self._build_common_style(style_cfg.get("common"))
@@ -303,7 +304,7 @@ class AggregatedSignalVisualizer:
         self.time_end_frame = time_end_frame
         self.target_axis = np.linspace(time_start_frame, time_end_frame, self.target_length)
         self.x_norm = np.linspace(0.0, 1.0, self.target_length)
-        self.window_norm_ranges = self._compute_window_norm_ranges()
+        self.window_norm_ranges, self.window_ms_ranges = self._compute_window_norm_ranges()
         return cropped
 
     def _resample_all(
@@ -471,11 +472,13 @@ class AggregatedSignalVisualizer:
                 label=ch,
             )
             for name, (start, end) in self.window_norm_ranges.items():
+                label = self._format_window_label(name)
                 ax.axvspan(
                     start,
                     end,
                     color=self.window_colors.get(name, "#cccccc"),
                     alpha=self.emg_style["window_span_alpha"],
+                    label=label,
                 )
             marker_info = markers.get(ch, {})
             onset_time = marker_info.get("onset")
@@ -545,11 +548,13 @@ class AggregatedSignalVisualizer:
                 label=ch,
             )
             for name, (start, end) in self.window_norm_ranges.items():
+                label = self._format_window_label(name)
                 ax.axvspan(
                     start,
                     end,
                     color=self.window_colors.get(name, "#cccccc"),
                     alpha=self.forceplate_style["window_span_alpha"],
+                    label=label,
                 )
             onset_time = markers.get(ch, {}).get("onset")
             if onset_time is not None and self._is_within_time_axis(onset_time):
@@ -614,13 +619,14 @@ class AggregatedSignalVisualizer:
             for name, (start, end) in self.window_norm_ranges.items():
                 mask = (x_axis >= start) & (x_axis <= end)
                 if mask.any():
+                    label = self._format_window_label(name)
                     ax.scatter(
                         x_vals[mask],
                         y_vals[mask],
                         s=self.cop_style["scatter_size"],
                         alpha=self.cop_style["scatter_alpha"],
                         color=self.window_colors.get(name, "#999999"),
-                        label=name,
+                        label=label,
                     )
         max_time = markers.get("max")
         if max_time is not None and self._is_within_time_axis(max_time) and self.target_axis is not None:
@@ -660,10 +666,13 @@ class AggregatedSignalVisualizer:
         )
         plt.close(fig)
 
-    def _compute_window_norm_ranges(self) -> Dict[str, Tuple[float, float]]:
+    def _compute_window_norm_ranges(
+        self,
+    ) -> Tuple[Dict[str, Tuple[float, float]], Dict[str, Tuple[float, float]]]:
         if self.time_start_ms is None or self.time_end_ms is None:
-            return {}
-        ranges: Dict[str, Tuple[float, float]] = {}
+            return {}, {}
+        norm_ranges: Dict[str, Tuple[float, float]] = {}
+        ms_ranges: Dict[str, Tuple[float, float]] = {}
         definitions = self.config.get("windows", {}).get("definitions", {})
         for name, cfg in definitions.items():
             raw_start = float(cfg["start_ms"])
@@ -676,8 +685,22 @@ class AggregatedSignalVisualizer:
             end_norm = self._ms_to_norm(clamped_end)
             if start_norm is None or end_norm is None:
                 continue
-            ranges[name] = (start_norm, end_norm)
-        return ranges
+            norm_ranges[name] = (start_norm, end_norm)
+            ms_ranges[name] = (clamped_start, clamped_end)
+        return norm_ranges, ms_ranges
+
+    def _format_window_label(self, name: str) -> str:
+        """
+        Return a legend label for a window, e.g. 'p1 (0-150 ms)'.
+
+        Uses the clamped ms ranges stored in self.window_ms_ranges,
+        falling back to just the name if no range is available.
+        """
+        ms_range = self.window_ms_ranges.get(name)
+        if not ms_range:
+            return name
+        start_ms, end_ms = ms_range
+        return f"{name} ({int(start_ms)}-{int(end_ms)} ms)"
 
     def _ms_to_norm(self, value: float) -> Optional[float]:
         if self.time_start_ms is None or self.time_end_ms is None:
