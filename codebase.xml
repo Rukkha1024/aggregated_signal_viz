@@ -2,86 +2,290 @@
 
 <source-tree>
   aggregated_signal_viz
-├── check_interpolation.py
+├── analyze_window_coverage.py
 ├── config.yaml
-├── debug_interp.py
+├── legacy_code
+│   ├── cop_com_visualization.py
+│   ├── emg&fz_timing_visualization.py
+│   └── signal_grid_visualization.py
 ├── main.py
+├── plan.md
 ├── requirements.txt
 └── visualizer.py
 
 </source-tree>
 
 <files>
-      <file path="check_interpolation.py">
+      <file path="analyze_window_coverage.py">
         ```py
 #!/usr/bin/env python3
-"""Interpolation 설정 확인 스크립트"""
-import numpy as np
+"""
+Window 범위 분석 및 Trial 커버리지 검증 모듈
+
+이 모듈은 각 trial의 실제 데이터 범위를 분석하고,
+현재 window 설정이 모든 trial을 적절히 커버하는지 검증합니다.
+
+의존성: polars
+
+사용법:
+    python analyze_window_coverage.py
+"""
+
 import polars as pl
-import yaml
-from pathlib import Path
+import statistics
+from typing import Dict, Tuple
 
-# Config 로드
-with open("config.yaml", "r", encoding="utf-8") as f:
-    config = yaml.safe_load(f)
 
-# 데이터 로드
-input_file = config["data"]["input_file"]
-df = pl.read_csv(input_file)
+class WindowCoverageAnalyzer:
+    """
+    Trial 데이터 범위를 분석하고 window 설정의 적절성을 평가합니다.
 
-# ID columns
-id_cfg = config["data"]["id_columns"]
-subject_col = id_cfg["subject"]
-velocity_col = id_cfg["velocity"]
-trial_col = id_cfg["trial_num"]
-frame_col = id_cfg["frame"]
-mocap_col = id_cfg["mocap_frame"]
-onset_col = id_cfg["onset"]
+    Polars를 사용하여 대용량 CSV 파일을 효율적으로 처리합니다.
 
-# Align frames (visualizer.py의 _load_and_align과 동일)
-device_rate = config["data"].get("device_sample_rate", 1000)
-mocap_rate = config["data"].get("mocap_sample_rate", 100)
-frame_ratio = config["data"].get("frame_ratio") or int(device_rate / mocap_rate)
+    Attributes:
+        df (pl.DataFrame): 정렬되고 aligned_frame이 추가된 데이터프레임
+        trial_ranges (dict): {(subject, velocity, trial): (min_frame, max_frame)}
+        frame_ratio (int): MocapFrame → DeviceFrame 비율 (기본값: 10)
+    """
 
-group_cols = [subject_col, velocity_col, trial_col]
-mocap_start = pl.col(mocap_col).min().over(group_cols)
-onset_device = (pl.col(onset_col).first().over(group_cols) - mocap_start) * frame_ratio
-onset_aligned = pl.col(frame_col) - onset_device
+    def __init__(self, csv_path: str = "data/processed_emg_data.csv", frame_ratio: int = 10):
+        """
+        분석기 초기화.
 
-df = df.with_columns([
-    onset_device.alias("onset_device_frame"),
-    onset_aligned.alias("aligned_frame"),
-]).sort(group_cols + ["aligned_frame"])
+        Args:
+            csv_path (str): 입력 CSV 파일 경로
+            frame_ratio (int): MocapFrame에서 DeviceFrame으로 변환할 비율 (기본값: 10)
+        """
+        self.csv_path = csv_path
+        self.frame_ratio = frame_ratio
+        self.df = self._load_and_compute()
+        self.trial_ranges = self._compute_trial_ranges()
 
-# Global min/max 계산 (현재 코드의 방식)
-frame_min = df.select(pl.col("aligned_frame").min()).item()
-frame_max = df.select(pl.col("aligned_frame").max()).item()
-target_length = config["interpolation"]["target_length"]
+    def _load_and_compute(self) -> pl.DataFrame:
+        """
+        CSV를 로드하고 aligned_frame을 계산합니다.
 
-print(f"=== Global Target Axis ===")
-print(f"Frame range: {frame_min:.2f} ~ {frame_max:.2f}")
-print(f"Target length: {target_length}")
-print(f"Global target axis: np.linspace({frame_min:.2f}, {frame_max:.2f}, {target_length})")
-print()
+        aligned_frame = DeviceFrame - (platform_onset - mocap_min) * frame_ratio
 
-# 각 trial의 실제 범위 확인
-print(f"=== Individual Trial Ranges (first 10) ===")
-groups = df.group_by(group_cols, maintain_order=True)
-for i, (key, subdf) in enumerate(groups):
-    if i >= 10:  # 처음 10개만 출력
-        break
-    trial_min = subdf["aligned_frame"].min()
-    trial_max = subdf["aligned_frame"].max()
-    trial_len = len(subdf)
-    print(f"Trial {i+1} ({key[0]}, vel={key[1]}, trial={key[2]}): "
-          f"range=[{trial_min:.2f}, {trial_max:.2f}], "
-          f"raw_points={trial_len}")
+        Returns:
+            pl.DataFrame: aligned_frame이 추가된 데이터프레임
+        """
+        # CSV 로드
+        df = pl.read_csv(self.csv_path)
 
-print()
-print(f"=== Analysis ===")
-print(f"각 trial이 global range [{frame_min:.2f}, {frame_max:.2f}]의 일부만 차지하므로,")
-print(f"interpolation 후 각 trial은 {target_length}개보다 적은 유효 포인트를 가질 수 있습니다.")
-print(f"(나머지는 NaN으로 채워짐)")
+        # 그룹별 mocap_min과 onset 계산
+        group_cols = ["subject", "velocity", "trial_num"]
+
+        df = df.with_columns([
+            pl.col("MocapFrame").min().over(group_cols).alias("mocap_min"),
+            pl.col("platform_onset").first().over(group_cols).alias("onset_first"),
+        ])
+
+        # aligned_frame 계산
+        # onset_device = (platform_onset - mocap_min) * frame_ratio
+        # aligned_frame = DeviceFrame - onset_device
+        df = df.with_columns([
+            ((pl.col("onset_first") - pl.col("mocap_min")) * self.frame_ratio).alias("onset_device"),
+        ])
+
+        df = df.with_columns([
+            (pl.col("DeviceFrame") - pl.col("onset_device")).alias("aligned_frame"),
+        ])
+
+        # 불필요한 컬럼 제거
+        df = df.drop(["mocap_min", "onset_first", "onset_device"])
+
+        return df
+
+    def _compute_trial_ranges(self) -> Dict[Tuple, Tuple[float, float]]:
+        """
+        각 trial의 aligned_frame 범위를 계산합니다.
+
+        Returns:
+            dict: {(subject, velocity, trial): (min_frame, max_frame)}
+        """
+        group_cols = ["subject", "velocity", "trial_num"]
+
+        # 각 trial별 min/max aligned_frame 계산
+        ranges_df = self.df.group_by(group_cols).agg([
+            pl.col("aligned_frame").min().alias("min_frame"),
+            pl.col("aligned_frame").max().alias("max_frame"),
+        ])
+
+        # 딕셔너리로 변환
+        ranges = {}
+        for row in ranges_df.iter_rows(named=True):
+            key = (row["subject"], row["velocity"], int(row["trial_num"]))
+            ranges[key] = (row["min_frame"], row["max_frame"])
+
+        return ranges
+
+    def analyze_trial_coverage(self) -> Dict:
+        """
+        Trial 범위 분포를 분석합니다.
+
+        각 trial을 최대 범위에 따라 분류하고,
+        현재 window 설정(0-800ms)과의 적합성을 검증합니다.
+
+        Returns:
+            dict: {
+                'min_max': 가장 일찍 끝나는 trial의 max_frame,
+                'min_max_trial': 해당 trial의 key,
+                'distribution': {'범위': 개수, ...},
+                'total_trials': 전체 trial 수
+            }
+        """
+        min_max = float("inf")
+        min_max_trial = None
+
+        distribution = {
+            "< 600ms": 0,
+            "600~700ms": 0,
+            "700~800ms": 0,
+            ">= 800ms": 0,
+        }
+
+        for trial_key, (min_f, max_f) in self.trial_ranges.items():
+            if max_f < min_max:
+                min_max = max_f
+                min_max_trial = trial_key
+
+            # 범위별 분류
+            if max_f < 600:
+                distribution["< 600ms"] += 1
+            elif max_f < 700:
+                distribution["600~700ms"] += 1
+            elif max_f < 800:
+                distribution["700~800ms"] += 1
+            else:
+                distribution[">= 800ms"] += 1
+
+        total = sum(distribution.values())
+
+        return {
+            "min_max": min_max,
+            "min_max_trial": min_max_trial,
+            "distribution": distribution,
+            "total_trials": total,
+        }
+
+    def get_statistics(self) -> Dict:
+        """
+        Trial 최대 범위의 기본 통계를 반환합니다.
+
+        Returns:
+            dict: {
+                'min': 최소 max_frame,
+                'max': 최대 max_frame,
+                'mean': 평균 max_frame,
+                'median': 중앙값 max_frame
+            }
+        """
+        max_frames = [max_f for min_f, max_f in self.trial_ranges.values()]
+        return {
+            "min": float(min(max_frames)),
+            "max": float(max(max_frames)),
+            "mean": float(statistics.mean(max_frames)),
+            "median": float(statistics.median(max_frames)),
+        }
+
+    def print_summary(self):
+        """
+        분석 결과를 정리하여 출력합니다.
+
+        다음 항목을 출력합니다:
+        1. 기본 정보 (총 trial 수, 최소 범위)
+        2. 현재 window 설정
+        3. Trial 범위 분포
+        4. Window 커버리지 검증
+        5. 권장사항
+        """
+        analysis = self.analyze_trial_coverage()
+
+        print("\n" + "=" * 70)
+        print("WINDOW 범위 분석 및 Trial 커버리지 검증")
+        print("=" * 70)
+
+        # 1. 기본 정보
+        print(f"\n[1] 기본 정보")
+        print(f"  총 trial 수: {analysis['total_trials']}개")
+        print(
+            f"  가장 일찍 끝나는 trial: {analysis['min_max_trial'][0]} "
+            f"(vel={analysis['min_max_trial'][1]}, trial={analysis['min_max_trial'][2]})"
+        )
+        print(f"  최소 범위: {analysis['min_max']:.0f}ms")
+
+        # 2. 현재 window 설정
+        windows = {
+            "p1": (0, 200),
+            "p2": (200, 400),
+            "p3": (400, 600),
+            "p4": (600, 800),
+        }
+
+        print(f"\n[2] 현재 window 설정")
+        for win_name, (start, end) in sorted(windows.items()):
+            print(f"  {win_name}: {start} ~ {end}ms")
+
+        max_window_end = max(end for start, end in windows.values())
+        print(f"  → 최대 필요 범위: {max_window_end}ms")
+
+        # 3. Trial 범위 분포
+        print(f"\n[3] Trial별 최대 범위 분포")
+        dist = analysis["distribution"]
+        for range_name, count in dist.items():
+            pct = (count / analysis["total_trials"]) * 100
+            print(f"  {range_name:12s}: {count:3d}개 ({pct:5.1f}%)")
+
+        # 4. 커버리지 검증
+        print(f"\n[4] Window 커버리지 검증")
+        insufficient = (
+            dist["< 600ms"] + dist["600~700ms"] + dist["700~800ms"]
+        )
+        insufficient_pct = (insufficient / analysis["total_trials"]) * 100
+
+        if insufficient == 0:
+            print(f"  ✓ 모든 trial이 {max_window_end}ms 이상 데이터 보유")
+        else:
+            print(
+                f"  ⚠️  {insufficient}개 trial ({insufficient_pct:.1f}%)이 "
+                f"{max_window_end}ms까지 완전한 데이터 없음"
+            )
+
+        # 5. 권장사항
+        print(f"\n[5] 권장사항")
+        if insufficient > 0:
+            safe_limit = int(analysis["min_max"])
+            print(
+                f"  ⚠️  현재 설정은 {insufficient_pct:.1f}%의 trial을 누락할 수 있습니다."
+            )
+            print(f"  → window 설정을 0 ~ {safe_limit}ms 이내로 조정하는 것을 권장합니다.")
+            print(f"\n  예시: {safe_limit}ms를 4개 window로 분할")
+            segment = safe_limit / 4
+            for i in range(4):
+                p_name = f"p{i+1}"
+                start = int(i * segment)
+                end = int((i + 1) * segment)
+                print(f"    {p_name}: {start} ~ {end}ms")
+        else:
+            print(f"  ✓ 현재 설정이 모든 trial을 커버합니다.")
+
+        print("\n" + "=" * 70 + "\n")
+
+
+if __name__ == "__main__":
+    # 분석기 초기화 및 결과 출력
+    analyzer = WindowCoverageAnalyzer(csv_path="data/processed_emg_data.csv")
+    analyzer.print_summary()
+
+    # 추가 통계 출력
+    stats = analyzer.get_statistics()
+    print("[추가 통계]")
+    print(f"  Trial max_frame 통계 (ms)")
+    print(f"    최소: {stats['min']:.0f}ms")
+    print(f"    최대: {stats['max']:.0f}ms")
+    print(f"    평균: {stats['mean']:.0f}ms")
+    print(f"    중앙값: {stats['median']:.0f}ms")
 
 ```
       </file>
@@ -89,7 +293,7 @@ print(f"(나머지는 NaN으로 채워짐)")
         ```yaml
 # === Data Settings ===
 data:
-  input_file: "data/processed_emg_data.csv"
+  input_file: "data/normalized_data.csv"
   features_file: "data/final_dataset.csv"
   id_columns:
     subject: "subject"
@@ -168,79 +372,1810 @@ output:
 
 ```
       </file>
-      <file path="debug_interp.py">
+      <file path="legacy_code/cop_com_visualization.py">
+        ```py
+import os
+import pandas as pd
+import matplotlib.pyplot as plt
+import numpy as np
+from matplotlib.colors import LinearSegmentedColormap
+from typing import Optional, Dict, Any
+
+# Import from new utils module (consolidated utilities)
+from .utils import (
+    setup_korean_font, 
+    setup_logger, 
+    run_parallel_plotting,
+    EMGKoreanEncodingHandler,
+    load_config,
+    get_window_boundaries,
+)
+
+# Initialize Korean font support and logger
+setup_korean_font()
+logger = setup_logger(__name__)
+
+# Default fallback frame values used throughout the module
+DEFAULT_FRAME_START, DEFAULT_FRAME_END = 3027, 3087
+
+def get_onset_offset_from_dataset(final_dataset, subject, velocity, trial_num=None):
+    """
+    Extract onset/offset values based on windowing configuration.
+    """
+    # Default fallback values
+    fallback_start, fallback_end = DEFAULT_FRAME_START, DEFAULT_FRAME_END
+    
+    try:
+        # Load configuration to get highlight window
+        config = load_config('config.yaml')
+        highlight_window = config.get('visualization', {}).get('highlight_window', 'full_window')
+        windowing_config = config.get('windowing', {})
+        
+        # Check if windowing is enabled
+        if not windowing_config.get('enabled', True):
+            # Fallback to legacy behavior
+            logger.info("Windowing disabled, using legacy platform_onset/platform_offset")
+            return _get_legacy_onset_offset_from_dataset(final_dataset, subject, velocity, trial_num)
+        
+        # Get window configuration
+        windows_config = windowing_config.get('windows', {})
+        if highlight_window not in windows_config:
+            logger.warning(f"Highlight window '{highlight_window}' not found in config. Using legacy approach.")
+            return _get_legacy_onset_offset_from_dataset(final_dataset, subject, velocity, trial_num)
+        
+        window_config = windows_config[highlight_window]
+        sampling_rate = windowing_config.get('sampling_rate', 1000)
+        
+        # Check if required columns exist
+        required_cols = ['subject', 'velocity', 'trial_num', 'platform_onset', 'platform_offset']
+        missing_cols = [col for col in required_cols if col not in final_dataset.columns]
+        if missing_cols:
+            logger.warning(f"Missing columns {missing_cols} in dataset. Using fallback values.")
+            return fallback_start, fallback_end
+        
+        # Filter by subject and velocity
+        subject_data = final_dataset[final_dataset['subject'] == subject]
+        if len(subject_data) == 0:
+            logger.warning(f"No data found for subject '{subject}'. Using fallback values.")
+            return fallback_start, fallback_end
+        
+        # Try to find exact match with both velocity and trial if provided
+        matching_data = pd.DataFrame()
+        if trial_num is not None:
+            matching_data = subject_data[
+                (subject_data['velocity'] == velocity) & 
+                (subject_data['trial_num'] == trial_num)
+            ]
+        
+        # If no match with trial, try velocity only
+        if len(matching_data) == 0:
+            matching_data = subject_data[subject_data['velocity'] == velocity]
+        
+        if len(matching_data) > 0:
+            row = matching_data.iloc[0]
+            
+            # Calculate window boundaries using centralized helper
+            res = get_window_boundaries(
+                row,
+                config_data=config,
+                domain='original_DeviceFrame',
+                include_all=True,
+                include_highlight=True,
+            )
+            hl = res.get('highlight_range')
+            if hl is not None:
+                frame_start, frame_end = hl
+                logger.info(f"Found window boundaries for {subject}, velocity {velocity}, window '{highlight_window}': {frame_start}-{frame_end}")
+                return frame_start, frame_end
+            else:
+                logger.warning(f"Highlight window '{highlight_window}' has no range; falling back to legacy approach.")
+                return _get_legacy_onset_offset_from_dataset(final_dataset, subject, velocity, trial_num)
+        else:
+            logger.warning(f"No matching data found for subject '{subject}', velocity '{velocity}'. Using fallback values.")
+            return fallback_start, fallback_end
+            
+    except Exception as e:
+        logger.error(f"Error extracting onset/offset from dataset: {e}. Using fallback values.")
+        return fallback_start, fallback_end
+
+def _get_legacy_onset_offset_from_dataset(final_dataset, subject, velocity, trial_num=None):
+    """
+    Legacy function using platform_onset/platform_offset directly.
+    """
+    fallback_start, fallback_end = DEFAULT_FRAME_START, DEFAULT_FRAME_END
+    
+    try:
+        # Filter by subject
+        subject_data = final_dataset[final_dataset['subject'] == subject]
+        if len(subject_data) == 0:
+            return fallback_start, fallback_end
+        
+        # Try to find exact match
+        matching_data = pd.DataFrame()
+        if trial_num is not None:
+            matching_data = subject_data[
+                (subject_data['velocity'] == velocity) & 
+                (subject_data['trial_num'] == trial_num)
+            ]
+        
+        if len(matching_data) == 0:
+            matching_data = subject_data[subject_data['velocity'] == velocity]
+        
+        if len(matching_data) > 0:
+            row = matching_data.iloc[0]
+            frame_start = int(row['platform_onset'])
+            frame_end = int(row['platform_offset'])
+            return frame_start, frame_end
+        else:
+            return fallback_start, fallback_end
+    except:
+        return fallback_start, fallback_end
+
+
+
+
+def get_max_timing_from_dataset(final_dataset, subject, velocity, trial_num=None):
+    """
+    Extract cop_max_timing and com_max_timing values from final_dataset.
+    """
+    try:
+        # Load configuration to get highlight window
+        config = load_config('config.yaml')
+        highlight_window = config.get('visualization', {}).get('highlight_window', 'full_window')
+        windowing_config = config.get('windowing', {})
+        
+        # Determine column names based on windowing configuration
+        if windowing_config.get('enabled', True) and highlight_window in windowing_config.get('windows', {}):
+            # Use windowed column names
+            cop_timing_col = f'cop_max_timing_{highlight_window}'
+            com_timing_col = f'com_max_timing_{highlight_window}'
+            logger.info(f"Looking for windowed timing columns: {cop_timing_col}, {com_timing_col}")
+        else:
+            # Use legacy column names
+            cop_timing_col = 'cop_max_timing'
+            com_timing_col = 'com_max_timing'
+            logger.info(f"Looking for legacy timing columns: {cop_timing_col}, {com_timing_col}")
+        
+        # Check if the timing columns exist in the dataset
+        timing_cols = [cop_timing_col, com_timing_col]
+        available_timing_cols = [col for col in timing_cols if col in final_dataset.columns]
+        
+        if not available_timing_cols:
+            # Try to find any timing columns (fallback)
+            all_cop_cols = [col for col in final_dataset.columns if col.startswith('cop_max_timing')]
+            all_com_cols = [col for col in final_dataset.columns if col.startswith('com_max_timing')]
+            
+            if all_cop_cols or all_com_cols:
+                # Use the first available windowed columns
+                cop_timing_col = all_cop_cols[0] if all_cop_cols else None
+                com_timing_col = all_com_cols[0] if all_com_cols else None
+                logger.info(f"Using fallback timing columns: {cop_timing_col}, {com_timing_col}")
+            else:
+                logger.warning(f"No timing columns found in dataset.")
+                return None, None
+        
+        # Check if required columns exist
+        required_cols = ['subject', 'velocity']
+        missing_cols = [col for col in required_cols if col not in final_dataset.columns]
+        if missing_cols:
+            logger.warning(f"Missing columns {missing_cols} in dataset for max timing extraction.")
+            return None, None
+        
+        # Filter by subject
+        subject_data = final_dataset[final_dataset['subject'] == subject]
+        if len(subject_data) == 0:
+            logger.warning(f"No data found for subject '{subject}' for max timing extraction.")
+            return None, None
+        
+        # Try to find exact match with both velocity and trial if provided
+        matching_data = pd.DataFrame()
+        if trial_num is not None:
+            # Match both velocity and trial columns
+            matching_data = subject_data[
+                (subject_data['velocity'] == velocity) & 
+                (subject_data['trial_num'] == trial_num)
+            ]
+        
+        # If no match with trial, try velocity only
+        if len(matching_data) == 0:
+            matching_data = subject_data[subject_data['velocity'] == velocity]
+        
+        if len(matching_data) > 0:
+            row = matching_data.iloc[0]
+            
+            # Extract timing values (handling None column names)
+            cop_max_timing = None
+            com_max_timing = None
+            
+            if cop_timing_col and cop_timing_col in row:
+                cop_max_timing = row[cop_timing_col] if pd.notna(row[cop_timing_col]) else None
+                
+            if com_timing_col and com_timing_col in row:
+                com_max_timing = row[com_timing_col] if pd.notna(row[com_timing_col]) else None
+            
+            logger.info(f"Found max timing for {subject}, velocity {velocity}, window '{highlight_window}': CoP={cop_max_timing}, CoM={com_max_timing}")
+            return cop_max_timing, com_max_timing
+        else:
+            logger.warning(f"No matching data found for subject '{subject}', velocity '{velocity}' for max timing extraction.")
+            return None, None
+            
+    except Exception as e:
+        logger.error(f"Error extracting max timing from dataset: {e}")
+        return None, None
+
+def create_tableau_style_plot(trial_df, subject, velocity, trial_num=None, final_dataset=None, flip_ap_sign=True, series_type="cop"):
+    """
+    Unified Tableau-style scatter plot with dynamic range coloring.
+    
+    Args:
+        series_type (str): "cop" for Center of Pressure (Cx/Cy) or "com" for Center of Mass (COM_X/COM_Y)
+    """
+    
+    # Determine column names and labels based on series type
+    if series_type.lower() == "cop":
+        x_col, y_col = 'Cx', 'Cy'
+        title_prefix = 'Force Plate Data: Cx vs Cy'
+        xlabel = 'Cx (Right +, Left -)'
+        ylabel = 'Cy (Anterior +)' if flip_ap_sign else 'Cy (Posterior +, Anterior -)'
+        max_timing_type = 'cop'
+        marker_label_prefix = 'CoP Max'
+    elif series_type.lower() == "com":
+        x_col, y_col = 'COM_X', 'COM_Y'
+        title_prefix = 'Center of Mass Data: COM_X vs COM_Y'
+        xlabel = 'COM_X (Right +, Left -)'
+        ylabel = 'COM_Y (Anterior +)' if flip_ap_sign else 'COM_Y (Posterior +, Anterior -)'
+        max_timing_type = 'com'
+        marker_label_prefix = 'CoM Max'
+    else:
+        logger.error(f"Invalid series_type '{series_type}'. Must be 'cop' or 'com'")
+        return None
+    
+    # Use the provided trial data
+    df = trial_df
+    
+    # Check if required columns exist
+    if x_col not in df.columns or y_col not in df.columns:
+        logger.error(f"{x_col} and {y_col} columns not found in trial data")
+        logger.info("Available columns: " + str(list(df.columns)))
+        return None
+    
+    # Validation check: Ensure DeviceFrame column exists
+    if 'DeviceFrame' not in df.columns:
+        logger.error("DeviceFrame column not found in DataFrame")
+        return None
+    
+    # Determine which dataset to use for window boundaries
+    dataset_for_windows = None
+    if final_dataset is not None:
+        dataset_for_windows = final_dataset
+    else:
+        cfg = load_config('config.yaml')
+        fallback_csv_path = cfg['data_paths']['final_dataset_filename']
+        if os.path.exists(fallback_csv_path):
+            logger.info(f"Loading final dataset from {fallback_csv_path} for window boundary extraction")
+            dataset_for_windows = pd.read_csv(fallback_csv_path)
+
+    # Resolve dataset row for this trial (subject/velocity/trial_num)
+    dataset_row = None
+    if dataset_for_windows is not None:
+        subset = dataset_for_windows[dataset_for_windows['subject'] == subject]
+        if trial_num is not None:
+            subset = subset[(subset['velocity'] == velocity) & (subset['trial_num'] == trial_num)]
+        else:
+            subset = subset[subset['velocity'] == velocity]
+        if len(subset) > 0:
+            dataset_row = subset.iloc[0]
+
+    # Load visualization/windowing configuration
+    config_data = load_config('config.yaml')
+    vis_cfg = config_data.get('visualization', {})
+    windowing_cfg = config_data.get('windowing', {})
+    highlight_window = vis_cfg.get('highlight_window', 'p4')
+    plot_all_windows = vis_cfg.get('plot_all_windows', True)
+    window_colors_cfg = vis_cfg.get('window_colors', {})
+
+    # Compute window boundaries in DeviceFrame domain via centralized helper
+    if dataset_row is not None:
+        wb = get_window_boundaries(dataset_row, config_data=config_data, domain='DeviceFrame', trial_df=df)
+        all_boundaries = wb.get('boundaries', {})
+        # Determine highlight range
+        if highlight_window in all_boundaries:
+            frame_start, frame_end = all_boundaries[highlight_window]
+        else:
+            hlr = wb.get('highlight_range')
+            if hlr is not None:
+                frame_start, frame_end = hlr
+            else:
+                # Legacy fallback
+                frame_start, frame_end = get_onset_offset_from_dataset(dataset_for_windows, subject, velocity, trial_num) if dataset_for_windows is not None else (DEFAULT_FRAME_START, DEFAULT_FRAME_END)
+        # Use configured palette if available
+        window_colors_cfg = vis_cfg.get('window_colors', {})
+        palette = wb.get('palette', window_colors_cfg)
+    else:
+        # No dataset row available; fallback
+        all_boundaries = {}
+        frame_start, frame_end = DEFAULT_FRAME_START, DEFAULT_FRAME_END
+        window_colors_cfg = vis_cfg.get('window_colors', {})
+        palette = window_colors_cfg
+    
+    # Prepare x, y data with optional y flip for visualization
+    x = df[x_col]  # ML axis: Right +, Left -
+    y = -df[y_col] if flip_ap_sign else df[y_col]  # AP axis: conditional flip for Anterior +
+    
+    # Create figure and axis
+    plt.figure(figsize=(12, 8))
+    
+    # Prepare masks per window if available
+    window_masks: Dict[str, Any] = {}
+    highlight_mask = None
+    if all_boundaries:
+        for w_name, (ws, we) in all_boundaries.items():
+            window_masks[w_name] = (df['DeviceFrame'] >= ws) & (df['DeviceFrame'] <= we)
+
+    # Get colors from configuration
+    plot_colors = vis_cfg.get('plot_colors', {})
+    
+    # Use configured window colors with fallback to config defaults
+    # palette was set earlier from helper; keep variable name for continuity
+
+    if plot_all_windows and window_masks:
+        # Plot each window in its own color
+        for w_name, mask in window_masks.items():
+            color = palette.get(w_name, None)
+            plt.scatter(x[np.asarray(mask)], y[np.asarray(mask)], c=color if color else None, s=24, alpha=0.85, label=f'{w_name} ({all_boundaries[w_name][0]}-{all_boundaries[w_name][1]})')
+        # Plot remaining points (outside all windows) lightly
+        if window_masks:
+            combined = np.zeros(len(df), dtype=bool)
+            for m in window_masks.values():
+                combined |= np.asarray(m)
+            # Save combined mask for summary stats
+            highlight_mask = combined
+            plt.scatter(x[~np.asarray(combined)], y[~np.asarray(combined)], c=plot_colors.get('background', 'lightgray'), alpha=0.4, s=18, label='Other frames')
+    else:
+        # Legacy single highlight visualization
+        highlight_mask = None
+        if highlight_window in window_masks:
+            highlight_mask = window_masks[highlight_window]
+        else:
+            highlight_mask = (df['DeviceFrame'] >= frame_start) & (df['DeviceFrame'] <= frame_end)
+
+        plt.scatter(x[~np.asarray(highlight_mask)], y[~np.asarray(highlight_mask)], c=plot_colors.get('background', 'lightgray'), alpha=0.6, s=20, label='Other frames')
+
+        if np.sum(highlight_mask) > 0:
+            highlight_data = df[np.asarray(highlight_mask)].copy()
+            norm_frames = (highlight_data['DeviceFrame'] - highlight_data['DeviceFrame'].min()) / (highlight_data['DeviceFrame'].max() - highlight_data['DeviceFrame'].min())
+            colors = [plot_colors.get('time_gradient_start', '#B9DDF1'), plot_colors.get('time_gradient_end', '#173049')]
+            custom_cmap = LinearSegmentedColormap.from_list('custom_blue', colors, N=256)
+            scatter = plt.scatter(x[np.asarray(highlight_mask)], y[np.asarray(highlight_mask)], c=norm_frames, cmap=custom_cmap, s=30, alpha=0.8,
+                                  label=f'{highlight_window} ({frame_start}-{frame_end})')
+            cbar = plt.colorbar(scatter)
+            cbar.set_label('Time Progression (Normalized DeviceFrame)', rotation=270, labelpad=20)
+            actual_frames = highlight_data['DeviceFrame'].values
+            cbar_ticks = np.linspace(0, 1, 5)
+            cbar_tick_labels = [f"{int(np.interp(t, [0, 1], [actual_frames.min(), actual_frames.max()]))}" for t in cbar_ticks]
+            cbar.set_ticks(cbar_ticks.tolist())
+            cbar.set_ticklabels(cbar_tick_labels)
+    
+    # Add maximum value highlight
+    max_timing_dataset = None
+    
+    # Check if final_dataset has max timing columns
+    timing_col = f'{max_timing_type}_max_timing'
+    if final_dataset is not None and timing_col in final_dataset.columns:
+        max_timing_dataset = final_dataset
+    else:
+        # Fallback: load from CSV file for max timing data
+        fallback_csv_path = load_config('config.yaml')['data_paths']['final_dataset_filename']
+        if os.path.exists(fallback_csv_path):
+            logger.info(f"Loading final dataset from {fallback_csv_path} for max timing extraction")
+            max_timing_dataset = pd.read_csv(fallback_csv_path)
+        else:
+            logger.warning(f"Fallback file '{fallback_csv_path}' not found. {marker_label_prefix} max highlight skipped.")
+    
+    if max_timing_dataset is not None:
+        if max_timing_type == 'cop':
+            max_timing, _ = get_max_timing_from_dataset(max_timing_dataset, subject, velocity, trial_num)
+        else:  # com
+            _, max_timing = get_max_timing_from_dataset(max_timing_dataset, subject, velocity, trial_num)
+            
+        if max_timing is not None:
+            # Find the data point at the max timing frame using DeviceFrame
+            if 'DeviceFrame' in df.columns:
+                max_point_mask = df['DeviceFrame'] == max_timing
+                if np.sum(max_point_mask) > 0:
+                    max_x = df[np.asarray(max_point_mask)][x_col].iloc[0]
+                    max_y = -df[np.asarray(max_point_mask)][y_col].iloc[0] if flip_ap_sign else df[np.asarray(max_point_mask)][y_col].iloc[0]
+                    plt.scatter(max_x, max_y, c=plot_colors.get('max_highlight', '#ED1C24'), s=200, marker='*', 
+                               edgecolor=plot_colors.get('edge_color', 'white'), linewidth=2, alpha=0.9,
+                               label=f'{marker_label_prefix} (DeviceFrame {int(max_timing)})', zorder=10)
+                    logger.info(f"Added {marker_label_prefix} max highlight at DeviceFrame {max_timing}: ({max_x:.4f}, {max_y:.4f})")
+                else:
+                    logger.warning(f"{marker_label_prefix} max timing DeviceFrame {max_timing} not found in trial data")
+            else:
+                logger.warning(f"DeviceFrame column not found in trial data, {marker_label_prefix} max highlight skipped")
+    
+    # Customize the plot
+    plt.xlabel(xlabel, fontsize=12)
+    plt.ylabel(ylabel, fontsize=12)
+    plt.title(f'{title_prefix}\nHighlighted Range: DeviceFrame {frame_start}-{frame_end}', 
+              fontsize=14, pad=20)
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    
+    # Make the plot look more professional
+    plt.tight_layout()
+    
+    # Show statistics
+    total_points = len(df)
+    highlighted_points = int(np.sum(highlight_mask)) if highlight_mask is not None else 0
+    logger.info(f"Total data points: {total_points}")
+    logger.info(f"Highlighted points (frames {frame_start}-{frame_end}): {highlighted_points}")
+    logger.info(f"DeviceFrame range in data: {df['DeviceFrame'].min()} - {df['DeviceFrame'].max()}")
+    
+    return plt
+
+
+def create_tableau_style_com_plot(trial_df, subject, velocity, trial_num=None, final_dataset=None, flip_ap_sign=True):
+    """
+    Create Tableau-style scatter plot for COM data.
+    """
+    
+    # Use the provided trial data
+    df = trial_df
+    
+    # Check if COM_X and COM_Y columns exist
+    if 'COM_X' not in df.columns or 'COM_Y' not in df.columns:
+        logger.error("COM_X and COM_Y columns not found in trial data")
+        logger.info("Available columns: " + str(list(df.columns)))
+        return None
+    
+    
+    # Validation check: Ensure DeviceFrame column exists
+    if 'DeviceFrame' not in df.columns:
+        logger.error("DeviceFrame column not found in DataFrame")
+        return None
+    # Determine which dataset to use for window boundaries
+    dataset_for_windows = None
+    if final_dataset is not None:
+        dataset_for_windows = final_dataset
+    else:
+        cfg = load_config('config.yaml')
+        fallback_csv_path = cfg['data_paths']['final_dataset_filename']
+        if os.path.exists(fallback_csv_path):
+            logger.info(f"Loading final dataset from {fallback_csv_path} for window boundary extraction")
+            dataset_for_windows = pd.read_csv(fallback_csv_path)
+
+    # Resolve dataset row for this trial
+    dataset_row = None
+    if dataset_for_windows is not None:
+        subset = dataset_for_windows[dataset_for_windows['subject'] == subject]
+        if trial_num is not None:
+            subset = subset[(subset['velocity'] == velocity) & (subset['trial_num'] == trial_num)]
+        else:
+            subset = subset[subset['velocity'] == velocity]
+        if len(subset) > 0:
+            dataset_row = subset.iloc[0]
+
+    # Load visualization/windowing configuration
+    config_data = load_config('config.yaml')
+    vis_cfg = config_data.get('visualization', {})
+    windowing_cfg = config_data.get('windowing', {})
+    highlight_window = vis_cfg.get('highlight_window', 'p4')
+    plot_all_windows = vis_cfg.get('plot_all_windows', True)
+    window_colors_cfg = vis_cfg.get('window_colors', {})
+
+    # Compute window boundaries in DeviceFrame domain via centralized helper
+    if dataset_row is not None:
+        wb = get_window_boundaries(dataset_row, config_data=config_data, domain='DeviceFrame', trial_df=df)
+        all_boundaries = wb.get('boundaries', {})
+        if highlight_window in all_boundaries:
+            frame_start, frame_end = all_boundaries[highlight_window]
+        else:
+            hlr = wb.get('highlight_range')
+            if hlr is not None:
+                frame_start, frame_end = hlr
+            else:
+                frame_start, frame_end = get_onset_offset_from_dataset(dataset_for_windows, subject, velocity, trial_num) if dataset_for_windows is not None else (DEFAULT_FRAME_START, DEFAULT_FRAME_END)
+        window_colors_cfg = vis_cfg.get('window_colors', {})
+        palette = wb.get('palette', window_colors_cfg)
+    else:
+        all_boundaries = {}
+        frame_start, frame_end = DEFAULT_FRAME_START, DEFAULT_FRAME_END
+        window_colors_cfg = vis_cfg.get('window_colors', {})
+        palette = window_colors_cfg
+    
+    # Prepare x, y data with optional COM_Y flip for visualization
+    x = df['COM_X']  # ML axis: Right +, Left -
+    y = -df['COM_Y'] if flip_ap_sign else df['COM_Y']  # AP axis: conditional flip for Anterior +
+    
+    # Create figure and axis
+    plt.figure(figsize=(12, 8))
+    
+    # Prepare masks per window if available
+    window_masks: Dict[str, Any] = {}
+    highlight_mask = None
+    if all_boundaries:
+        for w_name, (ws, we) in all_boundaries.items():
+            window_masks[w_name] = (df['DeviceFrame'] >= ws) & (df['DeviceFrame'] <= we)
+
+    # Use configured window colors
+    palette = window_colors_cfg
+
+    if plot_all_windows and window_masks:
+        for w_name, mask in window_masks.items():
+            color = palette.get(w_name, None)
+            plt.scatter(x[np.asarray(mask)], y[np.asarray(mask)], c=color if color else None, s=24, alpha=0.85, label=f'{w_name} ({all_boundaries[w_name][0]}-{all_boundaries[w_name][1]})')
+        if window_masks:
+            combined = np.zeros(len(df), dtype=bool)
+            for m in window_masks.values():
+                combined |= np.asarray(m)
+            highlight_mask = combined
+            plt.scatter(x[~np.asarray(combined)], y[~np.asarray(combined)], c=plot_colors.get('background', 'lightgray'), alpha=0.4, s=18, label='Other frames')
+    else:
+        highlight_mask = None
+        if highlight_window in window_masks:
+            highlight_mask = window_masks[highlight_window]
+        else:
+            highlight_mask = (df['DeviceFrame'] >= frame_start) & (df['DeviceFrame'] <= frame_end)
+
+        plt.scatter(x[~np.asarray(highlight_mask)], y[~np.asarray(highlight_mask)], c=plot_colors.get('background', 'lightgray'), alpha=0.6, s=20, label='Other frames')
+
+        if np.sum(highlight_mask) > 0:
+            highlight_data = df[np.asarray(highlight_mask)].copy()
+            norm_frames = (highlight_data['DeviceFrame'] - highlight_data['DeviceFrame'].min()) / (highlight_data['DeviceFrame'].max() - highlight_data['DeviceFrame'].min())
+            colors = [plot_colors.get('time_gradient_start', '#B9DDF1'), plot_colors.get('time_gradient_end', '#173049')]
+            custom_cmap = LinearSegmentedColormap.from_list('custom_blue', colors, N=256)
+            scatter = plt.scatter(x[np.asarray(highlight_mask)], y[np.asarray(highlight_mask)], c=norm_frames, cmap=custom_cmap, s=30, alpha=0.8,
+                                  label=f'{highlight_window} ({frame_start}-{frame_end})')
+            cbar = plt.colorbar(scatter)
+            cbar.set_label('Time Progression (Normalized DeviceFrame)', rotation=270, labelpad=20)
+            actual_frames = highlight_data['DeviceFrame'].values
+            cbar_ticks = np.linspace(0, 1, 5)
+            cbar_tick_labels = [f"{int(np.interp(t, [0, 1], [actual_frames.min(), actual_frames.max()]))}" for t in cbar_ticks]
+            cbar.set_ticks(cbar_ticks.tolist())
+            cbar.set_ticklabels(cbar_tick_labels)
+    
+    # Add CoM maximum value highlight
+    max_timing_dataset = None
+    
+    # Check if final_dataset has max timing columns
+    if final_dataset is not None and 'com_max_timing' in final_dataset.columns:
+        max_timing_dataset = final_dataset
+    else:
+        # Fallback: load from CSV file for max timing data
+        fallback_csv_path = load_config('config.yaml')['data_paths']['final_dataset_filename']
+        if os.path.exists(fallback_csv_path):
+            logger.info(f"Loading final dataset from {fallback_csv_path} for max timing extraction")
+            max_timing_dataset = pd.read_csv(fallback_csv_path)
+        else:
+            logger.warning(f"Fallback file '{fallback_csv_path}' not found. CoM max highlight skipped.")
+    
+    if max_timing_dataset is not None:
+        _, com_max_timing = get_max_timing_from_dataset(max_timing_dataset, subject, velocity, trial_num)
+        if com_max_timing is not None:
+            # Find the data point at the max timing frame
+            if 'DeviceFrame' in df.columns:
+                max_point_mask = df['DeviceFrame'] == com_max_timing
+                if np.sum(max_point_mask) > 0:
+                    max_x = df[np.asarray(max_point_mask)]['COM_X'].iloc[0]
+                    max_y = -df[np.asarray(max_point_mask)]['COM_Y'].iloc[0] if flip_ap_sign else df[np.asarray(max_point_mask)]['COM_Y'].iloc[0]
+                    plt.scatter(max_x, max_y, c=plot_colors.get('max_highlight', '#ED1C24'), s=200, marker='*', 
+                               edgecolor=plot_colors.get('edge_color', 'white'), linewidth=2, alpha=0.9,
+                               label=f'CoM Max (DeviceFrame {int(com_max_timing)})', zorder=10)
+                    logger.info(f"Added CoM max highlight at DeviceFrame {com_max_timing}: ({max_x:.4f}, {max_y:.4f})")
+                else:
+                    logger.warning(f"CoM max timing DeviceFrame {com_max_timing} not found in trial data")
+            else:
+                logger.warning("DeviceFrame column not found in trial data, CoM max highlight skipped")
+
+    # Add single onset point marker for CoP/CoM if onset timings exist in final_dataset
+    try:
+        if final_dataset is not None and 'DeviceFrame' in df.columns:
+            onset_df = final_dataset[(final_dataset['subject'] == subject)
+                                     & (final_dataset['velocity'] == velocity)
+                                     & (final_dataset['trial_num'] == trial_num)]
+            if len(onset_df) > 0:
+                onset_frame = None
+                if series_type.lower() == 'cop':
+                    cand = []
+                    if 'cx_onset_timing' in onset_df.columns:
+                        v = onset_df.iloc[0].get('cx_onset_timing')
+                        if pd.notna(v):
+                            cand.append(float(v))
+                    if 'cy_onset_timing' in onset_df.columns:
+                        v = onset_df.iloc[0].get('cy_onset_timing')
+                        if pd.notna(v):
+                            cand.append(float(v))
+                    if len(cand) > 0:
+                        onset_frame = min(cand)
+                else:  # com
+                    cand = []
+                    for cname in ('com_x_onset_timing', 'com_y_onset_timing', 'com_z_onset_timing'):
+                        if cname in onset_df.columns:
+                            v = onset_df.iloc[0].get(cname)
+                            if pd.notna(v):
+                                cand.append(float(v))
+                    if len(cand) > 0:
+                        onset_frame = min(cand)
+
+                if onset_frame is not None:
+                    mask_on = (df['DeviceFrame'] == onset_frame)
+                    if np.sum(mask_on) > 0:
+                        px = df[np.asarray(mask_on)][x_col].iloc[0]
+                        py_raw = df[np.asarray(mask_on)][y_col].iloc[0]
+                        py = -py_raw if flip_ap_sign else py_raw
+                        plt.scatter(px, py, c=plot_colors.get('max_highlight', '#ED1C24'), s=120, marker='X',
+                                    edgecolor=plot_colors.get('edge_color', 'white'), linewidth=1.5, alpha=0.9,
+                                    label=f"Onset ({int(onset_frame)})", zorder=12)
+    except Exception:
+        pass
+    
+    # Customize the plot
+    plt.xlabel('COM_X (Right +, Left -)', fontsize=12)
+    plt.ylabel('COM_Y (Anterior +)' if flip_ap_sign else 'COM_Y (Posterior +, Anterior -)', fontsize=12)
+    plt.title(f'Center of Mass Data: COM_X vs COM_Y\nHighlighted Range: DeviceFrame {frame_start}-{frame_end}', 
+              fontsize=14, pad=20)
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    
+    # Make the plot look more professional
+    plt.tight_layout()
+    
+    # Show statistics
+    total_points = len(df)
+    highlighted_points = int(np.sum(highlight_mask)) if highlight_mask is not None else 0
+    logger.info(f"Total data points: {total_points}")
+    logger.info(f"Highlighted points (frames {frame_start}-{frame_end}): {highlighted_points}")
+    logger.info(f"DeviceFrame range in data: {df['DeviceFrame'].min()} - {df['DeviceFrame'].max()}")
+    
+    return plt
+
+
+def create_plot_from_pipeline_data(final_dataset, subject='김윤자', velocity=20, trial_num=4, flip_ap_sign=True):
+    """
+    Create plot using final_dataset from pipeline execution.
+    """
+    # Filter for the specific trial data from final_dataset (which contains all data)
+    trial_df = final_dataset[
+        (final_dataset['subject'] == subject) & 
+        (final_dataset['velocity'] == velocity) & 
+        (final_dataset['trial_num'] == trial_num)
+    ]
+    
+    if len(trial_df) == 0:
+        logger.error(f"Error: No data found for subject '{subject}', velocity '{velocity}', trial {trial_num} in pipeline data")
+        available = final_dataset.groupby(['subject', 'velocity', 'trial_num']).size().reset_index(name='count')
+        logger.info("Available combinations in the pipeline data:")
+        logger.info(str(available.head(10)))
+        return None
+    
+    logger.info(f"Found {len(trial_df)} data points for {subject}, velocity {velocity}, trial {trial_num} from pipeline")
+    
+    # Create the plot using pipeline data
+    plot = create_tableau_style_plot(trial_df, subject, velocity, trial_num, final_dataset, flip_ap_sign, series_type="cop")
+    return plot
+
+
+def create_com_plot_from_pipeline_data(final_dataset, subject='김윤자', velocity=20, trial_num=4, flip_ap_sign=True):
+    """
+    Create COM plot using final_dataset from pipeline execution.
+    """
+    # Filter for the specific trial data from final_dataset (which contains all data)
+    trial_df = final_dataset[
+        (final_dataset['subject'] == subject) & 
+        (final_dataset['velocity'] == velocity) & 
+        (final_dataset['trial_num'] == trial_num)
+    ]
+    
+    if len(trial_df) == 0:
+        logger.error(f"Error: No data found for subject '{subject}', velocity '{velocity}', trial {trial_num} in pipeline data")
+        available = final_dataset.groupby(['subject', 'velocity', 'trial_num']).size().reset_index(name='count')
+        logger.info("Available combinations in the pipeline data:")
+        logger.info(str(available.head(10)))
+        return None
+    
+    # Check if COM_X and COM_Y columns exist
+    if 'COM_X' not in trial_df.columns or 'COM_Y' not in trial_df.columns:
+        logger.error("Error: COM_X and COM_Y columns not found in pipeline data")
+        logger.info("Available columns: " + str(list(trial_df.columns)))
+        return None
+    
+    logger.info(f"Found {len(trial_df)} data points for {subject}, velocity {velocity}, trial {trial_num} from pipeline (COM data)")
+    
+    # Create the plot using pipeline data
+    plot = create_tableau_style_plot(trial_df, subject, velocity, trial_num, final_dataset, flip_ap_sign, series_type="com")
+    return plot
+
+
+def _generate_cop_com_plot_worker(args):
+    """
+    Worker function to generate CoP and CoM plots for a single trial.
+    """
+    try:
+        # Extract parameters from args
+        subject = args['subject']
+        velocity = args['velocity']
+        trial_num = args['trial_num']
+        trial_data = args['trial_data']
+        timing_data = args.get('timing_data')
+        mode = args.get('mode', 'full')
+        config_data = args.get('config_data', {})
+        output_base_dir = args.get('output_base_dir')
+        has_cop_data = args.get('has_cop_data', False)
+        has_com_data = args.get('has_com_data', False)
+        combinations = args.get('combinations', timing_data)
+        
+        if output_base_dir is None:
+            # Derive from config if not provided
+            output_base_dir = config_data.get('data_paths', {}).get('cop_com_plot_dir', 'output/cop&com_plot')
+        
+        # Determine output directory based on mode
+        if mode == "sample":
+            base_dir = os.path.join(output_base_dir, 'sample')
+        else:
+            base_dir = output_base_dir
+            # Create subject subfolder for full mode
+            base_dir = os.path.join(base_dir, subject)
+        
+        os.makedirs(base_dir, exist_ok=True)
+        
+        if len(trial_data) == 0:
+            return (False, f"No data found for {subject}, velocity {velocity}, trial {trial_num}")
+        
+        plots_generated = []
+        
+        # Generate CoP plot if data available
+        if has_cop_data:
+            try:
+                plt.figure(figsize=(12, 8))  # Start fresh figure
+                # Pass final dataset directly; avoid boolean evaluation on DataFrame
+                cop_plot = create_tableau_style_plot(
+                    trial_data, subject, velocity, trial_num, combinations, series_type="cop"
+                )
+                
+                if cop_plot is not None:
+                    # Use appropriate naming convention based on mode
+                    if mode == "sample":
+                        filename = f"sample_CoP_{subject}_vel{velocity}_trial{trial_num}.png"
+                    else:
+                        filename = f"{subject}_vel{velocity}_trial{trial_num}_CoP.png"
+                    
+                    filepath = os.path.join(base_dir, filename)
+                    plt.savefig(filepath, dpi=300, bbox_inches='tight')
+                    plots_generated.append(f"CoP: {filename}")
+                
+                plt.close()  # Critical: Close figure to free memory
+                
+            except Exception as e:
+                plt.close()  # Clean up on error
+                return (False, f"CoP plot error for {subject}_vel{velocity}_trial{trial_num}: {e}")
+        
+        # Generate CoM plot if data available
+        if has_com_data:
+            try:
+                plt.figure(figsize=(12, 8))  # Start fresh figure
+                # Pass final dataset directly; avoid boolean evaluation on DataFrame
+                com_plot = create_tableau_style_plot(
+                    trial_data, subject, velocity, trial_num, combinations, series_type="com"
+                )
+                
+                if com_plot is not None:
+                    # Use appropriate naming convention based on mode
+                    if mode == "sample":
+                        filename = f"sample_CoM_{subject}_vel{velocity}_trial{trial_num}.png"
+                    else:
+                        filename = f"{subject}_vel{velocity}_trial{trial_num}_CoM.png"
+                    
+                    filepath = os.path.join(base_dir, filename)
+                    plt.savefig(filepath, dpi=300, bbox_inches='tight')
+                    plots_generated.append(f"CoM: {filename}")
+                
+                plt.close()  # Critical: Close figure to free memory
+                
+            except Exception as e:
+                plt.close()  # Clean up on error
+                return (False, f"CoM plot error for {subject}_vel{velocity}_trial{trial_num}: {e}")
+        
+        if plots_generated:
+            return (True, f"Generated plots for {subject}_vel{velocity}_trial{trial_num}: {', '.join(plots_generated)}")
+        else:
+            return (False, f"No plots generated for {subject}_vel{velocity}_trial{trial_num}")
+            
+    except Exception as e:
+        try:
+            plt.close()  # Ensure cleanup on any error
+        except:
+            pass
+        return (False, f"Worker error: {str(e)}")
+
+
+
+
+def _load_and_merge_data(config_data, merged_data=None, final_dataset=None):
+    """
+    Helper function to load and merge data if not provided.
+    
+    Returns:
+        tuple: (merged_data, final_dataset, has_cop_data, has_com_data)
+    """
+    # Load data if not provided (backward compatibility)
+    if merged_data is None:
+        logger.info("Loading raw EMG data from config...")
+        # Prefer processed_emg_file; fall back to legacy emg_file for compatibility
+        raw_emg_data_path = (
+            config_data.get('data_paths', {}).get('processed_emg_file')
+            or config_data.get('data_paths', {}).get('emg_file')
+        )
+        if not raw_emg_data_path:
+            logger.error("No EMG data path configured (processed_emg_file/emg_file)")
+            return None, None, False, False
+        if not os.path.exists(raw_emg_data_path):
+            logger.error(f"Raw EMG data file '{raw_emg_data_path}' not found.")
+            return None, None, False, False
+        
+        encoding_handler = EMGKoreanEncodingHandler()
+        raw_emg_data = encoding_handler.read_csv_with_korean_text(raw_emg_data_path)
+        
+        # Load platform conditions
+        platform_conditions_path = config_data['data_paths']['platform_file']
+        if not os.path.exists(platform_conditions_path):
+            logger.error(f"Platform conditions file '{platform_conditions_path}' not found.")
+            return None, None, False, False
+        
+        platform_conditions = encoding_handler.read_csv_with_korean_text(platform_conditions_path, sheet_name='in')
+        
+        # Rename 'trial' to 'trial_num' if needed
+        if 'trial' in platform_conditions.columns:
+            platform_conditions = platform_conditions.rename(columns={'trial': 'trial_num'})
+        
+        # Merge raw EMG data with platform conditions
+        merged_data = raw_emg_data.merge(
+            platform_conditions[['subject', 'velocity', 'trial_num', 'platform_onset', 'platform_offset']],
+            on=['subject', 'velocity', 'trial_num'],
+            how='inner'
+        )
+    
+    # Check if COP or COM data exists
+    has_cop_data = 'Cx' in merged_data.columns and 'Cy' in merged_data.columns
+    has_com_data = 'COM_X' in merged_data.columns and 'COM_Y' in merged_data.columns
+    
+    logger.info("Available data types:")
+    if has_cop_data:
+        logger.info("- COP data (Cx, Cy): Available")
+    if has_com_data:
+        logger.info("- COM data (COM_X, COM_Y): Available")
+    
+    if not has_cop_data and not has_com_data:
+        logger.error("No required columns for plotting found in data.")
+        logger.error("Need either: Cx & Cy (for COP) or COM_X & COM_Y (for COM)")
+        logger.error(f"Available columns: {list(merged_data.columns)}")
+        return None, None, False, False
+    
+    # Use merged_data as final_dataset if not provided
+    if final_dataset is None:
+        final_dataset = merged_data.groupby(['subject', 'velocity', 'trial_num']).first().reset_index()
+    
+    return merged_data, final_dataset, has_cop_data, has_com_data
+
+
+def _generate_cop_com_plots_unified(
+    merged_data: Optional[pd.DataFrame] = None,
+    final_dataset: Optional[pd.DataFrame] = None,
+    mode: str = "full",
+    limit_per_type: int = 10
+) -> None:
+    """
+    Unified function to generate CoP and CoM plots using shared helpers.
+    
+    Args:
+        merged_data: Pre-loaded merged dataset (None to load from config)
+        final_dataset: Pre-loaded final dataset (None to use merged_data)
+        mode: "full" or "sample"
+        limit_per_type: Limit for sample mode
+    """
+    mode_desc = "sample" if mode == "sample" else "all"
+    logger.info(f"Starting CoP and CoM {mode_desc} plot generation...")
+    
+    # Load configuration
+    config_data = load_config('config.yaml')
+    
+    # Load and validate data
+    merged_data, final_dataset, has_cop_data, has_com_data = _load_and_merge_data(
+        config_data, merged_data, final_dataset
+    )
+    
+    if merged_data is None:
+        return
+    
+    # Get output directory
+    output_base_dir = config_data['data_paths']['cop_com_plot_dir']
+    os.makedirs(output_base_dir, exist_ok=True)
+    
+    # Generate plots in sample mode directly
+    if mode == "sample":
+        logger.info(f"Generating up to {limit_per_type} sample plots each for CoP and CoM")
+        
+        # Get sample data
+        sample_combinations = final_dataset.head(limit_per_type)
+        
+        # Set output directory for sample mode
+        sample_output_dir = os.path.join(output_base_dir, 'sample')
+        os.makedirs(sample_output_dir, exist_ok=True)
+        
+        plots_generated = []
+        
+        for _, row in sample_combinations.iterrows():
+            subject = row['subject']
+            velocity = row['velocity']
+            trial_num = row['trial_num']
+            
+            try:
+                # Generate CoP plot if data available
+                if has_cop_data:
+                    trial_data = merged_data[
+                        (merged_data['subject'] == subject) & 
+                        (merged_data['velocity'] == velocity) & 
+                        (merged_data['trial_num'] == trial_num)
+                    ]
+                    
+                    if len(trial_data) > 0:
+                        plt.figure(figsize=(12, 8))
+                        cop_plot = create_tableau_style_plot(
+                            trial_data, subject, velocity, trial_num, final_dataset, series_type="cop"
+                        )
+                        
+                        if cop_plot is not None:
+                            filename = f"sample_CoP_{subject}_vel{velocity}_trial{trial_num}.png"
+                            filepath = os.path.join(sample_output_dir, filename)
+                            plt.savefig(filepath, dpi=300, bbox_inches='tight')
+                            plots_generated.append(f"CoP: {filename}")
+                        
+                        plt.close()
+                
+                # Generate CoM plot if data available
+                if has_com_data:
+                    trial_data = merged_data[
+                        (merged_data['subject'] == subject) & 
+                        (merged_data['velocity'] == velocity) & 
+                        (merged_data['trial_num'] == trial_num)
+                    ]
+                    
+                    if len(trial_data) > 0:
+                        plt.figure(figsize=(12, 8))
+                        com_plot = create_tableau_style_plot(
+                            trial_data, subject, velocity, trial_num, final_dataset, series_type="com"
+                        )
+                        
+                        if com_plot is not None:
+                            filename = f"sample_CoM_{subject}_vel{velocity}_trial{trial_num}.png"
+                            filepath = os.path.join(sample_output_dir, filename)
+                            plt.savefig(filepath, dpi=300, bbox_inches='tight')
+                            plots_generated.append(f"CoM: {filename}")
+                        
+                        plt.close()
+                        
+            except Exception as e:
+                logger.error(f"Error generating plots for {subject}_vel{velocity}_trial{trial_num}: {e}")
+                plt.close()  # Ensure cleanup
+        
+        logger.info(f"Generated {len(plots_generated)} sample plots in {sample_output_dir}")
+        return
+    
+    # For full mode, generate all plots
+    logger.info("Generating all CoP and CoM plots...")
+    all_combinations = final_dataset
+    plots_generated = []
+    
+    for _, row in all_combinations.iterrows():
+        subject = row['subject']
+        velocity = row['velocity']
+        trial_num = row['trial_num']
+        
+        try:
+            # Generate CoP plot if data available
+            if has_cop_data:
+                trial_data = merged_data[
+                    (merged_data['subject'] == subject) & 
+                    (merged_data['velocity'] == velocity) & 
+                    (merged_data['trial_num'] == trial_num)
+                ]
+                
+                if len(trial_data) > 0:
+                    plt.figure(figsize=(12, 8))
+                    cop_plot = create_tableau_style_plot(
+                        trial_data, subject, velocity, trial_num, final_dataset, series_type="cop"
+                    )
+                    
+                    if cop_plot is not None:
+                        filename = f"{subject}_vel{velocity}_trial{trial_num}_CoP.png"
+                        filepath = os.path.join(output_base_dir, filename)
+                        plt.savefig(filepath, dpi=300, bbox_inches='tight')
+                        plots_generated.append(f"CoP: {filename}")
+                    
+                    plt.close()
+            
+            # Generate CoM plot if data available
+            if has_com_data:
+                trial_data = merged_data[
+                    (merged_data['subject'] == subject) & 
+                    (merged_data['velocity'] == velocity) & 
+                    (merged_data['trial_num'] == trial_num)
+                ]
+                
+                if len(trial_data) > 0:
+                    plt.figure(figsize=(12, 8))
+                    com_plot = create_tableau_style_plot(
+                        trial_data, subject, velocity, trial_num, final_dataset, series_type="com"
+                    )
+                    
+                    if com_plot is not None:
+                        filename = f"{subject}_vel{velocity}_trial{trial_num}_CoM.png"
+                        filepath = os.path.join(output_base_dir, filename)
+                        plt.savefig(filepath, dpi=300, bbox_inches='tight')
+                        plots_generated.append(f"CoM: {filename}")
+                    
+                    plt.close()
+                    
+        except Exception as e:
+            logger.error(f"Error generating plots for {subject}_vel{velocity}_trial{trial_num}: {e}")
+            plt.close()  # Ensure cleanup
+    
+    logger.info(f"Generated {len(plots_generated)} total plots in {output_base_dir}")
+
+
+def generate_all_plots(merged_data: Optional[pd.DataFrame] = None, final_dataset: Optional[pd.DataFrame] = None):
+    """
+    Generate CoP and CoM plots for all subject-velocity-trial combinations.
+    
+    Args:
+        merged_data (pd.DataFrame, optional): Pre-loaded merged dataset. If None, loads from config.
+        final_dataset (pd.DataFrame, optional): Pre-loaded final dataset. If None, loads from config.
+    
+    This function now uses the unified plotting system to eliminate code duplication.
+    """
+    _generate_cop_com_plots_unified(
+        merged_data=merged_data,
+        final_dataset=final_dataset,
+        mode="full"
+    )
+
+
+def generate_sample_plots(
+    merged_data: Optional[pd.DataFrame] = None,
+    final_dataset: Optional[pd.DataFrame] = None,
+    limit_per_type: int = 10,
+):
+    """
+    Generate up to `limit_per_type` CoP and CoM sample plots.
+
+    - Outputs under cop_com_plot_dir/sample
+    - Uses unified plotting system to eliminate code duplication
+    """
+    _generate_cop_com_plots_unified(
+        merged_data=merged_data,
+        final_dataset=final_dataset,
+        mode="sample",
+        limit_per_type=limit_per_type
+    )
+
+
+def main():
+    """
+    Main function - calls generate_all_plots() for backward compatibility
+    """
+    generate_all_plots()
+
+if __name__ == "__main__":
+    main()
+
+```
+      </file>
+      <file path="legacy_code/emg&fz_timing_visualization.py">
         ```py
 #!/usr/bin/env python3
-"""실제 interpolation 작동 방식 확인"""
-import sys
+# -*- coding: utf-8 -*-
+"""
+EMG and Signal Grid Visualization Module (V5)
+
+Subject별로 모든 velocity-trial 조합을 하나의 grid plot에 배치.
+- EMG: TKEO-AGLR onset timing 마커 + Window span 하이라이트
+- Fplot
+
+"""
+
+import os
+import math
+import pandas as pd
+p
+import matplotlib.pyplot as plt
+from typing import O
+
+# Import from util
+from emg_pipeline.utils im (
+    setup_koreant,
+    setup_logger,
+    load_config,
+    get_windo,
+ ,
+    EMGSignalPipelineProcessor,
+)
+
+ialize
+setup_korean_font()
+logger = setup_logg_)
+
+tants
+ # inches
+SUBPLOT_HEIGHT = 6  # inches
+DPI = 300
+
+
+def get_velocity_trial_combos(df: pd.DataFrame, sub
+    """Get sorted velocity-trial combin"
+    subj_df = df[df['subject'] == subject][['velocity', 'trial_num']].()
+    subj_df = subj_])
+    ))
+
+
+def calculate_grid_dimensions(n_plots: int) -
+    """Calculate optimal grid dimensions (rows, cols) for n_plots."""
+    if n_plots <= 0:
+, 0)
+    cols = math.ceil(math.sqrt(n_plots))
+    rows = math.ceil(n_plots / cols)
+    return (rows, cols)
+
+
+def comp:
+    """Compute platform onset offset for x-"""
+    try:
+        dev_hz = float(config.get('windowing', {}).get('sa
+        
+        ratio = dev_hz / mocap_hz if mocap_hz else 1.0
+
+        trial_rows = timings_df[
+            (timings_df['subject'] == subject) &
+        ocity) &
+            (timings_df['trial_num'] == trial_num)
+        ]
+        dataset_row = trial_rows.iloc[0] if not trial_rows.empty else None
+
+        if dataset_row is not None and 'platform_onset' inx:
+            odf_min = float(pd.to_nu').min())
+            df_min = float(pd.to_numeric(trial_df[())
+            odf_onset = float(dataset_row['platform_ontio
+            onset_df_abs = (odf_onset - odf_min) + df_min
+            rw
+    except Exception:
+        pass
+    return 0.0, None
+
+
+def draw_window_spans(ax, dataset_row, config, onset_df_abs, trial_df):
+    """Draw window spans on the axes."""
+    if dataset_ro
+        return
+    try:
+        vis_cfg = config.get(')
+)
+        default_fallback = vis_cfg.get('plot_colors', {}).get('default_fallback', '#999999')
+
+        wb = get_window_boundaries(
+        all_bounds = wb.get('boundaries', {})
+        palette = wb.get('olors)
+
+        for wname, (ws, we) in all_bounds.items():
+            
+            ws_shifted = ws - onset_df_abs
+            we_shifted = we - onset_df_abs
+            ax.axvspan(ws_shifted, we_shifted, color=color, alpha=0.15,
+                       label=f'{wname}: {int(ws_shifted)}-fted)}')
+    except Exception as e:
+        logger.warning(f"Failed to draw window spa
+
+
+
+```
+      </file>
+      <file path="legacy_code/signal_grid_visualization.py">
+        ```py
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+EMG and Signal Grid Visualization Module (V5)
+
+Subject별로 모든 velocity-trial 조합을 하나의 grid plot에 배치.
+- EMG: TKEO-AGLR onset timing 마커 + Window span 하이라이트
+- Forceplate: Fx, Fy, Fz 각각 grid plot
+- CoP: Cx vs Cy trajectory grid plot
+"""
+
+import os
+import math
+import pandas as pd
 import numpy as np
-import polars as pl
-import yaml
+import matplotlib.pyplot as plt
+from typing import Optional, List
 
-# Config 로드
-with open("config.yaml", "r", encoding="utf-8") as f:
-    config = yaml.safe_load(f)
+# Import from utils module
+from emg_pipeline.utils import (
+    setup_korean_font,
+    setup_logger,
+    load_config,
+    get_window_boundaries,
+    resolve_windowed_column_name,
+    EMGSignalPipelineProcessor,
+)
 
-# 데이터 로드
-df = pl.read_csv(config["data"]["input_file"])
-print(f"전체 데이터: {len(df)} rows")
+# Initialize
+setup_korean_font()
+logger = setup_logger(__name__)
 
-# ID columns
-id_cfg = config["data"]["id_columns"]
-frame_ratio = 10  # mocap→device
+# Constants
+SUBPLOT_WIDTH = 12  # inches
+SUBPLOT_HEIGHT = 6  # inches
+DPI = 300
+PLOT_EMG_INPUT_PATH = os.path.join('data', 'processed_emg_data.csv')
 
-# Align frames (visualizer.py와 동일)
-group_cols = ["subject", "velocity", "trial_num"]
-mocap_start = pl.col("MocapFrame").min().over(group_cols)
-onset_device = (pl.col("platform_onset").first().over(group_cols) - mocap_start) * frame_ratio
-onset_aligned = pl.col("DeviceFrame") - onset_device
 
-df = df.with_columns([
-    onset_aligned.alias("aligned_frame"),
-])
+def get_velocity_trial_combos(df: pd.DataFrame, subject: str) -> list:
+    """Get sorted velocity-trial combinations for a subject."""
+    subj_df = df[df['subject'] == subject][['velocity', 'trial_num']].drop_duplicates()
+    subj_df = subj_df.sort_values(['velocity', 'trial_num'])
+    return list(subj_df.itertuples(index=False, name=None))
 
-# Global min/max (현재 코드 방식)
-frame_min = df.select(pl.col("aligned_frame").min()).item()
-frame_max = df.select(pl.col("aligned_frame").max()).item()
-target_length = 1000
 
-print(f"\n=== GLOBAL TARGET AXIS (현재 코드 방식) ===")
-print(f"전체 데이터의 aligned_frame 범위: {frame_min:.1f} ~ {frame_max:.1f}")
-print(f"Target axis: np.linspace({frame_min:.1f}, {frame_max:.1f}, {target_length})")
-print(f"→ 즉, {frame_min:.1f}부터 {frame_max:.1f}까지를 1000개로 나눔")
+def calculate_grid_dimensions(n_plots: int) -> tuple:
+    """Calculate optimal grid dimensions (rows, cols) for n_plots."""
+    if n_plots <= 0:
+        return (0, 0)
+    cols = math.ceil(math.sqrt(n_plots))
+    rows = math.ceil(n_plots / cols)
+    return (rows, cols)
 
-# 각 trial 확인 (처음 3개만)
-print(f"\n=== 개별 TRIAL 범위 (처음 3개) ===")
-groups = df.group_by(group_cols, maintain_order=True)
 
-for i, (key, subdf) in enumerate(groups):
-    if i >= 3:
-        break
+def compute_onset_offset(trial_df, timings_df, subject, velocity, trial_num, config):
+    """Compute platform onset offset for x-axis alignment."""
+    try:
+        dev_hz = float(config.get('windowing', {}).get('sampling_rate', 1000))
+        mocap_hz = float(config.get('mocap', {}).get('sampling_rate', 100))
+        ratio = dev_hz / mocap_hz if mocap_hz else 1.0
 
-    trial_min = subdf["aligned_frame"].min()
-    trial_max = subdf["aligned_frame"].max()
-    trial_range = trial_max - trial_min
+        trial_rows = timings_df[
+            (timings_df['subject'] == subject) &
+            (timings_df['velocity'] == velocity) &
+            (timings_df['trial_num'] == trial_num)
+        ]
+        dataset_row = trial_rows.iloc[0] if not trial_rows.empty else None
 
-    print(f"\nTrial {i+1}: subject={key[0]}, vel={key[1]}, trial={key[2]}")
-    print(f"  이 trial의 aligned_frame 범위: {trial_min:.1f} ~ {trial_max:.1f} (범위: {trial_range:.1f})")
-    print(f"  원본 데이터 포인트 수: {len(subdf)}개")
+        if dataset_row is not None and 'platform_onset' in dataset_row.index:
+            odf_min = float(pd.to_numeric(trial_df['original_DeviceFrame'], errors='coerce').min())
+            df_min = float(pd.to_numeric(trial_df['DeviceFrame'], errors='coerce').min())
+            odf_onset = float(dataset_row['platform_onset']) * ratio
+            onset_df_abs = (odf_onset - odf_min) + df_min
+            return onset_df_abs, dataset_row
+    except Exception:
+        pass
+    return 0.0, None
 
-    # Global target axis에서 이 trial이 차지하는 비율
-    global_range = frame_max - frame_min
-    trial_coverage = trial_range / global_range
-    expected_points = int(trial_coverage * target_length)
 
-    print(f"  Global range({global_range:.1f}) 대비 비율: {trial_coverage*100:.1f}%")
-    print(f"  → Interpolation 후 예상 유효 포인트: 약 {expected_points}개 (나머지는 NaN)")
+def draw_window_spans(ax, dataset_row, config, onset_df_abs, trial_df):
+    """Draw window spans on the axes."""
+    if dataset_row is None:
+        return
+    try:
+        vis_cfg = config.get('visualization', {})
+        window_colors = vis_cfg.get('window_colors', {})
+        default_fallback = vis_cfg.get('plot_colors', {}).get('default_fallback', '#999999')
 
-print(f"\n=== 문제점 요약 ===")
-print(f"현재 방식:")
-print(f"  1. 모든 trial의 시간 범위를 합친 [{frame_min:.1f}, {frame_max:.1f}]를 1000개로 나눔")
-print(f"  2. 각 trial은 자신의 시간 범위에만 데이터가 있고, 나머지는 NaN")
-print(f"  3. 따라서 각 trial은 1000개보다 훨씬 적은 유효 데이터만 가짐")
-print(f"\n올바른 방식:")
-print(f"  1. 각 trial의 시간 범위를 개별적으로 1000개로 나눔")
-print(f"  2. 각 trial이 모두 1000개의 유효 데이터를 가짐")
+        wb = get_window_boundaries(dataset_row, config_data=config, domain='DeviceFrame', trial_df=trial_df)
+        all_bounds = wb.get('boundaries', {})
+        palette = wb.get('palette', window_colors)
+
+        for wname, (ws, we) in all_bounds.items():
+            color = palette.get(wname, default_fallback)
+            ws_shifted = ws - onset_df_abs
+            we_shifted = we - onset_df_abs
+            ax.axvspan(ws_shifted, we_shifted, color=color, alpha=0.15,
+                       label=f'{wname}: {int(ws_shifted)}-{int(we_shifted)}')
+    except Exception as e:
+        logger.warning(f"Failed to draw window spans: {e}")
+
+
+
+def create_emg_subplot(
+    ax,
+    trial_df: pd.DataFrame,
+    channel: str,
+    velocity: float,
+    trial_num: int,
+    subject: str,
+    timings_df: pd.DataFrame,
+    config: dict,
+    emg_processor=None,
+):
+    """Create a single EMG signal subplot with TKEO-AGLR onset timing."""
+    if channel not in trial_df.columns:
+        ax.text(0.5, 0.5, f'{channel} not found', ha='center', va='center', transform=ax.transAxes)
+        ax.set_title(f'Vel:{velocity} Trial:{int(trial_num)}', fontsize=20, fontweight='bold')
+        return
+
+    trial_df = trial_df.sort_values('DeviceFrame').copy()
+    vis_cfg = config.get('visualization', {})
+
+    # Compute onset offset
+    onset_df_abs, dataset_row = compute_onset_offset(trial_df, timings_df, subject, velocity, trial_num, config)
+
+    # Process EMG signal
+    if emg_processor is not None:
+        try:
+            processed_data = emg_processor.process_emg_data(trial_df.copy(), [channel])
+            y_vals = processed_data[channel].values
+        except Exception:
+            y_vals = trial_df[channel].values
+    else:
+        y_vals = trial_df[channel].values
+
+    x_vals = trial_df['DeviceFrame'].values.astype(float) - float(onset_df_abs)
+
+    # Plot signal
+    ax.plot(x_vals, y_vals, 'b-', linewidth=0.8, alpha=0.8)
+
+    # Draw window spans
+    draw_window_spans(ax, dataset_row, config, onset_df_abs, trial_df)
+
+    # Add timing markers - TKEO-AGLR onset
+    channel_timings = timings_df[
+        (timings_df['subject'] == subject) &
+        (timings_df['velocity'] == velocity) &
+        (timings_df['trial_num'] == trial_num) &
+        (timings_df['emg_channel'] == channel)
+    ]
+
+    if not channel_timings.empty:
+        timing_row = channel_timings.iloc[0]
+
+        # TKEO-AGLR Onset timing marker
+        onset_col = 'TKEO_AGLR_emg_onset_timing'
+        if pd.notna(timing_row.get(onset_col)):
+            onset_time = timing_row[onset_col]
+            ax.axvline(x=onset_time, color='red', linestyle='--', linewidth=1.5,
+                       label=f'TKEO-AGLR Onset ({int(onset_time)})')
+
+        # Max amplitude timing marker
+        highlight_window = vis_cfg.get('highlight_window', None)
+        max_col = resolve_windowed_column_name(list(timing_row.index), 'max_amp_timing', highlight_window)
+        if max_col and pd.notna(timing_row.get(max_col)):
+            max_time = timing_row[max_col]
+            ax.axvline(x=max_time, color='orange', linestyle='--', linewidth=1.5,
+                       label=f'Max Amp ({int(max_time)})')
+
+    # Title and labels
+    ax.set_title(f'Vel:{velocity} Trial:{int(trial_num)}', fontsize=20, fontweight='bold', pad=5)
+    ax.set_xlabel('Frame (onset=0)', fontsize=8)
+    ax.set_ylabel(channel, fontsize=8)
+    ax.tick_params(axis='both', labelsize=7)
+    ax.grid(True, alpha=0.3)
+
+    try:
+        ax.set_xlim(float(np.nanmin(x_vals)), float(np.nanmax(x_vals)))
+    except Exception:
+        pass
+
+    # Legend
+    handles, labels = ax.get_legend_handles_labels()
+    if handles:
+        ax.legend(loc='best', fontsize=6, framealpha=0.8)
+
+
+def create_forceplate_subplot(
+    ax,
+    trial_df: pd.DataFrame,
+    channel: str,
+    velocity: float,
+    trial_num: int,
+    subject: str,
+    timings_df: pd.DataFrame,
+    config: dict,
+):
+    """Create a single forceplate signal subplot (Fx, Fy, Fz)."""
+    if channel not in trial_df.columns:
+        ax.text(0.5, 0.5, f'{channel} not found', ha='center', va='center', transform=ax.transAxes)
+        ax.set_title(f'Vel:{velocity} Trial:{int(trial_num)}', fontsize=20, fontweight='bold')
+        return
+
+    trial_df = trial_df.sort_values('DeviceFrame').copy()
+
+    # Compute onset offset
+    onset_df_abs, dataset_row = compute_onset_offset(trial_df, timings_df, subject, velocity, trial_num, config)
+
+    x_vals = trial_df['DeviceFrame'].values.astype(float) - float(onset_df_abs)
+    y_vals = trial_df[channel].values
+
+    # Plot signal with different colors per channel
+    colors = {'Fx': 'purple', 'Fy': 'brown', 'Fz': 'green'}
+    ax.plot(x_vals, y_vals, color=colors.get(channel, 'black'), linewidth=0.8, alpha=0.8)
+
+    # Draw window spans
+    draw_window_spans(ax, dataset_row, config, onset_df_abs, trial_df)
+
+    # Add onset timing marker
+    trial_timings = timings_df[
+        (timings_df['subject'] == subject) &
+        (timings_df['velocity'] == velocity) &
+        (timings_df['trial_num'] == trial_num)
+    ]
+
+    if not trial_timings.empty:
+        timing_row = trial_timings.iloc[0]
+        onset_col = f'{channel.lower()}_onset_timing'
+        if onset_col in timing_row.index and pd.notna(timing_row.get(onset_col)):
+            onset_time = timing_row[onset_col]
+            ax.axvline(x=onset_time, color='red', linestyle='--', linewidth=1.5,
+                       label=f'{channel} Onset ({int(onset_time)})')
+
+    # Title and labels
+    ax.set_title(f'Vel:{velocity} Trial:{int(trial_num)}', fontsize=20, fontweight='bold', pad=5)
+    ax.set_xlabel('Frame (onset=0)', fontsize=8)
+    ax.set_ylabel(f'{channel} Value', fontsize=8)
+    ax.tick_params(axis='both', labelsize=7)
+    ax.grid(True, alpha=0.3)
+
+    try:
+        ax.set_xlim(float(np.nanmin(x_vals)), float(np.nanmax(x_vals)))
+    except Exception:
+        pass
+
+    handles, labels = ax.get_legend_handles_labels()
+    if handles:
+        ax.legend(loc='best', fontsize=6, framealpha=0.8)
+
+
+def create_cop_subplot(
+    ax,
+    trial_df: pd.DataFrame,
+    velocity: float,
+    trial_num: int,
+    subject: str,
+    timings_df: pd.DataFrame,
+    config: dict,
+):
+    """Create a single CoP scatter plot (Cx vs Cy)."""
+    if 'Cx' not in trial_df.columns or 'Cy' not in trial_df.columns:
+        ax.text(0.5, 0.5, 'Cx/Cy not found', ha='center', va='center', transform=ax.transAxes)
+        ax.set_title(f'Vel:{velocity} Trial:{int(trial_num)}', fontsize=20, fontweight='bold')
+        return
+
+    trial_df = trial_df.sort_values('DeviceFrame').copy()
+    vis_cfg = config.get('visualization', {})
+    plot_colors = vis_cfg.get('plot_colors', {})
+
+    # Compute onset offset
+    onset_df_abs, dataset_row = compute_onset_offset(trial_df, timings_df, subject, velocity, trial_num, config)
+
+    # Prepare data (flip Cy for Anterior +)
+    x = trial_df['Cx'].values
+    y = -trial_df['Cy'].values
+
+    # Get window boundaries
+    all_boundaries = {}
+    if dataset_row is not None:
+        try:
+            wb = get_window_boundaries(dataset_row, config_data=config, domain='DeviceFrame', trial_df=trial_df)
+            all_boundaries = wb.get('boundaries', {})
+        except Exception:
+            pass
+
+    # Create window masks
+    window_masks = {}
+    for w_name, (ws, we) in all_boundaries.items():
+        window_masks[w_name] = (trial_df['DeviceFrame'] >= ws) & (trial_df['DeviceFrame'] <= we)
+
+    # Plot with window colors
+    window_colors = vis_cfg.get('window_colors', {})
+    if window_masks:
+        for w_name, mask in window_masks.items():
+            color = window_colors.get(w_name, None)
+            mask_arr = np.asarray(mask)
+            if np.sum(mask_arr) > 0:
+                ax.scatter(x[mask_arr], y[mask_arr], c=color, s=8, alpha=0.7, label=f'{w_name}')
+
+        # Plot remaining points
+        combined = np.zeros(len(trial_df), dtype=bool)
+        for m in window_masks.values():
+            combined |= np.asarray(m)
+        if np.sum(~combined) > 0:
+            ax.scatter(x[~combined], y[~combined], c=plot_colors.get('background', 'lightgray'),
+                       alpha=0.3, s=6)
+    else:
+        ax.scatter(x, y, c='blue', s=8, alpha=0.7)
+
+    # Add CoP max marker
+    trial_timings = timings_df[
+        (timings_df['subject'] == subject) &
+        (timings_df['velocity'] == velocity) &
+        (timings_df['trial_num'] == trial_num)
+    ]
+    if not trial_timings.empty:
+        timing_row = trial_timings.iloc[0]
+        highlight_window = vis_cfg.get('highlight_window', 'p4')
+        cop_max_col = f'cop_max_timing_{highlight_window}'
+        if cop_max_col not in timing_row.index:
+            cop_max_col = 'cop_max_timing'
+
+        if cop_max_col in timing_row.index and pd.notna(timing_row.get(cop_max_col)):
+            max_timing = timing_row[cop_max_col]
+            max_mask = trial_df['DeviceFrame'] == max_timing
+            if np.sum(max_mask) > 0:
+                max_x = trial_df[max_mask]['Cx'].iloc[0]
+                max_y = -trial_df[max_mask]['Cy'].iloc[0]
+                ax.scatter(max_x, max_y, c=plot_colors.get('max_highlight', '#ED1C24'),
+                           s=80, marker='*', edgecolor='white', linewidth=1, zorder=10,
+                           label=f'Max ({int(max_timing)})')
+
+    # Title and labels
+    ax.set_title(f'Vel:{velocity} Trial:{int(trial_num)}', fontsize=20, fontweight='bold', pad=5)
+    ax.set_xlabel('Cx (R+/L-)', fontsize=8)
+    ax.set_ylabel('Cy (A+)', fontsize=8)
+    ax.tick_params(axis='both', labelsize=7)
+    ax.grid(True, alpha=0.3)
+
+    handles, labels = ax.get_legend_handles_labels()
+    if handles:
+        ax.legend(loc='best', fontsize=5, framealpha=0.8)
+
+
+
+def generate_grid_plot(
+    raw_data: pd.DataFrame,
+    timings_df: pd.DataFrame,
+    subject: str,
+    channel: str,
+    output_dir: str,
+    config: dict,
+    plot_type: str = 'emg',
+) -> str:
+    """
+    Generate a grid plot for a single subject and channel.
+
+    Args:
+        raw_data: Raw signal data
+        timings_df: Timing data from final_dataset
+        subject: Subject name
+        channel: Channel name (EMG channel, Fx/Fy/Fz, or 'CoP')
+        output_dir: Output directory
+        config: Configuration dictionary
+        plot_type: 'emg', 'forceplate', or 'cop'
+
+    Returns:
+        Output file path or None
+    """
+    combos = get_velocity_trial_combos(raw_data, subject)
+    n_plots = len(combos)
+
+    if n_plots == 0:
+        logger.warning(f"No data for subject {subject}")
+        return None
+
+    logger.info(f"Generating {plot_type} grid plot for {subject} - {channel}: {n_plots} plots")
+
+    rows, cols = calculate_grid_dimensions(n_plots)
+
+    # Adjust subplot size for CoP (square-ish)
+    if plot_type == 'cop':
+        fig_width = 8 * cols
+        fig_height = 8 * rows
+    else:
+        fig_width = SUBPLOT_WIDTH * cols
+        fig_height = SUBPLOT_HEIGHT * rows
+
+    # Initialize EMG processor for EMG plots
+    emg_processor = None
+    if plot_type == 'emg':
+        try:
+            emg_processor = EMGSignalPipelineProcessor(config)
+        except Exception as e:
+            logger.warning(f"Failed to initialize EMG processor: {e}")
+
+    # Create figure
+    fig, axes = plt.subplots(rows, cols, figsize=(fig_width, fig_height), dpi=DPI)
+
+    title_map = {
+        'emg': f'{subject} - {channel} EMG Signal Grid',
+        'forceplate': f'{subject} - {channel} Forceplate Signal Grid',
+        'cop': f'{subject} - CoP Trajectory Grid',
+    }
+    fig.suptitle(title_map.get(plot_type, f'{subject} - {channel}'), fontsize=16, fontweight='bold', y=0.995)
+
+    # Flatten axes
+    if rows == 1 and cols == 1:
+        axes = np.array([[axes]])
+    elif rows == 1:
+        axes = axes.reshape(1, -1)
+    elif cols == 1:
+        axes = axes.reshape(-1, 1)
+    axes_flat = axes.flatten()
+
+    # Plot each velocity-trial combination
+    for idx, (velocity, trial_num) in enumerate(combos):
+        ax = axes_flat[idx]
+
+        trial_df = raw_data[
+            (raw_data['subject'] == subject) &
+            (raw_data['velocity'] == velocity) &
+            (raw_data['trial_num'] == trial_num)
+        ]
+
+        if plot_type == 'emg':
+            create_emg_subplot(ax, trial_df, channel, velocity, trial_num, subject, timings_df, config, emg_processor)
+        elif plot_type == 'forceplate':
+            create_forceplate_subplot(ax, trial_df, channel, velocity, trial_num, subject, timings_df, config)
+        elif plot_type == 'cop':
+            create_cop_subplot(ax, trial_df, velocity, trial_num, subject, timings_df, config)
+
+    # Hide unused subplots
+    for idx in range(n_plots, len(axes_flat)):
+        axes_flat[idx].set_visible(False)
+
+    plt.tight_layout(rect=[0, 0, 1, 0.99])
+
+    # Save
+    os.makedirs(output_dir, exist_ok=True)
+    if plot_type == 'cop':
+        output_path = os.path.join(output_dir, f'{subject}_CoP_grid.png')
+    else:
+        output_path = os.path.join(output_dir, f'{subject}_{channel}_grid.png')
+    plt.savefig(output_path, dpi=DPI, bbox_inches='tight', facecolor='white')
+    plt.close()
+
+    logger.info(f"Saved: {output_path}")
+    return output_path
+
+
+def generate_all_signal_plots(
+    raw_data: Optional[pd.DataFrame] = None,
+    timing_data: Optional[pd.DataFrame] = None,
+    limit_emg: Optional[int] = None,
+    limit_fz: Optional[int] = None,
+):
+    """
+    Generate grid plots for all subjects.
+
+    Args:
+        raw_data: Raw signal data (loaded from config if None)
+        timing_data: Timing data (loaded from config if None)
+        limit_emg: If provided, limit to first N subjects for EMG
+        limit_fz: If provided, limit to first N subjects for Forceplate/CoP
+    """
+    logger.info("Starting grid plot generation...")
+
+    # Load configuration
+    try:
+        config = load_config('config.yaml')
+    except Exception as e:
+        logger.error(f"Could not load configuration: {e}")
+        return
+
+    # Load data if not provided
+    if raw_data is None:
+        raw_data_path = PLOT_EMG_INPUT_PATH  # Hardcode plot input to avoid config interference
+        if not os.path.exists(raw_data_path):
+            logger.error(f"Raw data file for plotting not found: {raw_data_path}")
+            return
+        raw_data = pd.read_csv(raw_data_path)
+        logger.info(f"Loaded raw data for plotting from {raw_data_path}: {len(raw_data)} rows")
+
+    if timing_data is None:
+        timing_path = config['data_paths']['final_dataset_filename']
+        if not os.path.exists(timing_path):
+            logger.error(f"Timing data file not found: {timing_path}")
+            return
+        timing_data = pd.read_csv(timing_path)
+        logger.info(f"Loaded timing data: {len(timing_data)} rows")
+
+    # Output directory
+    output_dir = config['data_paths']['signal_plot_dir']
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Get all subjects
+    subjects = raw_data['subject'].unique().tolist()
+    logger.info(f"Found {len(subjects)} subjects")
+
+    # Get EMG channels from config
+    emg_channels = config.get('emg_parameters', {}).get('channels', [])
+
+    # Apply limits if in sample mode
+    emg_subjects = subjects[:limit_emg] if limit_emg else subjects
+    fp_subjects = subjects[:limit_fz] if limit_fz else subjects
+
+    # Generate EMG grid plots
+    logger.info("=" * 50)
+    logger.info("Generating EMG grid plots...")
+    for subject in emg_subjects:
+        for channel in emg_channels:
+            try:
+                generate_grid_plot(
+                    raw_data=raw_data,
+                    timings_df=timing_data,
+                    subject=subject,
+                    channel=channel,
+                    output_dir=output_dir,
+                    config=config,
+                    plot_type='emg',
+                )
+            except Exception as e:
+                logger.warning(f"Failed EMG grid for {subject}-{channel}: {e}")
+
+    # Generate Forceplate grid plots (Fx, Fy, Fz)
+    logger.info("=" * 50)
+    logger.info("Generating Forceplate grid plots...")
+    for subject in fp_subjects:
+        for fp_channel in ['Fx', 'Fy', 'Fz']:
+            try:
+                generate_grid_plot(
+                    raw_data=raw_data,
+                    timings_df=timing_data,
+                    subject=subject,
+                    channel=fp_channel,
+                    output_dir=output_dir,
+                    config=config,
+                    plot_type='forceplate',
+                )
+            except Exception as e:
+                logger.warning(f"Failed Forceplate grid for {subject}-{fp_channel}: {e}")
+
+    # Generate CoP grid plots
+    logger.info("=" * 50)
+    logger.info("Generating CoP grid plots...")
+    for subject in fp_subjects:
+        try:
+            generate_grid_plot(
+                raw_data=raw_data,
+                timings_df=timing_data,
+                subject=subject,
+                channel='CoP',
+                output_dir=output_dir,
+                config=config,
+                plot_type='cop',
+            )
+        except Exception as e:
+            logger.warning(f"Failed CoP grid for {subject}: {e}")
+
+    logger.info("=" * 50)
+    logger.info("Grid plot generation complete!")
+
+
+def generate_sample_plots(
+    merged_data: Optional[pd.DataFrame] = None,
+    final_dataset: Optional[pd.DataFrame] = None,
+    limit_per_type: int = 10,
+):
+    """
+    Generate sample grid plots (limited subjects).
+
+    Args:
+        merged_data: Raw signal data
+        final_dataset: Timing data
+        limit_per_type: Number of subjects to process
+    """
+    logger.info(f"Generating sample grid plots (limit: {limit_per_type} subjects)...")
+    generate_all_signal_plots(
+        raw_data=merged_data,
+        timing_data=final_dataset,
+        limit_emg=limit_per_type,
+        limit_fz=limit_per_type,
+    )
+
+
+# Legacy compatibility aliases
+def generate_generic_signal_plots(*args, **kwargs):
+    """Legacy compatibility - redirects to generate_all_signal_plots."""
+    logger.info("generate_generic_signal_plots called - redirecting to grid plots")
+    return generate_all_signal_plots(*args, **kwargs)
+
+
+if __name__ == '__main__':
+    generate_all_signal_plots()
 
 ```
       </file>
@@ -261,6 +2196,267 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+```
+      </file>
+      <file path="plan.md">
+        ```md
+# Aggregated Signal Visualization - Standalone Repository Plan
+
+## 목적
+시계열 시그널 데이터의 집계(aggregated) 플롯을 생성하는 **독립 레포지토리**.
+
+---
+
+## 핵심 제약사항
+- **완전 독립 레포지토리**: 외부 모듈 의존 없음
+- **외부 의존성**: polars, numpy, matplotlib, scipy만 사용
+- **Config 기반**: 모든 설정을 `config.yaml`에서 관리
+
+---
+
+## Legacy Code 분석 - Plot Type별 적용 요소
+
+| 요소 | EMG | Forceplate | COP |
+|------|-----|------------|-----|
+| **Plot Type** | Line (`'b-'`) | Line (채널별 색상) | Scatter |
+| **Window Span** | O (`axvspan`) | O (`axvspan`) | X |
+| **Window Color (scatter)** | X | X | O (점 색상) |
+| **Onset Marker** | O (`axvline`) | O (`axvline`) | X |
+| **Max Marker** | O (`axvline`) | X | O (`scatter '*'`) |
+| **Y축 반전** | X | X | O (Cy → -Cy) |
+
+### 공통 스타일
+```
+- DPI: 300
+- Grid: True, alpha=0.3
+- Tick labelsize: 7
+- Title fontsize: 30, fontweight='bold', pad=5
+- Label fontsize: 8
+- Legend: loc='best', framealpha=0.8
+- tight_layout: rect=[0, 0, 1, 0.99]
+- savefig: bbox_inches='tight', facecolor='white'
+```
+
+### EMG 전용
+```
+- Subplot size: 12x6
+- Line: 'b-', linewidth=0.8, alpha=0.8
+- Window span: axvspan, alpha=0.15
+- Onset marker: axvline, color='red', linestyle='--', linewidth=1.5
+- Max amp marker: axvline, color='orange', linestyle='--', linewidth=1.5
+- Legend fontsize: 6
+- X label: 'Frame (onset=0)'
+- Y label: {channel}
+```
+
+### Forceplate 전용
+```
+- Subplot size: 12x6
+- Line colors: Fx='purple', Fy='brown', Fz='green'
+- Line: linewidth=0.8, alpha=0.8
+- Window span: axvspan, alpha=0.15
+- Onset marker: axvline, color='red', linestyle='--', linewidth=1.5
+- Legend fontsize: 6
+- X label: 'Frame (onset=0)'
+- Y label: '{channel} Value'
+```
+
+### COP 전용
+```
+- Subplot size: 8x8 (정사각형)
+- Scatter: s=8, alpha=0.7
+- Window별 점 색상: p1='#4E79A7', p2='#F28E2B', p3='#E15759', p4='#59A14F'
+- Background 점: color='lightgray', alpha=0.3, s=6
+- Max marker: s=80, marker='*', color='#ED1C24', edgecolor='white', linewidth=1, zorder=10
+- Legend fontsize: 5
+- X label: 'Cx (R+/L-)'
+- Y label: 'Cy (A+)'
+- Y축 반전: y = -Cy
+```
+
+---
+
+## 디렉토리 구조
+```
+aggregated_signal_viz/
+├── config.yaml
+├── main.py
+├── visualizer.py
+├── data/
+│   └── (input.csv)
+├── output/
+│   ├── subject_mean/
+│   ├── grand_mean/
+│   └── filtered_mean/
+└── requirements.txt
+```
+
+---
+
+## config.yaml 설계
+
+```yaml
+# === 데이터 설정 ===
+data:
+  input_file: "data/processed_emg_data.csv"
+  id_columns:
+    subject: "subject"
+    group_var: "velocity"
+    trial: "trial_num"
+    time_axis: "DeviceFrame"
+
+# === 시그널 그룹 정의 ===
+signal_groups:
+  emg:
+    columns: [TA, EHL, MG, SOL, PL, RF, VL, ST, RA, EO, IO, SCM, GM, ESC, EST, ESL]
+    grid_layout: [4, 4]
+  forceplate:
+    columns: [Fx, Fy, Fz]
+    grid_layout: [1, 3]
+  cop:
+    columns: [Cx, Cy]
+
+# === 보간 설정 ===
+interpolation:
+  enabled: true
+  method: "linear"
+  target_length: 1000
+
+# === 집계 모드 ===
+aggregation_modes:
+  subject_mean:
+    enabled: true
+    groupby: [subject]
+    output_dir: "output/subject_mean"
+    filename_pattern: "{subject}_mean_{signal_group}.png"
+  grand_mean:
+    enabled: true
+    groupby: []
+    output_dir: "output/grand_mean"
+    filename_pattern: "grand_mean_{signal_group}.png"
+  filtered_mean:
+    enabled: true
+    filter:
+      column: "velocity"
+      value: 10.0
+    groupby: [subject]
+    output_dir: "output/filtered_mean"
+    filename_pattern: "{subject}_vel10_mean_{signal_group}.png"
+
+# === 플롯 스타일 ===
+plot_style:
+  # 공통
+  common:
+    dpi: 300
+    grid_alpha: 0.3
+    tick_labelsize: 7
+    title_fontsize: 20
+    title_fontweight: "bold"
+    title_pad: 5
+    label_fontsize: 8
+    legend_loc: "best"
+    legend_framealpha: 0.8
+    tight_layout_rect: [0, 0, 1, 0.99]
+    savefig_bbox_inches: "tight"
+    savefig_facecolor: "white"
+    font_family: "Malgun Gothic"
+  
+  # EMG 전용
+  emg:
+    subplot_size: [12, 6]
+    line_color: "blue"
+    line_width: 0.8
+    line_alpha: 0.8
+    window_span_alpha: 0.15
+    onset_marker_color: "red"
+    onset_marker_linestyle: "--"
+    onset_marker_linewidth: 1.5
+    max_marker_color: "orange"
+    max_marker_linestyle: "--"
+    max_marker_linewidth: 1.5
+    legend_fontsize: 6
+    x_label: "Frame (normalized)"
+    y_label: "{channel}"
+  
+  # Forceplate 전용
+  forceplate:
+    subplot_size: [12, 6]
+    line_colors:
+      Fx: "purple"
+      Fy: "brown"
+      Fz: "green"
+    line_width: 0.8
+    line_alpha: 0.8
+    window_span_alpha: 0.15
+    onset_marker_color: "red"
+    onset_marker_linestyle: "--"
+    onset_marker_linewidth: 1.5
+    legend_fontsize: 6
+    x_label: "Frame (normalized)"
+    y_label: "{channel} Value"
+  
+  # COP 전용
+  cop:
+    subplot_size: [8, 8]
+    scatter_size: 8
+    scatter_alpha: 0.7
+    background_color: "lightgray"
+    background_alpha: 0.3
+    background_size: 6
+    window_colors:
+      p1: "#4E79A7"
+      p2: "#F28E2B"
+      p3: "#E15759"
+      p4: "#59A14F"
+    max_marker_color: "#ED1C24"
+    max_marker_size: 80
+    max_marker_symbol: "*"
+    max_marker_edgecolor: "white"
+    max_marker_linewidth: 1
+    max_marker_zorder: 10
+    legend_fontsize: 5
+    x_label: "Cx (R+/L-)"
+    y_label: "Cy (A+)"
+    y_invert: true
+
+# === 출력 설정 ===
+output:
+  base_dir: "output"
+  format: "png"
+```
+
+---
+
+## 생성할 시각화 (3가지)
+
+### 1. Subject-Level Mean
+- **Groupby**: subject + DeviceFrame (보간 후)
+- **출력**: `{subject}_mean_emg.png`, `{subject}_mean_forceplate.png`, `{subject}_mean_cop.png`
+
+### 2. Grand Mean
+- **Groupby**: DeviceFrame (보간 후)
+- **출력**: `grand_mean_emg.png`, `grand_mean_forceplate.png`, `grand_mean_cop.png`
+
+### 3. Velocity 10 + Subject별
+- **Filter**: velocity == 10.0
+- **Groupby**: subject + DeviceFrame (보간 후)
+- **출력**: `{subject}_vel10_mean_emg.png`, `{subject}_vel10_mean_forceplate.png`, `{subject}_vel10_mean_cop.png`
+
+---
+
+## 사용 컬럼
+```python
+ID_COLS = ['subject', 'velocity', 'trial_num', 'DeviceFrame']
+EMG_COLS = ['TA', 'EHL', 'MG', 'SOL', 'PL', 'RF', 'VL', 'ST', 'RA', 'EO', 'IO', 'SCM', 'GM', 'ESC', 'EST', 'ESL']
+FP_COLS = ['Fx', 'Fy', 'Fz']
+COP_COLS = ['Cx', 'Cy']
+```
+
+---
+
+## 다음 단계
+`proceed` 시 코드 구현
 
 ```
       </file>
@@ -780,8 +2976,7 @@ class AggregatedSignalVisualizer:
             return self._collect_emg_markers(df)
         if signal_group == "forceplate":
             return self._collect_forceplate_markers(df)
-        if signal_group == "cop":
-            return self._collect_cop_markers(df)
+        # COP plots no longer rely on feature-based markers.
         return {}
 
     def _collect_emg_markers(self, df: pl.DataFrame) -> Dict[str, Dict[str, float]]:
@@ -821,20 +3016,6 @@ class AggregatedSignalVisualizer:
                 if onset_val is not None:
                     markers[ch] = {"onset": onset_val}
         return markers
-
-    def _collect_cop_markers(self, df: pl.DataFrame) -> Dict[str, Dict[str, float]]:
-        timing_cols = [
-            "cop_max_timing_p1",
-            "cop_max_timing_p2",
-            "cop_max_timing_p3",
-            "cop_max_timing_p4",
-        ]
-        for col in timing_cols:
-            if col in df.columns:
-                val = self._safe_mean(df[col])
-                if val is not None:
-                    return {"max": val}
-        return {}
 
     @staticmethod
     def _safe_mean(series: pl.Series) -> Optional[float]:

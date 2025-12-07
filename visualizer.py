@@ -502,8 +502,7 @@ class AggregatedSignalVisualizer:
             return self._collect_emg_markers(df)
         if signal_group == "forceplate":
             return self._collect_forceplate_markers(df)
-        if signal_group == "cop":
-            return self._collect_cop_markers(df)
+        # COP plots no longer rely on feature-based markers.
         return {}
 
     def _collect_emg_markers(self, df: pl.DataFrame) -> Dict[str, Dict[str, float]]:
@@ -543,20 +542,6 @@ class AggregatedSignalVisualizer:
                 if onset_val is not None:
                     markers[ch] = {"onset": onset_val}
         return markers
-
-    def _collect_cop_markers(self, df: pl.DataFrame) -> Dict[str, Dict[str, float]]:
-        timing_cols = [
-            "cop_max_timing_p1",
-            "cop_max_timing_p2",
-            "cop_max_timing_p3",
-            "cop_max_timing_p4",
-        ]
-        for col in timing_cols:
-            if col in df.columns:
-                val = self._safe_mean(df[col])
-                if val is not None:
-                    return {"max": val}
-        return {}
 
     @staticmethod
     def _safe_mean(series: pl.Series) -> Optional[float]:
