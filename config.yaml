@@ -33,6 +33,8 @@ signal_groups:
 interpolation:
   method: "linear"
   target_length: 1000
+  start_ms: -1000
+  end_ms: 800
 
 # === Aggregation Modes ===
 aggregation_modes:
@@ -87,7 +89,7 @@ plot_style:
     max_marker_linestyle: "--"
     max_marker_linewidth: 1.5
     legend_fontsize: 8
-    x_label: "Frame (normalized)"
+    x_label: "Normalized time (0-1)"
     y_label: "{channel}"
 
   # Forceplate 전용
@@ -104,7 +106,7 @@ plot_style:
     onset_marker_linestyle: "--"
     onset_marker_linewidth: 1.5
     legend_fontsize: 10
-    x_label: "Frame (normalized)"
+    x_label: "Normalized time (0-1)"
     y_label: "{channel} Value"
 
   # COP 전용

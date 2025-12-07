@@ -50,6 +50,12 @@ class AggregatedSignalVisualizer:
         self.target_length = int(self.config["interpolation"]["target_length"])
         self.interp_method = self.config["interpolation"]["method"]
         self.target_axis: Optional[np.ndarray] = None
+        self.x_norm: Optional[np.ndarray] = None
+        self.time_start_ms: Optional[float] = None
+        self.time_end_ms: Optional[float] = None
+        self.time_start_frame: Optional[float] = None
+        self.time_end_frame: Optional[float] = None
+        self.window_norm_ranges: Dict[str, Tuple[float, float]] = {}
         self.resampled: Dict[str, List[AggregatedRecord]] = {}
         style_cfg = self.config.get("plot_style", {})
         self.common_style = self._build_common_style(style_cfg.get("common"))
@@ -60,7 +66,6 @@ class AggregatedSignalVisualizer:
         font_family = self.common_style.get("font_family")
         if font_family:
             plt.rcParams["font.family"] = font_family
-        self.window_frames = self._compute_window_frames()
         self.features_df: Optional[pl.DataFrame] = self._load_features()
 
     # All plot style parameters are configured via config.yaml under `plot_style`.
@@ -189,7 +194,7 @@ class AggregatedSignalVisualizer:
         df = self._load_and_align()
         if sample:
             df = self._sample_single_group(df)
-        self.target_axis = self._build_target_axis(df)
+        df = self._prepare_time_axis(df)
         self.resampled = self._resample_all(df, selected_groups)
 
         for mode_name, mode_cfg in self.config["aggregation_modes"].items():
@@ -266,13 +271,40 @@ class AggregatedSignalVisualizer:
             & (pl.col(trial_col) == first_trial)
         )
 
-    def _build_target_axis(self, df: pl.DataFrame) -> np.ndarray:
-        frame_min = df.select(pl.col("aligned_frame").min()).item()
-        frame_max = df.select(pl.col("aligned_frame").max()).item()
-        if frame_max == frame_min:
-            frame_min -= 0.5
-            frame_max += 0.5
-        return np.linspace(frame_min, frame_max, self.target_length)
+    def _prepare_time_axis(self, df: pl.DataFrame) -> pl.DataFrame:
+        if df.is_empty():
+            raise ValueError("No data available to build time axis.")
+
+        aligned_col = "aligned_frame"
+        frame_min = df.select(pl.col(aligned_col).min()).item()
+        frame_max = df.select(pl.col(aligned_col).max()).item()
+        data_start_ms = self._frame_to_ms(frame_min)
+        data_end_ms = self._frame_to_ms(frame_max)
+
+        interp_cfg = self.config.get("interpolation", {})
+        start_ms_cfg = interp_cfg.get("start_ms")
+        end_ms_cfg = interp_cfg.get("end_ms")
+        time_start_ms = data_start_ms if start_ms_cfg is None else float(start_ms_cfg)
+        time_end_ms = data_end_ms if end_ms_cfg is None else float(end_ms_cfg)
+
+        if time_end_ms <= time_start_ms:
+            raise ValueError("`interpolation.end_ms` must be greater than `interpolation.start_ms`.")
+
+        time_start_frame = self._ms_to_frame(time_start_ms)
+        time_end_frame = self._ms_to_frame(time_end_ms)
+
+        cropped = df.filter((pl.col(aligned_col) >= time_start_frame) & (pl.col(aligned_col) <= time_end_frame))
+        if cropped.is_empty():
+            raise ValueError("No data remains after applying the interpolation time window.")
+
+        self.time_start_ms = time_start_ms
+        self.time_end_ms = time_end_ms
+        self.time_start_frame = time_start_frame
+        self.time_end_frame = time_end_frame
+        self.target_axis = np.linspace(time_start_frame, time_end_frame, self.target_length)
+        self.x_norm = np.linspace(0.0, 1.0, self.target_length)
+        self.window_norm_ranges = self._compute_window_norm_ranges()
+        return cropped
 
     def _resample_all(
         self, df: pl.DataFrame, selected_groups: Optional[Iterable[str]]
@@ -370,6 +402,7 @@ class AggregatedSignalVisualizer:
 
     def _aggregate_group(self, records: List[AggregatedRecord]) -> Dict[str, np.ndarray]:
         assert records, "No records to aggregate"
+        assert self.target_axis is not None, "target_axis must be initialized before aggregation"
         channels = records[0].data.keys()
         aggregated: Dict[str, np.ndarray] = {}
         for ch in channels:
@@ -422,7 +455,7 @@ class AggregatedSignalVisualizer:
         rows, cols = self.config["signal_groups"]["emg"]["grid_layout"]
         fig, axes = plt.subplots(rows, cols, figsize=self.emg_style["subplot_size"], dpi=self.common_style["dpi"])
         axes_flat = axes.flatten()
-        x = self.target_axis
+        x = self.x_norm if self.x_norm is not None else self.target_axis
         channels = self.config["signal_groups"]["emg"]["columns"]
         for ax, ch in zip(axes_flat, channels):
             y = aggregated.get(ch)
@@ -437,7 +470,7 @@ class AggregatedSignalVisualizer:
                 alpha=self.emg_style["line_alpha"],
                 label=ch,
             )
-            for name, (start, end) in self.window_frames.items():
+            for name, (start, end) in self.window_norm_ranges.items():
                 ax.axvspan(
                     start,
                     end,
@@ -446,11 +479,15 @@ class AggregatedSignalVisualizer:
                 )
             marker_info = markers.get(ch, {})
             onset_time = marker_info.get("onset")
-            if onset_time is not None:
-                ax.axvline(onset_time, **self.emg_style["onset_marker"], label="onset")
+            if onset_time is not None and self._is_within_time_axis(onset_time):
+                onset_norm = self._ms_to_norm(onset_time)
+                if onset_norm is not None:
+                    ax.axvline(onset_norm, **self.emg_style["onset_marker"], label="onset")
             max_time = marker_info.get("max")
-            if max_time is not None:
-                ax.axvline(max_time, **self.emg_style["max_marker"], label="max")
+            if max_time is not None and self._is_within_time_axis(max_time):
+                max_norm = self._ms_to_norm(max_time)
+                if max_norm is not None:
+                    ax.axvline(max_norm, **self.emg_style["max_marker"], label="max")
             ax.set_title(
                 ch,
                 fontsize=self.common_style["title_fontsize"],
@@ -495,7 +532,7 @@ class AggregatedSignalVisualizer:
         fig, axes = plt.subplots(
             rows, cols, figsize=self.forceplate_style["subplot_size"], dpi=self.common_style["dpi"]
         )
-        x = self.target_axis
+        x = self.x_norm if self.x_norm is not None else self.target_axis
         for ax, ch in zip(np.ravel(axes), self.config["signal_groups"]["forceplate"]["columns"]):
             y = aggregated[ch]
             color = self.forceplate_style["line_colors"].get(ch, "blue")
@@ -507,7 +544,7 @@ class AggregatedSignalVisualizer:
                 alpha=self.forceplate_style["line_alpha"],
                 label=ch,
             )
-            for name, (start, end) in self.window_frames.items():
+            for name, (start, end) in self.window_norm_ranges.items():
                 ax.axvspan(
                     start,
                     end,
@@ -515,8 +552,10 @@ class AggregatedSignalVisualizer:
                     alpha=self.forceplate_style["window_span_alpha"],
                 )
             onset_time = markers.get(ch, {}).get("onset")
-            if onset_time is not None:
-                ax.axvline(onset_time, **self.forceplate_style["onset_marker"], label="onset")
+            if onset_time is not None and self._is_within_time_axis(onset_time):
+                onset_norm = self._ms_to_norm(onset_time)
+                if onset_norm is not None:
+                    ax.axvline(onset_norm, **self.forceplate_style["onset_marker"], label="onset")
             ax.set_title(
                 ch,
                 fontsize=self.common_style["title_fontsize"],
@@ -561,6 +600,7 @@ class AggregatedSignalVisualizer:
             return
         x_vals = cx
         y_vals = -cy if self.cop_style["y_invert"] else cy
+        x_axis = self.x_norm if self.x_norm is not None else self.target_axis
         fig, ax = plt.subplots(1, 1, figsize=self.cop_style["subplot_size"], dpi=self.common_style["dpi"])
         ax.scatter(
             x_vals,
@@ -570,20 +610,22 @@ class AggregatedSignalVisualizer:
             s=self.cop_style["background_size"],
             label="trajectory",
         )
-        for name, (start, end) in self.window_frames.items():
-            mask = (self.target_axis >= start) & (self.target_axis <= end)
-            if mask.any():
-                ax.scatter(
-                    x_vals[mask],
-                    y_vals[mask],
-                    s=self.cop_style["scatter_size"],
-                    alpha=self.cop_style["scatter_alpha"],
-                    color=self.window_colors.get(name, "#999999"),
-                    label=name,
-                )
+        if x_axis is not None:
+            for name, (start, end) in self.window_norm_ranges.items():
+                mask = (x_axis >= start) & (x_axis <= end)
+                if mask.any():
+                    ax.scatter(
+                        x_vals[mask],
+                        y_vals[mask],
+                        s=self.cop_style["scatter_size"],
+                        alpha=self.cop_style["scatter_alpha"],
+                        color=self.window_colors.get(name, "#999999"),
+                        label=name,
+                    )
         max_time = markers.get("max")
-        if max_time is not None:
-            idx = self._closest_index(self.target_axis, max_time)
+        if max_time is not None and self._is_within_time_axis(max_time) and self.target_axis is not None:
+            target_frame = self._ms_to_frame(max_time)
+            idx = self._closest_index(self.target_axis, target_frame)
             ax.scatter(
                 x_vals[idx],
                 y_vals[idx],
@@ -618,15 +660,45 @@ class AggregatedSignalVisualizer:
         )
         plt.close(fig)
 
-    def _compute_window_frames(self) -> Dict[str, Tuple[float, float]]:
-        frames = {}
+    def _compute_window_norm_ranges(self) -> Dict[str, Tuple[float, float]]:
+        if self.time_start_ms is None or self.time_end_ms is None:
+            return {}
+        ranges: Dict[str, Tuple[float, float]] = {}
         definitions = self.config.get("windows", {}).get("definitions", {})
         for name, cfg in definitions.items():
-            # Convert ms offsets relative to onset into device-frame units for plotting.
-            start = cfg["start_ms"] * self.device_rate / 1000
-            end = cfg["end_ms"] * self.device_rate / 1000
-            frames[name] = (start, end)
-        return frames
+            raw_start = float(cfg["start_ms"])
+            raw_end = float(cfg["end_ms"])
+            clamped_start = max(raw_start, self.time_start_ms)
+            clamped_end = min(raw_end, self.time_end_ms)
+            if clamped_start >= clamped_end:
+                continue
+            start_norm = self._ms_to_norm(clamped_start)
+            end_norm = self._ms_to_norm(clamped_end)
+            if start_norm is None or end_norm is None:
+                continue
+            ranges[name] = (start_norm, end_norm)
+        return ranges
+
+    def _ms_to_norm(self, value: float) -> Optional[float]:
+        if self.time_start_ms is None or self.time_end_ms is None:
+            return None
+        denom = self.time_end_ms - self.time_start_ms
+        if denom == 0:
+            return None
+        return (value - self.time_start_ms) / denom
+
+    def _ms_to_frame(self, ms: float) -> float:
+        return ms * self.device_rate / 1000.0
+
+    def _frame_to_ms(self, frame: float) -> float:
+        return frame / self.device_rate * 1000.0
+
+    def _is_within_time_axis(self, value_ms: float) -> bool:
+        return (
+            self.time_start_ms is not None
+            and self.time_end_ms is not None
+            and self.time_start_ms <= value_ms <= self.time_end_ms
+        )
 
     def _format_title(
         self, signal_group: str, mode_name: str, group_fields: List[str], key: Tuple
