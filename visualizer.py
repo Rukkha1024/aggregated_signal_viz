@@ -545,10 +545,17 @@ class AggregatedSignalVisualizer:
 
     @staticmethod
     def _safe_mean(series: pl.Series) -> Optional[float]:
-        val = series.drop_nulls().mean()
-        if val is None or np.isnan(val):
+        arr = series.drop_nulls().to_numpy()
+
+        if arr.size == 0:
             return None
-        return float(val)
+
+        arr = arr[~np.isnan(arr)]
+
+        if arr.size == 0:
+            return None
+
+        return float(arr.mean())
 
     @staticmethod
     def _closest_index(arr: np.ndarray, value: float) -> int:
