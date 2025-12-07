@@ -1,0 +1,198 @@
+# --- QSN Normalization Configuration ---
+qsn:
+  baseline_ms: 1000  # Baseline window duration in milliseconds
+
+# --- Resampling Configuration ---
+resampling:
+  window_samples: 100  # 1000 Hz → 100 ms bins
+
+# --- Data Paths ---
+data_paths:
+  output_directory: output
+
+  # Input files (NEW WORKFLOW: using pre-processed data)
+  processed_emg_file: data/merged_data_comprehensive.csv  # Use full merged dataset (all subjects/trials)
+  raw_emg_file: data/merged_data_comprehensive.csv  # Raw EMG data for TKEO onset detection
+  platform_file: "/mnt/c/Users/Alice/OneDrive - 청주대학교/근전도 분석 코드/platform on-offset.xlsx"
+
+  # Legacy files (deprecated - no longer used in main pipeline)
+  # emg_file: data/merged_data_comprehensive.csv
+  
+  # Output sub-directories
+  cop_com_plot_dir: output/cop&com_plot
+  signal_plot_dir: output/signal_plots
+  
+  # TKEO-specific plot directories
+  tkeo_plot_dir: output/tkeo_plots
+  tkeo_onset_dir: output/tkeo_plots/onset_detection
+  tkeo_comparison_dir: output/tkeo_plots/comparison
+  
+  # Full file paths
+  final_dataset_filename: output/final_dataset.csv
+
+
+onset_detection:
+  # Standard EMG onset detection (threshold-based)
+  # Note: Uses absolute baseline policy - first N frames regardless of detected onset
+  emg:
+    background_frames: 500  # Always use first N frames as baseline (absolute positioning)
+    sd_multiplier: 5
+    # Search window within which to detect onset (optional)
+    # If omitted, falls back to entire trial after baseline window.
+    search_window:
+      event: platform_onset       # Start reference event
+      end_event: platform_onset  # End reference event (can be same as event)
+      relative_start_ms: 100        # Start offset relative to 'event' (ms)
+      relative_end_ms: 400          # End offset relative to 'end_event' (ms)
+  fz:
+    background_frames: 200  # Always use first N frames as baseline (absolute positioning)
+    sd_multiplier: 2.0
+    # Search window within which to detect Fz onset (optional)
+    # If omitted, falls back to entire trial after baseline window.
+    search_window:
+      event: platform_onset       # Start reference event
+      end_event: platform_onset  # End reference event
+      relative_start_ms: 0
+      relative_end_ms: 300
+
+  # Generic onset targets (use EMG settings for detection parameters)
+  generic:
+    forceplate:
+      channels: [Fx, Fy, Fz]
+    com:
+      channels: []
+  
+  # TKEO (Teager-Kaiser Energy Operator) method configuration
+  # Note: Also uses absolute baseline policy - first N frames from background_frames above
+  tkeo:
+    # Multi-lag TKEO configuration
+    lags: [1]
+    combine: max          # max | mean | sum
+    th_sd_multiplier: 15  # default: 15
+    th_consecutive_samples: 25  # default: 25
+  
+  # AGLR (Adaptive Generalized Likelihood Ratio) method configuration  
+  # Note: Also uses absolute baseline policy - first N frames from background_frames above
+  aglr:
+    input: tkeo         # Input signal: "bandpass" or "tkeo"
+    tkeo_lags: [1]
+    tkeo_combine: max
+    L_ms: 15.0              # Window size in milliseconds (default: 25.0)
+    h: 25                 # Threshold value in natural log scale (default: 14.0)
+    debug_plot: false       # Generate debug plot with g[n] trace and t1 marker
+
+# --- Mocap Configuration ---
+mocap:
+  sampling_rate: 100  # Hz - Platform onset/offset timing reference frame rate
+
+# --- Windowing Configuration ---
+windowing:
+  # Define time windows relative to event markers
+  windows:
+    p1:
+      event: platform_onset
+      relative_start_ms: 0  # 100ms after event
+      relative_end_ms: 200        
+      
+    p2:
+      event: platform_onset
+      relative_start_ms: 200     
+      relative_end_ms: 400    
+      
+    p3:
+      event: platform_onset
+      relative_start_ms: 400     
+      relative_end_ms: 600   
+      
+    # This reproduces the original behavior: platform_onset to platform_offset
+    p4:
+      event: platform_onset
+      relative_start_ms: 600     # At event time
+      end_event: platform_onset  # Different end event
+      relative_end_ms: 800       
+  
+  # Define sampling rate for time calculations
+  sampling_rate: 1000  # Hz
+  
+  # Fixed analysis window for EMG max amplitude/timing
+  analysis_fixed_window:
+    event: platform_onset
+    relative_start_ms: 0
+    relative_end_ms: 800
+
+signal_processing:
+  enable_demeaning: true
+  enable_rectification: true
+  high_pass:
+    cutoff: 35
+    order: 3
+  low_pass:
+    cutoff: 40
+    order: 3
+  pad_frames: 50
+  sample_rate: 1000
+  
+  tkeo_filters:
+    band_pass:
+      high_cutoff: 300
+      low_cutoff: 30
+      order: 6
+    low_pass:
+      cutoff: 40
+      order: 3
+
+# --- EMG Channel and Metric Definitions ---
+emg_parameters:
+  channels:
+    - TA
+    - EHL
+    - MG
+    - SOL
+    - PL
+    - RF
+    - VL
+    - ST
+    - RA
+    - EO
+    - IO
+    - SCM
+    - GM
+    - ESC
+    - EST
+    - ESL
+
+  # Data restructuring (melt) ID variables
+  melt_id_vars:
+    - subject
+    - velocity
+    - trial_num
+    - DeviceFrame
+    - platform_onset
+    - platform_offset
+    - state
+    - step_T/F
+    - RPS
+
+# --- Visualization Configuration ---
+visualization:
+  # Specifies which of the defined windowing.windows should be used for highlighting
+  # in plots like the CoP/CoM trajectory visualization.
+  # Use one of the defined windows: p1, p2, p3, p4
+  highlight_window: 'p1'
+  
+  # Plot configuration for multi-window displays
+  plot_all_windows: true  # Whether to show markers for all windows or just highlight_window
+  window_colors:
+    p1: '#4E79A7'    # Blue
+    p2: '#F28E2B'  # Orange  
+    p3: '#E15759'   # Red
+    p4: '#59A14F'    # Green
+  
+  # Additional color constants for plot styling
+  plot_colors:
+    time_gradient_start: '#B9DDF1'  # Light blue for time progression start
+    time_gradient_end: '#173049'    # Dark blue for time progression end
+    max_highlight: '#ED1C24'        # Red for maximum value markers
+    background: 'lightgray'         # Background/other frames color
+    edge_color: 'white'             # Edge color for highlighted markers
+    default_fallback: '#999999'     # Default fallback color

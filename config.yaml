@@ -52,9 +52,9 @@ aggregation_modes:
     filter:
       column: "velocity"
       value: 10.0
-    groupby: ["subject"]
+    groupby: []
     output_dir: "output/filtered_mean"
-    filename_pattern: "{subject}_vel10_mean_{signal_group}.png"
+    filename_pattern: "vel10_mean_{signal_group}.png"
 
 # === Window Definitions (relative to platform_onset in ms) ===
 windows:
@@ -62,16 +62,16 @@ windows:
   definitions:
     p1:
       start_ms: 0
-      end_ms: 200
+      end_ms: 150
     p2:
-      start_ms: 200
-      end_ms: 400
+      start_ms: 150
+      end_ms: 300
     p3:
-      start_ms: 400
-      end_ms: 600
+      start_ms: 300
+      end_ms: 450
     p4:
-      start_ms: 600
-      end_ms: 800
+      start_ms: 450
+      end_ms: 600
 
 # === Output Settings ===
 output:
