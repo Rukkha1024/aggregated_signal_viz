@@ -31,7 +31,6 @@ signal_groups:
 
 # === Interpolation ===
 interpolation:
-  enabled: true
   method: "linear"
   target_length: 1000
 
@@ -63,7 +62,7 @@ plot_style:
     dpi: 300
     grid_alpha: 0.3
     tick_labelsize: 7
-    title_fontsize: 20
+    title_fontsize: 14
     title_fontweight: "bold"
     title_pad: 5
     label_fontsize: 8
@@ -72,11 +71,11 @@ plot_style:
     tight_layout_rect: [0, 0, 1, 0.99]
     savefig_bbox_inches: "tight"
     savefig_facecolor: "white"
-    font_family: "Malgun Gothic"
+    font_family: "NanumGothic"
 
   # EMG 전용
   emg:
-    subplot_size: [12, 6]
+    subplot_size: [18, 9]
     line_color: "blue"
     line_width: 0.8
     line_alpha: 0.8
@@ -87,7 +86,7 @@ plot_style:
     max_marker_color: "orange"
     max_marker_linestyle: "--"
     max_marker_linewidth: 1.5
-    legend_fontsize: 6
+    legend_fontsize: 8
     x_label: "Frame (normalized)"
     y_label: "{channel}"
 
@@ -104,7 +103,7 @@ plot_style:
     onset_marker_color: "red"
     onset_marker_linestyle: "--"
     onset_marker_linewidth: 1.5
-    legend_fontsize: 6
+    legend_fontsize: 10
     x_label: "Frame (normalized)"
     y_label: "{channel} Value"
 
@@ -127,7 +126,7 @@ plot_style:
     max_marker_edgecolor: "white"
     max_marker_linewidth: 1
     max_marker_zorder: 10
-    legend_fontsize: 5
+    legend_fontsize: 10
     x_label: "Cx (R+/L-)"
     y_label: "Cy (A+)"
     y_invert: true
