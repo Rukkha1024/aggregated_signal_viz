@@ -480,16 +480,18 @@ class AggregatedSignalVisualizer:
                     label=label,
                 )
             marker_info = markers.get(ch, {})
-            onset_time = marker_info.get("onset")
-            if onset_time is not None and self._is_within_time_axis(onset_time):
-                onset_norm = self._ms_to_norm(onset_time)
-                if onset_norm is not None:
-                    ax.axvline(onset_norm, **self.emg_style["onset_marker"], label="onset")
-            max_time = marker_info.get("max")
-            if max_time is not None and self._is_within_time_axis(max_time):
-                max_norm = self._ms_to_norm(max_time)
-                if max_norm is not None:
-                    ax.axvline(max_norm, **self.emg_style["max_marker"], label="max")
+            if self.common_style.get("show_onset_marker", True):
+                onset_time = marker_info.get("onset")
+                if onset_time is not None and self._is_within_time_axis(onset_time):
+                    onset_norm = self._ms_to_norm(onset_time)
+                    if onset_norm is not None:
+                        ax.axvline(onset_norm, **self.emg_style["onset_marker"], label="onset")
+            if self.common_style.get("show_max_marker", True):
+                max_time = marker_info.get("max")
+                if max_time is not None and self._is_within_time_axis(max_time):
+                    max_norm = self._ms_to_norm(max_time)
+                    if max_norm is not None:
+                        ax.axvline(max_norm, **self.emg_style["max_marker"], label="max")
             ax.set_title(
                 ch,
                 fontsize=self.common_style["title_fontsize"],
@@ -554,11 +556,12 @@ class AggregatedSignalVisualizer:
                     alpha=self.forceplate_style["window_span_alpha"],
                     label=label,
                 )
-            onset_time = markers.get(ch, {}).get("onset")
-            if onset_time is not None and self._is_within_time_axis(onset_time):
-                onset_norm = self._ms_to_norm(onset_time)
-                if onset_norm is not None:
-                    ax.axvline(onset_norm, **self.forceplate_style["onset_marker"], label="onset")
+            if self.common_style.get("show_onset_marker", True):
+                onset_time = markers.get(ch, {}).get("onset")
+                if onset_time is not None and self._is_within_time_axis(onset_time):
+                    onset_norm = self._ms_to_norm(onset_time)
+                    if onset_norm is not None:
+                        ax.axvline(onset_norm, **self.forceplate_style["onset_marker"], label="onset")
             ax.set_title(
                 ch,
                 fontsize=self.common_style["title_fontsize"],

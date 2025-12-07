@@ -74,6 +74,8 @@ plot_style:
     savefig_bbox_inches: "tight"
     savefig_facecolor: "white"
     font_family: "NanumGothic"
+    show_onset_marker: true
+    show_max_marker: true
 
   # EMG 전용
   emg:
@@ -88,7 +90,7 @@ plot_style:
     max_marker_color: "orange"
     max_marker_linestyle: "--"
     max_marker_linewidth: 1.5
-    legend_fontsize: 8
+    legend_fontsize: 4
     x_label: "Normalized time (0-1)"
     y_label: "{channel}"
 
