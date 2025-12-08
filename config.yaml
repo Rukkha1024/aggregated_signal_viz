@@ -56,6 +56,16 @@ aggregation_modes:
     groupby: []
     output_dir: "output/filtered_mean"
     filename_pattern: "vel10_mean_{signal_group}.png"
+  age_group_mean:
+    enabled: true
+    groupby: ["age_group"]
+    output_dir: "output/age_group_mean"
+    filename_pattern: "{age_group}_mean_{signal_group}.png"  
+  step_TF_mean:
+    enabled: true
+    groupby: ["step_TF"]
+    output_dir: "output/step_TF_mean"
+    filename_pattern: "{step_TF}_mean_{signal_group}.png"  
 
 # === 플롯 스타일 ===
 plot_style:

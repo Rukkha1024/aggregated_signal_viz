@@ -774,9 +774,15 @@ class AggregatedSignalVisualizer:
             col = filter_cfg["column"]
             val = filter_cfg["value"]
             if col in df.columns:
+                if val is None:
+                    print(f"[markers] skip filter: column '{col}' has None value; skipping marker collection")
+                    return {}
                 df = df.filter(pl.col(col) == val)
         for field, value in zip(group_fields, key):
             if field in df.columns:
+                if value is None:
+                    print(f"[markers] skip group: column '{field}' has None value; key={key}; skipping marker collection")
+                    return {}
                 df = df.filter(pl.col(field) == value)
         if df.is_empty():
             return {}
