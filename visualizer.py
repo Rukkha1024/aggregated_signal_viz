@@ -433,19 +433,39 @@ class AggregatedSignalVisualizer:
     def _aggregate_group(self, records: List[AggregatedRecord]) -> Dict[str, np.ndarray]:
         assert records, "No records to aggregate"
         assert self.target_axis is not None, "target_axis must be initialized before aggregation"
-        channels = records[0].data.keys()
+        channels = list(records[0].data.keys())
         aggregated: Dict[str, np.ndarray] = {}
-        for ch in channels:
-            stack = np.vstack([r.data[ch] for r in records])
-            nan_template = np.full_like(self.target_axis, np.nan, dtype=float)  # type: ignore[arg-type]
-            if np.all(np.isnan(stack)):
-                aggregated[ch] = nan_template
-            else:
-                nan_cols = np.all(np.isnan(stack), axis=0)
-                if (~nan_cols).any():
-                    nan_template[~nan_cols] = np.nanmean(stack[:, ~nan_cols], axis=0)
-                aggregated[ch] = nan_template
+
+        unique_subjects = {r.subject for r in records}
+        if len(unique_subjects) > 1:
+            subject_groups: Dict[str, List[AggregatedRecord]] = {}
+            for rec in records:
+                subject_groups.setdefault(rec.subject, []).append(rec)
+            for ch in channels:
+                subject_means = [
+                    self._mean_of_signals([r.data[ch] for r in sub_recs])
+                    for sub_recs in subject_groups.values()
+                ]
+                aggregated[ch] = self._mean_of_signals(subject_means)
+        else:
+            for ch in channels:
+                aggregated[ch] = self._mean_of_signals([r.data[ch] for r in records])
         return aggregated
+
+    def _mean_of_signals(self, signals: List[np.ndarray]) -> np.ndarray:
+        assert self.target_axis is not None, "target_axis must be initialized before aggregation"
+        if not signals:
+            return np.full_like(self.target_axis, np.nan, dtype=float)
+
+        stack = np.vstack(signals)
+        nan_template = np.full_like(self.target_axis, np.nan, dtype=float)
+        if np.all(np.isnan(stack)):
+            return nan_template
+
+        valid_cols = ~np.all(np.isnan(stack), axis=0)
+        if valid_cols.any():
+            nan_template[valid_cols] = np.nanmean(stack[:, valid_cols], axis=0)
+        return nan_template
 
     def _render_filename(
         self, pattern: str, key: Tuple, signal_group: str, group_fields: List[str]
