@@ -1,7 +1,7 @@
 # === Data Settings ===
 data:
-  input_file: "data/normalized_data.csv"
-  features_file: "data/final_dataset.csv"
+  input_file: "data/merged.parquet"
+  features_file: "/mnt/c/Users/Alice/OneDrive - 청주대학교/근전도 분석 코드/EMG_analysis/output/final_dataset.csv"
   id_columns:
     subject: "subject"
     velocity: "velocity"
@@ -74,8 +74,8 @@ plot_style:
     savefig_bbox_inches: "tight"
     savefig_facecolor: "white"
     font_family: "NanumGothic"
-    show_onset_marker: true
-    show_max_marker: true
+    show_onset_marker: false
+    show_max_marker: false
 
   # EMG 전용
   emg:
@@ -141,16 +141,16 @@ windows:
   definitions:
     p1:
       start_ms: 0
-      end_ms: 150
+      end_ms: 200
     p2:
-      start_ms: 150
-      end_ms: 300
+      start_ms: 200
+      end_ms: 400
     p3:
-      start_ms: 300
-      end_ms: 450
-    p4:
-      start_ms: 450
+      start_ms: 400
       end_ms: 600
+    p4:
+      start_ms: 600
+      end_ms: 800
 
 # === Output Settings ===
 output:

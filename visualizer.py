@@ -216,7 +216,7 @@ class AggregatedSignalVisualizer:
         input_path = Path(self.config["data"]["input_file"])
         if not input_path.is_absolute():
             input_path = (self.base_dir / input_path).resolve()
-        df = pl.read_csv(input_path)
+        df = pl.read_parquet(input_path)
         df = df.rename({c: c.lstrip("\ufeff") for c in df.columns})
 
         task_col = self.id_cfg.get("task")
