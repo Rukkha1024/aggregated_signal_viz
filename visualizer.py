@@ -20,9 +20,14 @@ class AggregatedRecord:
     velocity: float
     trial: int
     data: Dict[str, np.ndarray]
+    meta: Optional[Dict[str, Any]] = None
 
     def get(self, key: str) -> Optional[object]:
-        return getattr(self, key, None)
+        if hasattr(self, key):
+            return getattr(self, key, None)
+        if self.meta is not None:
+            return self.meta.get(key)
+        return None
 
 
 def load_config(config_path: Path) -> Dict:
@@ -316,24 +321,48 @@ class AggregatedSignalVisualizer:
         group_cols = [subject_col, velocity_col, trial_col]
 
         records: Dict[str, List[AggregatedRecord]] = {k: [] for k in self.config["signal_groups"]}
+        ignore_cols: set[str] = set(group_cols)
+        frame_col = self.id_cfg.get("frame")
+        if frame_col:
+            ignore_cols.add(frame_col)
+        mocap_frame_col = self.id_cfg.get("mocap_frame")
+        if mocap_frame_col:
+            ignore_cols.add(mocap_frame_col)
+        ignore_cols.add("aligned_frame")
+        for sg_cfg in self.config["signal_groups"].values():
+            for col in sg_cfg.get("columns", []):
+                ignore_cols.add(col)
+
         groups = df.group_by(group_cols, maintain_order=True)
         for key, subdf in groups:
             subdf_sorted = subdf.sort("aligned_frame")
-            meta = {
+            meta_base = {
                 subject_col: key[0],
                 velocity_col: float(key[1]),
                 trial_col: int(key[2]),
             }
+            meta_all: Dict[str, Any] = dict(meta_base)
+            for col in subdf.columns:
+                if col in ignore_cols:
+                    continue
+                if col in meta_all:
+                    continue
+                n_unique = subdf.select(pl.col(col).n_unique()).item()
+                if n_unique != 1:
+                    continue
+                value = subdf.select(pl.col(col).first()).item()
+                meta_all[col] = value
             for group_name, cfg in self.config["signal_groups"].items():
                 if selected_groups and group_name not in selected_groups:
                     continue
                 data = self._interpolate_group(subdf_sorted, cfg["columns"])
                 records[group_name].append(
                     AggregatedRecord(
-                        subject=meta[subject_col],
-                        velocity=meta[velocity_col],
-                        trial=meta[trial_col],
+                        subject=meta_base[subject_col],
+                        velocity=meta_base[velocity_col],
+                        trial=meta_base[trial_col],
                         data=data,
+                        meta=meta_all,
                     )
                 )
         return records
@@ -387,7 +416,7 @@ class AggregatedSignalVisualizer:
             return records
         col = filter_cfg["column"]
         value = filter_cfg["value"]
-        return [r for r in records if getattr(r, col, None) == value]
+        return [r for r in records if r.get(col) == value]
 
     def _group_records(
         self, records: List[AggregatedRecord], group_fields: List[str]
@@ -397,7 +426,7 @@ class AggregatedSignalVisualizer:
 
         grouped: Dict[Tuple, List[AggregatedRecord]] = {}
         for rec in records:
-            key = tuple(getattr(rec, f) for f in group_fields)
+            key = tuple(rec.get(f) for f in group_fields)
             grouped.setdefault(key, []).append(rec)
         return grouped
 
