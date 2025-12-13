@@ -827,11 +827,11 @@ class AggregatedSignalVisualizer:
         self.window_norm_ranges: Dict[str, Tuple[float, float]] = {}
         self.window_ms_ranges: Dict[str, Tuple[float, float]] = {}
 
-        style_cfg = self.config.get("plot_style", {})
-        self.common_style = self._build_common_style(style_cfg.get("common"))
-        self.emg_style = self._build_emg_style(style_cfg.get("emg"))
-        self.forceplate_style = self._build_forceplate_style(style_cfg.get("forceplate"))
-        self.cop_style = self._build_cop_style(style_cfg.get("cop"))
+        style_cfg = self.config["plot_style"]
+        self.common_style = self._build_common_style(style_cfg["common"])
+        self.emg_style = self._build_emg_style(style_cfg["emg"])
+        self.forceplate_style = self._build_forceplate_style(style_cfg["forceplate"])
+        self.cop_style = self._build_cop_style(style_cfg["cop"])
         self.window_colors = self.cop_style.get("window_colors", {})
         self.legend_label_threshold = self.common_style.get("legend_label_threshold", 6)
 
@@ -1498,119 +1498,101 @@ class AggregatedSignalVisualizer:
 
     # All plot style parameters are configured via config.yaml under `plot_style`.
     # Module-level style constants were removed; do not reintroduce hard-coded styles.
-    def _build_common_style(self, cfg: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-        defaults = {
-            "dpi": 300,
-            "grid_alpha": 0.3,
-            "tick_labelsize": 7,
-            "title_fontsize": 20,
-            "title_fontweight": "bold",
-            "title_pad": 5,
-            "label_fontsize": 8,
-            "legend_loc": "best",
-            "legend_framealpha": 0.8,
-            "tight_layout_rect": [0, 0, 1, 0.99],
-            "savefig_bbox_inches": "tight",
-            "savefig_facecolor": "white",
-            "font_family": "Malgun Gothic",
-            "show_onset_marker": True,
-            "show_max_marker": True,
+    def _build_common_style(self, cfg: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "dpi": cfg["dpi"],
+            "grid_alpha": cfg["grid_alpha"],
+            "tick_labelsize": cfg["tick_labelsize"],
+            "title_fontsize": cfg["title_fontsize"],
+            "title_fontweight": cfg["title_fontweight"],
+            "title_pad": cfg["title_pad"],
+            "label_fontsize": cfg["label_fontsize"],
+            "legend_loc": cfg["legend_loc"],
+            "legend_framealpha": cfg["legend_framealpha"],
+            "tight_layout_rect": cfg["tight_layout_rect"],
+            "savefig_bbox_inches": cfg["savefig_bbox_inches"],
+            "savefig_facecolor": cfg["savefig_facecolor"],
+            "font_family": cfg["font_family"],
+            "show_onset_marker": cfg["show_onset_marker"],
+            "show_max_marker": cfg["show_max_marker"],
         }
-        return self._merge_style(defaults, cfg)
 
-    def _build_emg_style(self, cfg: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-        defaults = {
-            "subplot_size": (12, 6),
-            "line_color": "blue",
-            "line_width": 0.8,
-            "line_alpha": 0.8,
-            "window_span_alpha": 0.15,
-            "onset_marker_color": "red",
-            "onset_marker_linestyle": "--",
-            "onset_marker_linewidth": 1.5,
-            "max_marker_color": "orange",
-            "max_marker_linestyle": "--",
-            "max_marker_linewidth": 1.5,
-            "legend_fontsize": 6,
-            "x_label": "Frame (normalized)",
-            "y_label": "{channel}",
+    def _build_emg_style(self, cfg: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "subplot_size": tuple(cfg["subplot_size"]),
+            "line_color": cfg["line_color"],
+            "line_width": cfg["line_width"],
+            "line_alpha": cfg["line_alpha"],
+            "window_span_alpha": cfg["window_span_alpha"],
+            "onset_marker_color": cfg["onset_marker_color"],
+            "onset_marker_linestyle": cfg["onset_marker_linestyle"],
+            "onset_marker_linewidth": cfg["onset_marker_linewidth"],
+            "max_marker_color": cfg["max_marker_color"],
+            "max_marker_linestyle": cfg["max_marker_linestyle"],
+            "max_marker_linewidth": cfg["max_marker_linewidth"],
+            "legend_fontsize": cfg["legend_fontsize"],
+            "x_label": cfg["x_label"],
+            "y_label": cfg["y_label"],
+            "onset_marker": {
+                "color": cfg["onset_marker_color"],
+                "linestyle": cfg["onset_marker_linestyle"],
+                "linewidth": cfg["onset_marker_linewidth"],
+            },
+            "max_marker": {
+                "color": cfg["max_marker_color"],
+                "linestyle": cfg["max_marker_linestyle"],
+                "linewidth": cfg["max_marker_linewidth"],
+            },
         }
-        style = self._merge_style(defaults, cfg)
-        style["subplot_size"] = tuple(style.get("subplot_size", defaults["subplot_size"]))
-        style["onset_marker"] = {
-            "color": style["onset_marker_color"],
-            "linestyle": style["onset_marker_linestyle"],
-            "linewidth": style["onset_marker_linewidth"],
-        }
-        style["max_marker"] = {
-            "color": style["max_marker_color"],
-            "linestyle": style["max_marker_linestyle"],
-            "linewidth": style["max_marker_linewidth"],
-        }
-        return style
 
-    def _build_forceplate_style(self, cfg: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-        defaults = {
-            "subplot_size": (12, 6),
-            "line_colors": {"Fx": "purple", "Fy": "brown", "Fz": "green"},
-            "line_width": 0.8,
-            "line_alpha": 0.8,
-            "window_span_alpha": 0.15,
-            "onset_marker_color": "red",
-            "onset_marker_linestyle": "--",
-            "onset_marker_linewidth": 1.5,
-            "legend_fontsize": 6,
-            "x_label": "Frame (normalized)",
-            "y_label": "{channel} Value",
+    def _build_forceplate_style(self, cfg: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "subplot_size": tuple(cfg["subplot_size"]),
+            "line_colors": cfg["line_colors"],
+            "line_width": cfg["line_width"],
+            "line_alpha": cfg["line_alpha"],
+            "window_span_alpha": cfg["window_span_alpha"],
+            "onset_marker_color": cfg["onset_marker_color"],
+            "onset_marker_linestyle": cfg["onset_marker_linestyle"],
+            "onset_marker_linewidth": cfg["onset_marker_linewidth"],
+            "legend_fontsize": cfg["legend_fontsize"],
+            "x_label": cfg["x_label"],
+            "y_label": cfg["y_label"],
+            "onset_marker": {
+                "color": cfg["onset_marker_color"],
+                "linestyle": cfg["onset_marker_linestyle"],
+                "linewidth": cfg["onset_marker_linewidth"],
+            },
         }
-        style = self._merge_style(defaults, cfg)
-        style["subplot_size"] = tuple(style.get("subplot_size", defaults["subplot_size"]))
-        style["onset_marker"] = {
-            "color": style["onset_marker_color"],
-            "linestyle": style["onset_marker_linestyle"],
-            "linewidth": style["onset_marker_linewidth"],
-        }
-        return style
 
-    def _build_cop_style(self, cfg: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-        defaults = {
-            "subplot_size": (8, 8),
-            "scatter_size": 8,
-            "scatter_alpha": 0.7,
-            "background_color": "lightgray",
-            "background_alpha": 0.3,
-            "background_size": 6,
-            "window_colors": {"p1": "#4E79A7", "p2": "#F28E2B", "p3": "#E15759", "p4": "#59A14F"},
-            "max_marker_color": "#ED1C24",
-            "max_marker_size": 80,
-            "max_marker_symbol": "*",
-            "max_marker_edgecolor": "white",
-            "max_marker_linewidth": 1,
-            "max_marker_zorder": 10,
-            "legend_fontsize": 5,
-            "x_label": "Cx (R+/L-)",
-            "y_label": "Cy (A+)",
-            "y_invert": True,
+    def _build_cop_style(self, cfg: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "subplot_size": tuple(cfg["subplot_size"]),
+            "scatter_size": cfg["scatter_size"],
+            "scatter_alpha": cfg["scatter_alpha"],
+            "background_color": cfg["background_color"],
+            "background_alpha": cfg["background_alpha"],
+            "background_size": cfg["background_size"],
+            "window_colors": cfg["window_colors"],
+            "max_marker_color": cfg["max_marker_color"],
+            "max_marker_size": cfg["max_marker_size"],
+            "max_marker_symbol": cfg["max_marker_symbol"],
+            "max_marker_edgecolor": cfg["max_marker_edgecolor"],
+            "max_marker_linewidth": cfg["max_marker_linewidth"],
+            "max_marker_zorder": cfg["max_marker_zorder"],
+            "legend_fontsize": cfg["legend_fontsize"],
+            "x_label": cfg["x_label"],
+            "y_label": cfg["y_label"],
+            "y_invert": bool(cfg["y_invert"]),
+            "max_marker": {
+                "size": cfg["max_marker_size"],
+                "marker": cfg["max_marker_symbol"],
+                "color": cfg["max_marker_color"],
+                "edgecolor": cfg["max_marker_edgecolor"],
+                "linewidth": cfg["max_marker_linewidth"],
+                "zorder": cfg["max_marker_zorder"],
+            },
         }
-        style = self._merge_style(defaults, cfg)
-        style["subplot_size"] = tuple(style.get("subplot_size", defaults["subplot_size"]))
-        style["max_marker"] = {
-            "size": style["max_marker_size"],
-            "marker": style["max_marker_symbol"],
-            "color": style["max_marker_color"],
-            "edgecolor": style["max_marker_edgecolor"],
-            "linewidth": style["max_marker_linewidth"],
-            "zorder": style["max_marker_zorder"],
-        }
-        style["y_invert"] = bool(style.get("y_invert"))
-        return style
-
-    @staticmethod
-    def _merge_style(defaults: Dict[str, Any], overrides: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-        style = defaults.copy()
-        if overrides:
-            style.update({k: v for k, v in overrides.items() if v is not None})
-        return style
 
     def _collect_markers(
         self,
