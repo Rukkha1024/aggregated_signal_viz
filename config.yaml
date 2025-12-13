@@ -1,6 +1,6 @@
 # === Data Settings ===
 data:
-  input_file: "/mnt/c/Users/Alice/OneDrive - 청주대학교/근전도 분석 코드/shared_files/output/03_post_processed/normalized_data.parquet"
+  input_file: "data/merged.parquet"
   features_file: "/mnt/c/Users/Alice/OneDrive - 청주대학교/근전도 분석 코드/EMG_analysis/output/final_dataset.csv"
   id_columns:
     subject: "subject"

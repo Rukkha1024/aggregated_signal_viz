@@ -452,6 +452,7 @@ def _plot_emg_overlay(
     axes_flat = axes.flatten()
 
     for ax, ch in zip(axes_flat, channels):
+        seen_labels: set[str] = set()
         has_any_series = any(aggregated_by_key.get(key, {}).get(ch) is not None for key in sorted_keys)
         if not has_any_series:
             ax.axis("off")
@@ -471,12 +472,17 @@ def _plot_emg_overlay(
             if y is None:
                 continue
             group_label = _format_group_label(key, group_fields, filtered_group_fields)
+            if group_label is None or group_label in seen_labels:
+                plot_label = "_nolegend_"
+            else:
+                plot_label = group_label
+                seen_labels.add(group_label)
             ax.plot(
                 x,
                 y,
                 linewidth=emg_style["line_width"],
                 alpha=emg_style["line_alpha"],
-                label=group_label,
+                label=plot_label,
             )
 
         for key in sorted_keys:
@@ -640,6 +646,7 @@ def _plot_forceplate_overlay(
     fig, axes = plt.subplots(rows, cols, figsize=forceplate_style["subplot_size"], dpi=common_style["dpi"])
 
     for ax, ch in zip(np.ravel(axes), channels):
+        seen_labels: set[str] = set()
         for span in window_spans:
             ax.axvspan(
                 span["start"],
@@ -654,12 +661,17 @@ def _plot_forceplate_overlay(
             if y is None:
                 continue
             group_label = _format_group_label(key, group_fields, filtered_group_fields)
+            if group_label is None or group_label in seen_labels:
+                plot_label = "_nolegend_"
+            else:
+                plot_label = group_label
+                seen_labels.add(group_label)
             ax.plot(
                 x,
                 y,
                 linewidth=forceplate_style["line_width"],
                 alpha=forceplate_style["line_alpha"],
-                label=group_label,
+                label=plot_label,
             )
 
         if common_style.get("show_onset_marker", True):
