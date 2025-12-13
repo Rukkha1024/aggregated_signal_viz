@@ -1,6 +1,6 @@
 # === Data Settings ===
 data:
-  input_file: "data/merged.parquet"
+  input_file: "/mnt/c/Users/Alice/OneDrive - 청주대학교/근전도 분석 코드/shared_files/output/03_post_processed/normalized_data.parquet"
   features_file: "/mnt/c/Users/Alice/OneDrive - 청주대학교/근전도 분석 코드/EMG_analysis/output/final_dataset.csv"
   id_columns:
     subject: "subject"
@@ -38,118 +38,145 @@ interpolation:
 
 # === Aggregation Modes ===
 aggregation_modes:
-  subject_mean:
-    enabled: true
-    groupby: ["subject"]
-    output_dir: "output/subject_mean"
-    filename_pattern: "{subject}_mean_{signal_group}.png"
+# grand, subject mean 
   grand_mean:
     enabled: true
     groupby: []
     output_dir: "output/grand_mean"
     filename_pattern: "grand_mean_{signal_group}.png"
-  filtered_mean:
-    enabled: true
-    filter:
-      column: "velocity"
-      value: 10.0
-    groupby: []
-    output_dir: "output/filtered_mean"
-    filename_pattern: "vel10_mean_{signal_group}.png"
+  subject_mean:
+    enabled: false
+    groupby: ["subject"]
+    output_dir: "output/subject_mean"
+    filename_pattern: "{subject}_mean_{signal_group}.png"
+
+# age_group:young vs. old 
   age_group_mean:
     enabled: true
     groupby: ["age_group"]
     output_dir: "output/age_group_mean"
     filename_pattern: "{age_group}_mean_{signal_group}.png"  
+  diff_age_group_mean:
+    enabled: true
+    groupby: ["age_group"]
+    overlay: true
+    output_dir: "output/diff"
+    filename_pattern: "diff_age_group_{signal_group}.png" 
+  diff_age_group_subject_mean:
+    enabled: true
+    groupby: ["age_group","subject"]
+    overlay: true
+    output_dir: "output/diff"
+    filename_pattern: "diff_age_group_subject_mean_{signal_group}.png"
+  diff_age_group_step_TF_mean: 
+    enabled: true
+    groupby: ["age_group","step_TF"]
+    overlay: true
+    output_dir: "output/diff"
+    filename_pattern: "diff_age_group_step_TF_mean_{signal_group}.png"
+
+# step_TF: step vs. nonstep 
   step_TF_mean:
     enabled: true
     groupby: ["step_TF"]
     output_dir: "output/step_TF_mean"
     filename_pattern: "{step_TF}_mean_{signal_group}.png"  
-  step_TF_comparison:
+  diff_step_TF_mean:
     enabled: true
     groupby: ["step_TF"]
     overlay: true
-    output_dir: "output/comparison"
-    filename_pattern: "comparison_by_step_TF_{signal_group}.png"
+    output_dir: "output/diff"
+    filename_pattern: "diff_step_TF_{signal_group}.png"
+  diff_step_TF_subject_mean:
+    enabled: true
+    groupby: ["step_TF","subject"]
+    overlay: true
+    output_dir: "output/diff"
+    filename_pattern: "diff_step_TF_subject_mean_{signal_group}.png"
+  diff_step_TF_age_group_mean: 
+    enabled: true
+    groupby: ["step_TF","age_group"]
+    overlay: true
+    output_dir: "output/diff"
+    filename_pattern: "diff_step_TF_age_group_mean_{signal_group}.png"
 
 # === 플롯 스타일 ===
 plot_style:
-  # 공통
+  # 공통 설정 (모든 신호 타입에 적용)
   common:
-    dpi: 300
-    grid_alpha: 0.3
-    tick_labelsize: 7
-    title_fontsize: 14
-    title_fontweight: "bold"
-    title_pad: 5
-    label_fontsize: 8
-    legend_loc: "best"
-    legend_framealpha: 0.8
-    tight_layout_rect: [0, 0, 1, 0.99]
-    savefig_bbox_inches: "tight"
-    savefig_facecolor: "white"
-    font_family: "NanumGothic"
-    show_onset_marker: false
-    show_max_marker: false
+    dpi: 300                           
+    grid_alpha: 0.3                    # 격자선 투명도 (0=완전투명, 1=완전불투명)
+    tick_labelsize: 7                  # 축 눈금 폰트 크기 (포인트)
+    title_fontsize: 14                 # 제목 폰트 크기
+    title_fontweight: "bold"           # 제목 굵기 ("bold", "normal")
+    title_pad: 5                       # 제목과 그래프 사이 간격 (포인트)
+    label_fontsize: 8                  # 축 라벨 폰트 크기
+    legend_loc: "best"                 # legend 위치 ("best", "upper left", "lower right" 등)
+    legend_framealpha: 0.8             # legend 배경 투명도
+    tight_layout_rect: [0, 0, 1, 0.99] # 레이아웃 여백 [left, bottom, right, top]
+    savefig_bbox_inches: "tight"       # 저장 시 테두리 처리 ("tight"로 여백 최소화)
+    savefig_facecolor: "white"         # 배경색 ("white", "gray" 등)
+    font_family: "NanumGothic"         # 폰트 ("NanumGothic", "Arial" 등)
+    show_onset_marker: false           # platform_onset 마커 표시 여부
+    show_max_marker: false             # 최댓값 마커 표시 여부
 
-  # EMG 전용
+  # EMG 신호 전용 설정
   emg:
-    subplot_size: [18, 9]
-    line_color: "blue"
-    line_width: 0.8
-    line_alpha: 0.8
-    window_span_alpha: 0.15
-    onset_marker_color: "red"
-    onset_marker_linestyle: "--"
-    onset_marker_linewidth: 1.5
-    max_marker_color: "orange"
-    max_marker_linestyle: "--"
-    max_marker_linewidth: 1.5
-    legend_fontsize: 4
-    x_label: "Normalized time (0-1)"
-    y_label: "{channel}"
+    subplot_size: [18, 9]              # 그리드 크기 (가로, 세로) 인치. 예: [18,9]는 18"x9" 캔버스
+    line_color: "blue"                 # 라인 색상 (RGB 색상명 또는 16진수 "#0000FF")
+    line_width: 0.8                    # 라인 두께 (포인트)
+    line_alpha: 0.8                    # 라인 투명도 (0=투명, 1=불투명)
+    window_span_alpha: 0.15            # 윈도우 배경 투명도 (p1,p2,p3,p4 구간 표시용)
+    onset_marker_color: "red"          # onset 마커 색상
+    onset_marker_linestyle: "--"       # onset 마커 스타일 ("--"=점선, "-"=실선, ":"=점)
+    onset_marker_linewidth: 1.5        # onset 마커 두께
+    max_marker_color: "orange"         # 최댓값 마커 색상
+    max_marker_linestyle: "--"         # 최댓값 마커 스타일
+    max_marker_linewidth: 1.5          # 최댓값 마커 두께
+    legend_fontsize: 4                 # legend 폰트 크기 (채널이 많아서 작게 설정)
+    x_label: "Normalized time (0-1)"   # X축 라벨 (0=시작, 1=끝)
+    y_label: "{channel}"               # Y축 라벨 ({channel}은 동적 치환: TA, RF 등)
 
-  # Forceplate 전용
+  # Forceplate 신호 전용 설정
   forceplate:
-    subplot_size: [12, 6]
-    line_colors:
-      Fx: "purple"
-      Fy: "brown"
-      Fz: "green"
-    line_width: 0.8
-    line_alpha: 0.8
-    window_span_alpha: 0.15
-    onset_marker_color: "red"
-    onset_marker_linestyle: "--"
-    onset_marker_linewidth: 1.5
-    legend_fontsize: 10
-    x_label: "Normalized time (0-1)"
-    y_label: "{channel} Value"
+    subplot_size: [12, 6]              # 그리드 크기 (가로, 세로) 인치
+    line_colors:                       # 각 채널별 라인 색상 매핑
+      Fx: "purple"                     # 전후방향 힘 (보라)
+      Fy: "brown"                      # 좌우방향 힘 (갈색)
+      Fz: "green"                      # 수직 힘 (초록)
+    line_width: 0.8                    # 라인 두께
+    line_alpha: 0.8                    # 라인 투명도
+    window_span_alpha: 0.15            # 윈도우 배경 투명도
+    onset_marker_color: "red"          # onset 마커 색상
+    onset_marker_linestyle: "--"       # onset 마커 스타일
+    onset_marker_linewidth: 1.5        # onset 마커 두께
+    legend_fontsize: 10                # legend 폰트 크기 (채널 수가 적어서 크게)
+    x_label: "Normalized time (0-1)"   # X축 라벨
+    y_label: "{channel} Value"         # Y축 라벨 (예: "Fx Value", "Fy Value")
 
-  # COP 전용
+  # COP (Center of Pressure) 신호 전용 설정
   cop:
-    subplot_size: [8, 8]
-    scatter_size: 8
-    scatter_alpha: 0.7
-    background_color: "lightgray"
-    background_alpha: 0.3
-    background_size: 6
-    window_colors:
-      p1: "#4E79A7"
-      p2: "#F28E2B"
-      p3: "#E15759"
-      p4: "#59A14F"
-    max_marker_color: "#ED1C24"
-    max_marker_size: 80
-    max_marker_symbol: "*"
-    max_marker_edgecolor: "white"
-    max_marker_linewidth: 1
-    max_marker_zorder: 10
-    legend_fontsize: 10
-    x_label: "Cx (R+/L-)"
-    y_label: "Cy (A+)"
-    y_invert: true
+    subplot_size: [8, 8]               # 그리드 크기 (정사각형 권장)
+    scatter_size: 8                    # 산점도 점 크기 (마커 크기)
+    scatter_alpha: 0.7                 # 산점도 점 투명도 (궤적 시각화용)
+    background_color: "lightgray"      # 배경 색상
+    background_alpha: 0.3              # 배경 투명도
+    background_size: 6                 # 배경 점 크기
+    window_colors:                     # 각 윈도우 기간별 색상 (p1~p4)
+      p1: "#4E79A7"                    # 0-200ms (파란색)
+      p2: "#F28E2B"                    # 200-400ms (주황색)
+      p3: "#E15759"                    # 400-600ms (빨간색)
+      p4: "#59A14F"                    # 600-800ms (초록색)
+    max_marker_color: "#ED1C24"        # 최댓값 마커 색상 (빨강)
+    max_marker_size: 80                # 최댓값 마커 크기 (통상 점보다 큼)
+    max_marker_symbol: "*"             # 최댓값 마커 모양 ("*"=별, "o"=원, "s"=사각형)
+    max_marker_edgecolor: "white"      # 최댓값 마커 테두리 색상
+    max_marker_linewidth: 1            # 최댓값 마커 테두리 두께
+    max_marker_zorder: 10              # 최댓값 마커 겹침순서 (값 클수록 위에)
+    legend_fontsize: 10                # legend 폰트 크기
+    x_label: "Cx (R+/L-)"              # X축 라벨 (오른쪽 양수, 왼쪽 음수)
+    y_label: "Cy (A+)"                 # Y축 라벨 (앞쪽 양수)
+    y_invert: true                     # Y축 반전 여부 (true면 위쪽이 음수)
 
 # === Window Definitions (relative to platform_onset in ms) ===
 windows:

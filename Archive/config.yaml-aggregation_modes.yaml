@@ -1,0 +1,73 @@
+aggregation_modes:
+# grand, subject mean 
+  grand_mean:
+    enabled: true
+    groupby: []
+    output_dir: "output/grand_mean"
+    filename_pattern: "grand_mean_{signal_group}.png"
+  subject_mean:
+    enabled: false
+    groupby: ["subject"]
+    output_dir: "output/subject_mean"
+    filename_pattern: "{subject}_mean_{signal_group}.png"
+
+# age_group:young vs. old 
+  age_group_mean:
+    enabled: true
+    groupby: ["age_group"]
+    output_dir: "output/age_group_mean"
+    filename_pattern: "{age_group}_mean_{signal_group}.png"  
+  diff_age_group_mean:
+    enabled: true
+    groupby: ["age_group"]
+    overlay: true
+    output_dir: "output/diff"
+    filename_pattern: "diff_age_group_{signal_group}.png" 
+  diff_age_group_subject_mean:
+    enabled: true
+    groupby: ["age_group","subject"]
+    overlay: true
+    output_dir: "output/diff"
+    filename_pattern: "diff_age_group_subject_mean_{signal_group}.png"
+  diff_age_group_step_TF_mean: 
+    enabled: true
+    groupby: ["age_group","step_TF"]
+    overlay: true
+    output_dir: "output/diff"
+    filename_pattern: "diff_age_group_step_TF_mean_{signal_group}.png"
+
+# step_TF: step vs. nonstep 
+  step_TF_mean:
+    enabled: true
+    groupby: ["step_TF"]
+    output_dir: "output/step_TF_mean"
+    filename_pattern: "{step_TF}_mean_{signal_group}.png"  
+  diff_step_TF_mean:
+    enabled: true
+    groupby: ["step_TF"]
+    overlay: true
+    output_dir: "output/diff"
+    filename_pattern: "diff_step_TF_{signal_group}.png"
+  diff_step_TF_subject_mean:
+    enabled: true
+    groupby: ["step_TF","subject"]
+    overlay: true
+    output_dir: "output/diff"
+    filename_pattern: "diff_step_TF_subject_mean_{signal_group}.png"
+  diff_step_TF_age_group_mean: 
+    enabled: true
+    groupby: ["step_TF","age_group"]
+    overlay: true
+    output_dir: "output/diff"
+    filename_pattern: "diff_step_TF_age_group_mean_{signal_group}.png"
+
+# velocity: 10 
+  velocity_10_mean:
+    enabled: true
+    filter:
+      column: "velocity"
+      value: 10.0
+    groupby: []
+    output_dir: "output/velocity_10_mean"
+    filename_pattern: "vel10_mean_{signal_group}.png"
+    
