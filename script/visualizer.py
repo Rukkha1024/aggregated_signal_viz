@@ -969,7 +969,8 @@ class AggregatedSignalVisualizer:
         channels = list(group_cfg["columns"])
 
         cols = set(group_cols + ["aligned_frame"] + channels + meta_cols)
-        lf_sel = lf.select([pl.col(c) for c in cols if c in self._lazy_columns(lf)])
+        available_cols = set(self._lazy_columns(lf))
+        lf_sel = lf.select([pl.col(c) for c in cols if c in available_cols])
 
         agg_exprs: List[pl.Expr] = [pl.col("aligned_frame").sort().alias("__x")]
         for ch in channels:
