@@ -480,20 +480,20 @@ def _plot_emg_overlay(
             )
 
         for key in sorted_keys:
-            group_label = _format_group_label(key, group_fields, filtered_group_fields)
             marker_info = markers_by_key.get(key, {}).get(ch, {})
+            marker_label = _format_group_label(key, group_fields)
             if common_style.get("show_onset_marker", True):
                 onset_time = marker_info.get("onset")
                 if onset_time is not None and _is_within_time_axis(onset_time, time_start_ms, time_end_ms):
                     onset_norm = _ms_to_norm(onset_time, time_start_ms, time_end_ms)
                     if onset_norm is not None:
-                        ax.axvline(onset_norm, **emg_style["onset_marker"], label=f"{group_label} onset")
+                        ax.axvline(onset_norm, **emg_style["onset_marker"], label=f"{marker_label} onset")
             if common_style.get("show_max_marker", True):
                 max_time = marker_info.get("max")
                 if max_time is not None and _is_within_time_axis(max_time, time_start_ms, time_end_ms):
                     max_norm = _ms_to_norm(max_time, time_start_ms, time_end_ms)
                     if max_norm is not None:
-                        ax.axvline(max_norm, **emg_style["max_marker"], label=f"{group_label} max")
+                        ax.axvline(max_norm, **emg_style["max_marker"], label=f"{marker_label} max")
 
         ax.set_title(
             ch,
@@ -670,8 +670,8 @@ def _plot_forceplate_overlay(
                 onset_norm = _ms_to_norm(onset_time, time_start_ms, time_end_ms)
                 if onset_norm is None:
                     continue
-                group_label = _format_group_label(key, group_fields, filtered_group_fields)
-                ax.axvline(onset_norm, **forceplate_style["onset_marker"], label=f"{group_label} onset")
+                marker_label = _format_group_label(key, group_fields)
+                ax.axvline(onset_norm, **forceplate_style["onset_marker"], label=f"{marker_label} onset")
 
         ax.set_title(
             ch,
