@@ -972,12 +972,20 @@ class AggregatedSignalVisualizer:
         available_cols = set(self._lazy_columns(lf))
         lf_sel = lf.select([pl.col(c) for c in cols if c in available_cols])
 
-        agg_exprs: List[pl.Expr] = [pl.col("aligned_frame").sort().alias("__x")]
-        for ch in channels:
-            agg_exprs.append(pl.col(ch).sort_by("aligned_frame").alias(ch))
+        present_meta_cols: List[str] = []
+        missing_meta_cols: List[str] = []
         for col in meta_cols:
             if col in group_cols:
                 continue
+            if col in available_cols:
+                present_meta_cols.append(col)
+            else:
+                missing_meta_cols.append(col)
+
+        agg_exprs: List[pl.Expr] = [pl.col("aligned_frame").sort().alias("__x")]
+        for ch in channels:
+            agg_exprs.append(pl.col(ch).sort_by("aligned_frame").alias(ch))
+        for col in present_meta_cols:
             agg_exprs.append(pl.col(col).first().alias(col))
             agg_exprs.append(pl.col(col).n_unique().alias(f"__nuniq_{col}"))
 
@@ -986,7 +994,7 @@ class AggregatedSignalVisualizer:
         if df.is_empty():
             raise ValueError("No data available after applying task or input filters.")
 
-        for col in meta_cols:
+        for col in present_meta_cols:
             nuniq_col = f"__nuniq_{col}"
             if nuniq_col not in df.columns:
                 continue
@@ -1020,6 +1028,10 @@ class AggregatedSignalVisualizer:
             if c in df.columns and c not in keep_cols:
                 keep_cols.append(c)
         meta_df = df.select(keep_cols)
+        for col in missing_meta_cols:
+            if col in meta_df.columns:
+                continue
+            meta_df = meta_df.with_columns(pl.lit(None).alias(col))
         return _ResampledGroup(meta_df=meta_df, tensor=tensor, channels=channels)
 
     def _build_plot_tasks(
@@ -1154,7 +1166,7 @@ class AggregatedSignalVisualizer:
         col = filter_cfg.get("column")
         value = filter_cfg.get("value")
         if col is None or col not in meta_df.columns:
-            return np.array([], dtype=int)
+            return idx if value is None else np.array([], dtype=int)
         series = meta_df[col].to_numpy()
         mask = series == value
         return idx[mask]
