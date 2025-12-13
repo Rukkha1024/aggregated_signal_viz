@@ -1,256 +1,140 @@
-# Aggregated Signal Visualization - Standalone Repository Plan
+<prompt>
+You are modifying the codebase in `aggregated_signal_viz/` (files: `config.yaml`, `visualizer.py`) to add a new “overlay plotting” capability for aggregation modes. The goal is: when an aggregation mode has `overlay: true`, the visualizer must aggregate each group separately but plot ALL groups together in a single output image (one image per signal_group), using Matplotlib’s auto color cycle (do NOT set any line colors).
 
-## 목적
-시계열 시그널 데이터의 집계(aggregated) 플롯을 생성하는 **독립 레포지토리**.
+Hard constraints (must satisfy):
 
----
+* Overlay applies ONLY to `signal_group in {"emg","forceplate"}`. If `signal_group == "cop"` AND `overlay: true`, skip (do not output any COP overlay file). Non-overlay COP behavior must remain unchanged.
+* Legends must show EVERYTHING: group lines + all window spans (p1..p4 with their ms ranges) + all markers that are enabled (onset/max). No “hide duplicates” logic that removes window labels.
+* Overlay must work for ANY `groupby` definition (e.g., ["step_TF"], ["subject"], ["age_group"], ["subject","velocity"], etc.). It must not be step_TF-specific.
+* Key ordering must be stable:
 
-## 핵심 제약사항
-- **완전 독립 레포지토리**: 외부 모듈 의존 없음
-- **외부 의존성**: polars, numpy, matplotlib, scipy만 사용
-- **Config 기반**: 모든 설정을 `config.yaml`에서 관리
+  * If `groupby == ["step_TF"]` exactly, enforce `nonstep` then `step`.
+  * Otherwise, sort keys lexicographically by their string representations, so overlay line color assignment remains stable run-to-run.
 
----
+Part 1) Update `config.yaml`
 
-## Legacy Code 분석 - Plot Type별 적용 요소
+* Add a new mode example under `aggregation_modes` that demonstrates overlay for step_TF comparison:
 
-| 요소 | EMG | Forceplate | COP |
-|------|-----|------------|-----|
-| **Plot Type** | Line (`'b-'`) | Line (채널별 색상) | Scatter |
-| **Window Span** | O (`axvspan`) | O (`axvspan`) | X |
-| **Window Color (scatter)** | X | X | O (점 색상) |
-| **Onset Marker** | O (`axvline`) | O (`axvline`) | X |
-| **Max Marker** | O (`axvline`) | X | O (`scatter '*'`) |
-| **Y축 반전** | X | X | O (Cy → -Cy) |
+  * name: `step_TF_comparison`
+  * fields: `enabled: true`, `groupby: ["step_TF"]`, `overlay: true`, `output_dir: "output/comparison"`, `filename_pattern: "comparison_by_step_TF_{signal_group}.png"`
+* Do NOT remove or alter existing modes.
+* Do NOT change existing plot_style keys; overlay logic will simply ignore `line_color` / `line_colors` when overlay is active.
 
-### 공통 스타일
-```
-- DPI: 300
-- Grid: True, alpha=0.3
-- Tick labelsize: 7
-- Title fontsize: 30, fontweight='bold', pad=5
-- Label fontsize: 8
-- Legend: loc='best', framealpha=0.8
-- tight_layout: rect=[0, 0, 1, 0.99]
-- savefig: bbox_inches='tight', facecolor='white'
-```
+Part 2) Update `visualizer.py`
+A) Modify `_run_mode(self, signal_group: str, mode_name: str, mode_cfg: Dict) -> None`
 
-### EMG 전용
-```
-- Subplot size: 12x6
-- Line: 'b-', linewidth=0.8, alpha=0.8
-- Window span: axvspan, alpha=0.15
-- Onset marker: axvline, color='red', linestyle='--', linewidth=1.5
-- Max amp marker: axvline, color='orange', linestyle='--', linewidth=1.5
-- Legend fontsize: 6
-- X label: 'Frame (onset=0)'
-- Y label: {channel}
-```
+* Current behavior loops groups and saves one file per group. Keep that for non-overlay.
+* Add an overlay branch:
 
-### Forceplate 전용
-```
-- Subplot size: 12x6
-- Line colors: Fx='purple', Fy='brown', Fz='green'
-- Line: linewidth=0.8, alpha=0.8
-- Window span: axvspan, alpha=0.15
-- Onset marker: axvline, color='red', linestyle='--', linewidth=1.5
-- Legend fontsize: 6
-- X label: 'Frame (onset=0)'
-- Y label: '{channel} Value'
-```
+  1. Read `overlay = bool(mode_cfg.get("overlay", False))`
+  2. If `overlay` is True:
 
-### COP 전용
-```
-- Subplot size: 8x8 (정사각형)
-- Scatter: s=8, alpha=0.7
-- Window별 점 색상: p1='#4E79A7', p2='#F28E2B', p3='#E15759', p4='#59A14F'
-- Background 점: color='lightgray', alpha=0.3, s=6
-- Max marker: s=80, marker='*', color='#ED1C24', edgecolor='white', linewidth=1, zorder=10
-- Legend fontsize: 5
-- X label: 'Cx (R+/L-)'
-- Y label: 'Cy (A+)'
-- Y축 반전: y = -Cy
-```
+     * If `signal_group == "cop"`: print a short warning (e.g., “[overlay] skip COP …”) and `return`
+     * Filter records using existing `_apply_filter`
+     * Group using existing `_group_records(records, group_fields)`
+     * For each group key, compute:
 
----
+       * `aggregated_by_key[key] = self._aggregate_group(recs)`
+       * `markers_by_key[key] = self._collect_markers(signal_group, key, group_fields, mode_cfg.get("filter"))`
+     * Sort keys using a NEW helper `_sort_overlay_keys(keys, group_fields)`
+     * Render ONE output filename and path:
 
-## 디렉토리 구조
-```
-aggregated_signal_viz/
-├── config.yaml
-├── main.py
-├── visualizer.py
-├── data/
-│   └── (input.csv)
-├── output/
-│   ├── subject_mean/
-│   ├── grand_mean/
-│   └── filtered_mean/
-└── requirements.txt
-```
+       * Prefer using key `("all",)` so filename patterns that only require `{signal_group}` still work:
+         `filename = self._render_filename(mode_cfg["filename_pattern"], ("all",), signal_group, group_fields=[])`
+       * Additionally, make this robust if a user accidentally includes group placeholders:
+         try formatting with `signal_group` only; on KeyError, format again by providing each group field with the literal `"overlay"` so it won’t crash (and print a warning once).
+     * Call a NEW method `_plot_overlay(...)` that plots all groups into a single figure and saves ONE file.
+  3. If `overlay` is False: keep existing behavior exactly.
 
----
+B) Add new helpers/methods
 
-## config.yaml 설계
+1. `_sort_overlay_keys(self, keys: List[Tuple], group_fields: List[str]) -> List[Tuple]`
 
-```yaml
-# === 데이터 설정 ===
-data:
-  input_file: "data/processed_emg_data.csv"
-  id_columns:
-    subject: "subject"
-    group_var: "velocity"
-    trial: "trial_num"
-    time_axis: "DeviceFrame"
+   * If `group_fields == ["step_TF"]`:
+     order using mapping `{ "nonstep": 0, "step": 1 }`, unknowns go after (e.g., 99), and keep stable fallback sort.
+   * Else:
+     sort by `tuple(str(v) for v in key)`.
 
-# === 시그널 그룹 정의 ===
-signal_groups:
-  emg:
-    columns: [TA, EHL, MG, SOL, PL, RF, VL, ST, RA, EO, IO, SCM, GM, ESC, EST, ESL]
-    grid_layout: [4, 4]
-  forceplate:
-    columns: [Fx, Fy, Fz]
-    grid_layout: [1, 3]
-  cop:
-    columns: [Cx, Cy]
+2. `_format_group_label(self, key: Tuple, group_fields: List[str]) -> str`
 
-# === 보간 설정 ===
-interpolation:
-  enabled: true
-  method: "linear"
-  target_length: 1000
+   * If `not group_fields` or `key == ("all",)`: return "all"
+   * If len(group_fields)==1: return `str(key[0])`
+   * Else: return `", ".join(f"{f}={v}" for f, v in zip(group_fields, key))`
 
-# === 집계 모드 ===
-aggregation_modes:
-  subject_mean:
-    enabled: true
-    groupby: [subject]
-    output_dir: "output/subject_mean"
-    filename_pattern: "{subject}_mean_{signal_group}.png"
-  grand_mean:
-    enabled: true
-    groupby: []
-    output_dir: "output/grand_mean"
-    filename_pattern: "grand_mean_{signal_group}.png"
-  filtered_mean:
-    enabled: true
-    filter:
-      column: "velocity"
-      value: 10.0
-    groupby: [subject]
-    output_dir: "output/filtered_mean"
-    filename_pattern: "{subject}_vel10_mean_{signal_group}.png"
+3. `_plot_overlay(self, signal_group: str, aggregated_by_key: Dict[Tuple, Dict[str,np.ndarray]], markers_by_key: Dict[Tuple, Dict[str,Any]], output_path: Path, mode_name: str, group_fields: List[str], sorted_keys: List[Tuple]) -> None`
 
-# === 플롯 스타일 ===
-plot_style:
-  # 공통
-  common:
-    dpi: 300
-    grid_alpha: 0.3
-    tick_labelsize: 7
-    title_fontsize: 20
-    title_fontweight: "bold"
-    title_pad: 5
-    label_fontsize: 8
-    legend_loc: "best"
-    legend_framealpha: 0.8
-    tight_layout_rect: [0, 0, 1, 0.99]
-    savefig_bbox_inches: "tight"
-    savefig_facecolor: "white"
-    font_family: "Malgun Gothic"
-  
-  # EMG 전용
-  emg:
-    subplot_size: [12, 6]
-    line_color: "blue"
-    line_width: 0.8
-    line_alpha: 0.8
-    window_span_alpha: 0.15
-    onset_marker_color: "red"
-    onset_marker_linestyle: "--"
-    onset_marker_linewidth: 1.5
-    max_marker_color: "orange"
-    max_marker_linestyle: "--"
-    max_marker_linewidth: 1.5
-    legend_fontsize: 6
-    x_label: "Frame (normalized)"
-    y_label: "{channel}"
-  
-  # Forceplate 전용
-  forceplate:
-    subplot_size: [12, 6]
-    line_colors:
-      Fx: "purple"
-      Fy: "brown"
-      Fz: "green"
-    line_width: 0.8
-    line_alpha: 0.8
-    window_span_alpha: 0.15
-    onset_marker_color: "red"
-    onset_marker_linestyle: "--"
-    onset_marker_linewidth: 1.5
-    legend_fontsize: 6
-    x_label: "Frame (normalized)"
-    y_label: "{channel} Value"
-  
-  # COP 전용
-  cop:
-    subplot_size: [8, 8]
-    scatter_size: 8
-    scatter_alpha: 0.7
-    background_color: "lightgray"
-    background_alpha: 0.3
-    background_size: 6
-    window_colors:
-      p1: "#4E79A7"
-      p2: "#F28E2B"
-      p3: "#E15759"
-      p4: "#59A14F"
-    max_marker_color: "#ED1C24"
-    max_marker_size: 80
-    max_marker_symbol: "*"
-    max_marker_edgecolor: "white"
-    max_marker_linewidth: 1
-    max_marker_zorder: 10
-    legend_fontsize: 5
-    x_label: "Cx (R+/L-)"
-    y_label: "Cy (A+)"
-    y_invert: true
+   * Dispatch:
 
-# === 출력 설정 ===
-output:
-  base_dir: "output"
-  format: "png"
-```
+     * emg -> `_plot_emg_overlay(...)`
+     * forceplate -> `_plot_forceplate_overlay(...)`
+     * (cop should never reach here)
 
----
+C) Implement overlay plotting (MUST use auto color cycle)
 
-## 생성할 시각화 (3가지)
+1. `_plot_emg_overlay(...)`
 
-### 1. Subject-Level Mean
-- **Groupby**: subject + DeviceFrame (보간 후)
-- **출력**: `{subject}_mean_emg.png`, `{subject}_mean_forceplate.png`, `{subject}_mean_cop.png`
+   * Layout must match `_plot_emg` (grid_layout, figsize, dpi, suptitle, supxlabel, supylabel, tight_layout, savefig).
+   * For each channel subplot:
 
-### 2. Grand Mean
-- **Groupby**: DeviceFrame (보간 후)
-- **출력**: `grand_mean_emg.png`, `grand_mean_forceplate.png`, `grand_mean_cop.png`
+     * Add window spans ONCE per window with label from `_format_window_label(name)` (use existing `self.window_norm_ranges` and `self.window_colors`).
+     * For each group in `sorted_keys`:
 
-### 3. Velocity 10 + Subject별
-- **Filter**: velocity == 10.0
-- **Groupby**: subject + DeviceFrame (보간 후)
-- **출력**: `{subject}_vel10_mean_emg.png`, `{subject}_vel10_mean_forceplate.png`, `{subject}_vel10_mean_cop.png`
+       * Get y = aggregated_by_key[key].get(channel). If None -> skip.
+       * Plot: `ax.plot(x, y, linewidth=self.emg_style["line_width"], alpha=self.emg_style["line_alpha"], label=<group_label>)`
+         IMPORTANT: do NOT pass any color or format string like `"blue"`; do NOT pass `color=...`.
+     * Markers (legend must show all):
 
----
+       * For each group in `sorted_keys`, if markers_by_key[key] has this channel:
 
-## 사용 컬럼
-```python
-ID_COLS = ['subject', 'velocity', 'trial_num', 'DeviceFrame']
-EMG_COLS = ['TA', 'EHL', 'MG', 'SOL', 'PL', 'RF', 'VL', 'ST', 'RA', 'EO', 'IO', 'SCM', 'GM', 'ESC', 'EST', 'ESL']
-FP_COLS = ['Fx', 'Fy', 'Fz']
-COP_COLS = ['Cx', 'Cy']
-```
+         * If `show_onset_marker` enabled and onset exists:
 
----
+           * draw axvline using `self.emg_style["onset_marker"]`
+           * label must be unique per group, e.g. `f"{group_label} onset"`
+         * If `show_max_marker` enabled and max exists:
 
-## 다음 단계
-`proceed` 시 코드 구현
+           * draw axvline using `self.emg_style["max_marker"]`
+           * label must be unique per group, e.g. `f"{group_label} max"`
+     * Call `ax.legend(...)` (do not filter or deduplicate labels; legends must include windows + groups + markers).
+   * Title:
+
+     * Use a new overlay title format: `f"{mode_name} | {signal_group} | overlay by {', '.join(group_fields) if group_fields else 'all'}"`
+
+2. `_plot_forceplate_overlay(...)`
+
+   * Layout must match `_plot_forceplate` (grid_layout, figsize, dpi, suptitle, per-axes xlabel/ylabel, tight_layout, savefig).
+   * For each force channel subplot (Fx/Fy/Fz):
+
+     * Add window spans ONCE per window (label included).
+     * For each group in `sorted_keys`:
+
+       * y = aggregated_by_key[key][channel]
+       * Plot WITHOUT specifying color:
+         `ax.plot(x, y, linewidth=self.forceplate_style["line_width"], alpha=self.forceplate_style["line_alpha"], label=<group_label>)`
+     * Markers:
+
+       * For each group, if markers_by_key has onset for this channel, draw axvline with label `f"{group_label} onset"`.
+     * Call legend without dedupe.
+
+D) Preserve existing non-overlay behavior
+
+* Do NOT change `_plot_emg`, `_plot_forceplate`, `_plot_cop` output logic (except if you must refactor shared code, but outputs must remain identical for non-overlay modes).
+* Do NOT reintroduce hard-coded styling outside config; overlay just avoids specifying colors.
+
+Part 3) Verification / acceptance checks
+
+* Run:
+
+  * `python main.py --modes step_TF_comparison --groups emg forceplate --sample`
+* Expected:
+
+  * Exactly ONE EMG overlay PNG saved under `output/comparison/` (per filename_pattern), containing each EMG channel subplot with two lines (nonstep/step) in different auto-cycle colors, window spans labeled, and legend showing windows + both group lines (and markers if enabled).
+  * Exactly ONE forceplate overlay PNG saved similarly, each subplot containing multiple group lines with auto-cycle colors and legend containing windows + group lines (and markers if enabled).
+  * No COP overlay file is produced for overlay modes.
+* Also run at least one existing non-overlay mode (e.g., `step_TF_mean`) to confirm it still creates per-group files and looks unchanged.
+
+Deliverables:
+
+* Patch `config.yaml` with the new overlay mode example.
+* Patch `visualizer.py` implementing overlay logic and helpers as described.
+
+</prompt>

@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from visualizer import AggregatedSignalVisualizer, ensure_output_dirs, parse_args
+from script.visualizer import AggregatedSignalVisualizer, ensure_output_dirs, parse_args
 
 
 def main() -> None:

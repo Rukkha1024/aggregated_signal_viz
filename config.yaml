@@ -66,6 +66,12 @@ aggregation_modes:
     groupby: ["step_TF"]
     output_dir: "output/step_TF_mean"
     filename_pattern: "{step_TF}_mean_{signal_group}.png"  
+  step_TF_comparison:
+    enabled: true
+    groupby: ["step_TF"]
+    overlay: true
+    output_dir: "output/comparison"
+    filename_pattern: "comparison_by_step_TF_{signal_group}.png"
 
 # === 플롯 스타일 ===
 plot_style:

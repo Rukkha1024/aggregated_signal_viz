@@ -13,7 +13,8 @@ data_paths:
   # Input files (NEW WORKFLOW: using pre-processed data)
   processed_emg_file: data/merged_data_comprehensive.csv  # Use full merged dataset (all subjects/trials)
   raw_emg_file: data/merged_data_comprehensive.csv  # Raw EMG data for TKEO onset detection
-  platform_file: "/mnt/c/Users/Alice/OneDrive - 청주대학교/근전도 분석 코드/platform on-offset.xlsx"
+  platform_file: "/mnt/c/Users/Alice/OneDrive - 청주대학교/연구실 자료/연구실_노인균형프로토콜/데이터 정리-설문, 신체계측, 기타 데이터/perturb_inform.xlsm"
+  platform_sheet: "platform"
 
   # Legacy files (deprecated - no longer used in main pipeline)
   # emg_file: data/merged_data_comprehensive.csv

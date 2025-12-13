@@ -12,16 +12,9 @@ Always follow this procedure when performing tasks:
 - Use the existing conda env: `module` (WSL2).
 - Always run Python/pip as: `conda run -n module python` / `conda run -n module pip`.
 - **Do not** create or activate any `venv` or `.venv` or run `uv venv`.
-- If a package is missing, prefer:
-  1) `mamba/conda install -n module <pkg>` (if available)
-  2) otherwise `conda run -n module pip install <pkg>`
-- Before running Python, verify the interpreter path with:
-  `conda run -n module python -c "import sys; print(sys.executable)"`
 
 ---
 ## **Codebase Rule: Configuration Management**
-
-절대 사용자의 컨펌이 있기 전에는 코드 실행을 진행하지 마라. 사용자가 정확하게 `proceed`라고 하지 않는 이상 절대로 코드 수정을 하지 않는다. 
 
 ### **Core Principle: Centralized Control**
 The primary goal is to centralize shared values across multiple scripts. This ensures consistency and minimizes code modifications when parameters change.
@@ -35,57 +28,89 @@ The primary goal is to centralize shared values across multiple scripts. This en
 6.  **Shared Texts:** Centralize common log messages or report headers (e.g., `STAGE03_SUMMARY_HEADER`).
 
 ### **Exclusion Rule:**
+- **Visualization Settings:** Do not include settings related to the visual appearance of plots (e.g., colors, fonts, line styles).
+
+---
+### **Codebase Rule: Configuration Management**
+
+#### **Core Principle: Centralized Control**
+The primary goal is to centralize shared values across multiple scripts. This ensures consistency and minimizes code modifications when parameters change.
+
+#### **Items to Include in Config Files:**
+1.  **Paths and Directories:** Define paths to data, logs, and outputs (e.g., `RAW_DATA_DIR`, `OUTPUT_DIR`).
+2.  **File Identification Patterns:** Store regex or fixed strings for parsing filenames (e.g., `VELOCITY_PATTERN`, `TRIAL_PATTERNS`).
+3.  **Data Structure Definitions:** List column names for data extraction or processing (e.g., `FORCEPLATE_COLUMNS`).
+4.  **Fixed Processing Constants:** Define constants derived from the experimental setup (e.g., `FRAME_RATIO`, `FORCEPLATE_DATA_START`).
+5.  **Tunable Analysis Parameters:** Specify parameters that researchers might adjust (e.g., filter cutoffs, normalization methods).
+6.  **Shared Texts:** Centralize common log messages or report headers (e.g., `STAGE01_SUMMARY_HEADER`).
+
+#### **Exclusion Rule:**
 - **Visualization Settings:** Do not include settings related to the visual appearance of plots (e.g., colors, fonts, line styles). These should be managed within the visualization code itself.
 
 ---
 
-## **Codebase Rule: Perturbation Task Data Processing**
+# Codebase Rule: Perturbation Task Data Processing (Generalized)
 
-### **Scope: This document defines the rules governing data structure, time frames, and processing units specifically for the `perturb` task within this codebase.**
+## 1) Primary processing unit
+* The minimum, non-negotiable unit for processing, caching, file naming, and grouping is:
+  * **`subject-velocity-trial`**
+* All intermediate and final artifacts must be generated, stored, and merged at this unit.
 
-## **1. Core Principles**
+## 2) Configuration authority
+* `config.yaml` is the single source of truth for:
+  * **channels**
+  * **sampling rates**
+  * **processing parameters**
+* The code must not contain hardcoded duplicates of config-defined values. If a value exists in `config.yaml`, the runtime must consume it from `config.yaml`.
 
-### **1.1. Unit of Analysis**
-The fundamental, indivisible unit for all data processing, analysis, and file management is the unique combination of **`subject-velocity-trial`**.
-
-*   **Subject:** The unique identifier for a participant (e.g., '김연옥').
-*   **Velocity:** The perturbation speed condition (e.g., '5.0').
-*   **Trial:** The specific trial number for a given subject and velocity (e.g., '1').
-*   **Implementation:** All intermediate and final data files are named and grouped using this unit. Data merging and aggregation operations are performed at this level. 
-
-### **1.2. Data Source Authority**
-*   The `platform on-offset.xlsx` file is the definitive source for event timing (`platform_onset`, `platform_offset`). These timings are recorded in the **MocapFrame** unit.
-*   The `config.yaml` file is the definitive source for signal processing parameters (e.g., filter cutoffs, processing order) and muscle channel names.
-
-## **2. Time Frame Definitions and Rules**
-
-This codebase utilizes four distinct time frame systems. Adherence to these definitions is critical for data integrity.
-
-### **2.1. `MocapFrame`**
-*   **Description:** The **absolute** time frame system based on the motion capture system's sampling rate.
-*   **Sampling Rate:** **100Hz**.
-*   **Role:**
-    *   Acts as the master clock for synchronizing all heterogeneous data sources (EMG, Forceplate, COM).
-    *   Serves as the reference unit for all event timings defined in `platform on-offset.xlsx`.
-*   **Rule:** This value must remain unchanged throughout the pipeline and represents the original, global timestamp from the raw data.
-
-### **2.2. `original_DeviceFrame`**
-*   **Description:** The **absolute** time frame system based on the EMG/Forceplate sensor's sampling rate.
-*   **Sampling Rate:** **1000Hz**.
-*   **Role:** A high-resolution version of the absolute time frame, preserved to maintain linkage to the original raw sensor data after segmentation.
-*   **Rule:** It is calculated as `MocapFrame * 10`. This column is created during Stage 03 as a backup of the initial `DeviceFrame` before it is localized.
-
-### **2.3. `DeviceFrame`**
-*   **Description:** A **relative** (local) time frame system.
-*   **Sampling Rate:** **1000Hz**.
-*   **Role:** Represents the time elapsed *within* a single, segmented `subject-velocity-trial` unit.
-*   **Rule:** For each trial segment, this frame counter **must** start at `0`. It is generated in Stage 03 by resetting the frame index for each extracted segment.
+## 3) Time axis policy (flexible, explicit)
+* A dataset must provide **one usable time index** column (examples: `DeviceFrame`, `MocapFrame`, `Timestamp`).
+* Within each `subject-velocity-trial`, the chosen time index must be:
+  * **monotonic (non-decreasing)**
+* The time index origin may be either:
+  * **global/absolute**, or
+  * **trial-zero (local)**
+* The chosen origin must be **explicitly declared** (via metadata and/or `config.yaml`).
 
 
-## **3. Frame Conversion and Relationship**
+## 4) Sampling-rate relationship and provenance backup
+* The sampling rates are part of the data’s provenance and must be configuration-controlled:
+  * `MocapFrame` domain: **100 Hz**
+  * `DeviceFrame` domain: **1000 Hz**
+* The conversion relationship between these domains (e.g., `FRAME_RATIO`) must be derived from `config.yaml` values and must not be hardcoded.
+* If any operation **redefines the time axis** (including but not limited to):
+  * changing sampling rates,
+  * changing the conversion ratio,
+  * shifting the origin to onset/offset alignment,
+  * normalization/resampling,
+  * any transformation that changes how time is interpreted,
+    then an immutable, original absolute sensor frame pointer must be preserved as a dedicated column, e.g.:**`original_DeviceFrame`**
+* `original_DeviceFrame` must be treated as **read-only provenance**:
+  * it must **not be overwritten**,
+  * it must **not be replaced by recomputation**.
+* If correction/repair is required, create a **new** column (e.g., `repaired_original_DeviceFrame`) and keep the original column intact.
 
-*   **`FRAME_RATIO`:** The constant conversion factor between Mocap and Device frames is **10**.
-*   **Conversion Formulas:**
-    *   To Device Frame: `DeviceFrame = MocapFrame * 10`
-    *   To Mocap Frame: `MocapFrame = DeviceFrame // 10` (integer division)
-*   **Hierarchy:** `MocapFrame` and `original_DeviceFrame` are global/absolute. `DeviceFrame` is local/relative to a trial. `resampled_frame` is normalized and abstract.
+
+## 5) Derived time axes are allowed (but must not overwrite)
+* Alignment (e.g., onset-locked) and normalization/resampling are permitted **only as derived columns**, for example:
+  * `aligned_*`, `x_norm`, `resampled_*`
+* Derived time axes must **not overwrite** the dataset’s chosen time index.
+* The chosen time index column must remain usable for:
+  * grouping,
+  * validation,
+  * traceability.
+
+## 6) Event columns (if present)
+* If event columns exist (e.g., `onset`, `offset`), they must:
+  * be expressed in a **clearly defined time index domain**, and
+  * fall within the run’s time range for that `subject-velocity-trial`.
+
+## 7) Required validation (minimum)
+For each dataset/run:
+
+* `subject`, `velocity`, `trial` are present and non-null.
+* The chosen time index exists and is monotonic per `subject-velocity-trial`.
+* Duplicates in the primary time index within a run are either:
+  * absent, or
+  * explicitly handled and documented (implementation-defined, but must be deliberate and reproducible).
+
