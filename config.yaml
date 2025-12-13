@@ -44,67 +44,12 @@ aggregation_modes:
     groupby: []
     output_dir: "output/grand_mean"
     filename_pattern: "grand_mean_{signal_group}.png"
-  subject_mean:
-    enabled: false
-    groupby: ["subject"]
-    output_dir: "output/subject_mean"
-    filename_pattern: "{subject}_mean_{signal_group}.png"
-
-# age_group:young vs. old 
-  age_group_mean:
-    enabled: true
-    groupby: ["age_group"]
-    output_dir: "output/age_group_mean"
-    filename_pattern: "{age_group}_mean_{signal_group}.png"  
-  diff_age_group_mean:
-    enabled: true
-    groupby: ["age_group"]
-    overlay: true
-    output_dir: "output/diff"
-    filename_pattern: "diff_age_group_{signal_group}.png" 
-  diff_age_group_subject_mean:
-    enabled: true
-    groupby: ["age_group","subject"]
-    overlay: true
-    output_dir: "output/diff"
-    filename_pattern: "diff_age_group_subject_mean_{signal_group}.png"
-  diff_age_group_step_TF_mean: 
-    enabled: true
-    groupby: ["age_group","step_TF"]
-    overlay: true
-    output_dir: "output/diff"
-    filename_pattern: "diff_age_group_step_TF_mean_{signal_group}.png"
-
-# step_TF: step vs. nonstep 
-  step_TF_mean:
-    enabled: true
-    groupby: ["step_TF"]
-    output_dir: "output/step_TF_mean"
-    filename_pattern: "{step_TF}_mean_{signal_group}.png"  
-  diff_step_TF_mean:
-    enabled: true
-    groupby: ["step_TF"]
-    overlay: true
-    output_dir: "output/diff"
-    filename_pattern: "diff_step_TF_{signal_group}.png"
-  diff_step_TF_subject_mean:
-    enabled: true
-    groupby: ["step_TF","subject"]
-    overlay: true
-    output_dir: "output/diff"
-    filename_pattern: "diff_step_TF_subject_mean_{signal_group}.png"
-  diff_step_TF_age_group_mean: 
-    enabled: true
-    groupby: ["step_TF","age_group"]
-    overlay: true
-    output_dir: "output/diff"
-    filename_pattern: "diff_step_TF_age_group_mean_{signal_group}.png"
 
 # === 플롯 스타일 ===
 plot_style:
   # 공통 설정 (모든 신호 타입에 적용)
   common:
-    dpi: 300                           
+    dpi: 300
     grid_alpha: 0.3                    # 격자선 투명도 (0=완전투명, 1=완전불투명)
     tick_labelsize: 7                  # 축 눈금 폰트 크기 (포인트)
     title_fontsize: 14                 # 제목 폰트 크기
@@ -113,6 +58,7 @@ plot_style:
     label_fontsize: 8                  # 축 라벨 폰트 크기
     legend_loc: "best"                 # legend 위치 ("best", "upper left", "lower right" 등)
     legend_framealpha: 0.8             # legend 배경 투명도
+    legend_label_threshold: 6          # groupby column의 unique 값이 이 값 이상이면 legend에서 제외
     tight_layout_rect: [0, 0, 1, 0.99] # 레이아웃 여백 [left, bottom, right, top]
     savefig_bbox_inches: "tight"       # 저장 시 테두리 처리 ("tight"로 여백 최소화)
     savefig_facecolor: "white"         # 배경색 ("white", "gray" 등)

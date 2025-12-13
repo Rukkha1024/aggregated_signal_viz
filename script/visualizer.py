@@ -119,9 +119,75 @@ def _format_title(signal_group: str, mode_name: str, group_fields: List[str], ke
     return f"{mode_name} | {signal_group} | " + ", ".join(parts)
 
 
-def _format_group_label(key: Tuple, group_fields: List[str]) -> str:
+def _calculate_filtered_group_fields(
+    sorted_keys: List[Tuple],
+    group_fields: List[str],
+    threshold: int = 6
+) -> List[str]:
+    """
+    groupby column별로 unique 값 개수를 계산하여 threshold 미만인 field만 반환.
+
+    Args:
+        sorted_keys: groupby 결과 key 리스트
+        group_fields: groupby에 사용된 field 이름 리스트
+        threshold: unique 값 개수 임계값 (이상이면 제외)
+
+    Returns:
+        threshold 미만의 unique 값을 가진 field 리스트
+    """
+    if not sorted_keys or not group_fields:
+        return []
+
+    # ("all",) 특수 케이스 처리
+    if any(key == ("all",) for key in sorted_keys):
+        return []
+
+    filtered = []
+    for i, field in enumerate(group_fields):
+        # 해당 field의 인덱스 i에서 모든 key의 값을 추출하여 unique 개수 계산
+        unique_values = {key[i] for key in sorted_keys if i < len(key)}
+        if len(unique_values) < threshold:
+            filtered.append(field)
+
+    return filtered
+
+
+def _format_group_label(
+    key: Tuple,
+    group_fields: List[str],
+    filtered_group_fields: Optional[List[str]] = None
+) -> Optional[str]:
+    """
+    groupby key를 legend label 문자열로 변환.
+
+    Args:
+        key: groupby 결과 key tuple
+        group_fields: 전체 groupby field 리스트
+        filtered_group_fields: 필터링된 field 리스트 (None이면 전체 사용)
+
+    Returns:
+        legend label 문자열 또는 None (label 없이 plot)
+    """
     if not group_fields or key == ("all",):
         return "all"
+
+    # filtered_group_fields가 제공된 경우
+    if filtered_group_fields is not None:
+        # 빈 리스트 → 모든 column이 6개 이상 → label 없이 plot
+        if not filtered_group_fields:
+            return None
+
+        # filtered_group_fields만 사용하여 label 생성
+        field_to_value = dict(zip(group_fields, key))
+        if len(filtered_group_fields) == 1:
+            return str(field_to_value[filtered_group_fields[0]])
+        return ", ".join(
+            f"{field}={field_to_value[field]}"
+            for field in filtered_group_fields
+            if field in field_to_value
+        )
+
+    # 기존 로직 (backward compatibility)
     if len(group_fields) == 1:
         return str(key[0])
     return ", ".join(f"{field}={value}" for field, value in zip(group_fields, key))
@@ -197,6 +263,7 @@ def _plot_task(task: Dict[str, Any]) -> None:
             common_style=common_style,
             time_start_ms=task["time_start_ms"],
             time_end_ms=task["time_end_ms"],
+            filtered_group_fields=task["filtered_group_fields"],
         )
         return
 
@@ -237,6 +304,7 @@ def _plot_task(task: Dict[str, Any]) -> None:
             common_style=common_style,
             time_start_ms=task["time_start_ms"],
             time_end_ms=task["time_end_ms"],
+            filtered_group_fields=task["filtered_group_fields"],
         )
         return
 
@@ -375,6 +443,7 @@ def _plot_emg_overlay(
     common_style: Dict[str, Any],
     time_start_ms: float,
     time_end_ms: float,
+    filtered_group_fields: List[str],
 ) -> None:
     import matplotlib.pyplot as plt
 
@@ -401,7 +470,7 @@ def _plot_emg_overlay(
             y = aggregated_by_key.get(key, {}).get(ch)
             if y is None:
                 continue
-            group_label = _format_group_label(key, group_fields)
+            group_label = _format_group_label(key, group_fields, filtered_group_fields)
             ax.plot(
                 x,
                 y,
@@ -411,7 +480,7 @@ def _plot_emg_overlay(
             )
 
         for key in sorted_keys:
-            group_label = _format_group_label(key, group_fields)
+            group_label = _format_group_label(key, group_fields, filtered_group_fields)
             marker_info = markers_by_key.get(key, {}).get(ch, {})
             if common_style.get("show_onset_marker", True):
                 onset_time = marker_info.get("onset")
@@ -563,6 +632,7 @@ def _plot_forceplate_overlay(
     common_style: Dict[str, Any],
     time_start_ms: float,
     time_end_ms: float,
+    filtered_group_fields: List[str],
 ) -> None:
     import matplotlib.pyplot as plt
 
@@ -583,7 +653,7 @@ def _plot_forceplate_overlay(
             y = aggregated_by_key.get(key, {}).get(ch)
             if y is None:
                 continue
-            group_label = _format_group_label(key, group_fields)
+            group_label = _format_group_label(key, group_fields, filtered_group_fields)
             ax.plot(
                 x,
                 y,
@@ -600,7 +670,7 @@ def _plot_forceplate_overlay(
                 onset_norm = _ms_to_norm(onset_time, time_start_ms, time_end_ms)
                 if onset_norm is None:
                     continue
-                group_label = _format_group_label(key, group_fields)
+                group_label = _format_group_label(key, group_fields, filtered_group_fields)
                 ax.axvline(onset_norm, **forceplate_style["onset_marker"], label=f"{group_label} onset")
 
         ax.set_title(
@@ -763,6 +833,7 @@ class AggregatedSignalVisualizer:
         self.forceplate_style = self._build_forceplate_style(style_cfg.get("forceplate"))
         self.cop_style = self._build_cop_style(style_cfg.get("cop"))
         self.window_colors = self.cop_style.get("window_colors", {})
+        self.legend_label_threshold = self.common_style.get("legend_label_threshold", 6)
 
         self.features_df: Optional[pl.DataFrame] = self._load_features()
 
@@ -1071,6 +1142,11 @@ class AggregatedSignalVisualizer:
                 markers_by_key[key] = self._collect_markers(signal_group, key, group_fields, mode_cfg.get("filter"))
 
             sorted_keys = _sort_overlay_keys(list(aggregated_by_key.keys()), group_fields)
+            filtered_group_fields = _calculate_filtered_group_fields(
+                sorted_keys,
+                group_fields,
+                threshold=self.legend_label_threshold
+            )
 
             output_dir = Path(self.base_dir, mode_cfg["output_dir"])
             output_dir.mkdir(parents=True, exist_ok=True)
@@ -1096,6 +1172,7 @@ class AggregatedSignalVisualizer:
                         group_fields=group_fields,
                         sorted_keys=sorted_keys,
                         window_spans=window_spans,
+                        filtered_group_fields=filtered_group_fields,
                     )
                 )
             elif signal_group == "forceplate":
@@ -1108,6 +1185,7 @@ class AggregatedSignalVisualizer:
                         group_fields=group_fields,
                         sorted_keys=sorted_keys,
                         window_spans=window_spans,
+                        filtered_group_fields=filtered_group_fields,
                     )
                 )
             return tasks
@@ -1271,6 +1349,7 @@ class AggregatedSignalVisualizer:
         group_fields: List[str],
         sorted_keys: List[Tuple],
         window_spans: List[Dict[str, Any]],
+        filtered_group_fields: List[str],
     ) -> Dict[str, Any]:
         return {
             "kind": "emg_overlay",
@@ -1289,6 +1368,7 @@ class AggregatedSignalVisualizer:
             "common_style": self.common_style,
             "time_start_ms": self.time_start_ms,
             "time_end_ms": self.time_end_ms,
+            "filtered_group_fields": filtered_group_fields,
         }
 
     def _task_forceplate(
@@ -1331,6 +1411,7 @@ class AggregatedSignalVisualizer:
         group_fields: List[str],
         sorted_keys: List[Tuple],
         window_spans: List[Dict[str, Any]],
+        filtered_group_fields: List[str],
     ) -> Dict[str, Any]:
         return {
             "kind": "forceplate_overlay",
@@ -1349,6 +1430,7 @@ class AggregatedSignalVisualizer:
             "common_style": self.common_style,
             "time_start_ms": self.time_start_ms,
             "time_end_ms": self.time_end_ms,
+            "filtered_group_fields": filtered_group_fields,
         }
 
     def _task_cop(
