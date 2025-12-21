@@ -921,7 +921,7 @@ def _plot_cop(
 
     ax_scatter.set_xlabel(cop_style["x_label"], fontsize=common_style["label_fontsize"])
     ax_scatter.set_ylabel(cop_style["y_label"], fontsize=common_style["label_fontsize"])
-    ax_scatter.set_aspect("equal", adjustable="box")
+    ax_scatter.set_aspect("equal", adjustable="datalim")
 
     # Scatter 축에 window 색상 legend를 별도로 제공 (배경/라인 legend와 분리).
     try:
@@ -950,7 +950,6 @@ def _plot_cop(
     fig.tight_layout(rect=common_style["tight_layout_rect"])
     fig.savefig(
         output_path,
-        bbox_inches=common_style["savefig_bbox_inches"],
         facecolor=common_style["savefig_facecolor"],
     )
     plt.close(fig)
@@ -1135,7 +1134,7 @@ def _plot_cop_overlay(
         )
     ax_scatter.set_xlabel(cop_style["x_label"], fontsize=common_style["label_fontsize"])
     ax_scatter.set_ylabel(cop_style["y_label"], fontsize=common_style["label_fontsize"])
-    ax_scatter.set_aspect("equal", adjustable="box")
+    ax_scatter.set_aspect("equal", adjustable="datalim")
 
     overlay_by = ", ".join(group_fields) if group_fields else "all"
     fig.suptitle(
@@ -1146,7 +1145,6 @@ def _plot_cop_overlay(
     fig.tight_layout(rect=common_style["tight_layout_rect"])
     fig.savefig(
         output_path,
-        bbox_inches=common_style["savefig_bbox_inches"],
         facecolor=common_style["savefig_facecolor"],
     )
     plt.close(fig)
