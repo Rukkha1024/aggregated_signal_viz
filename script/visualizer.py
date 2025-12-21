@@ -119,6 +119,30 @@ def _format_title(signal_group: str, mode_name: str, group_fields: List[str], ke
     return f"{mode_name} | {signal_group} | " + ", ".join(parts)
 
 
+def _resolve_cop_channel_names(channels: Sequence[str]) -> Tuple[str, str]:
+    if len(channels) < 2:
+        raise ValueError("COP requires at least 2 channels. Check signal_groups.cop.columns in config.yaml.")
+
+    lower_names = [ch.lower() for ch in channels]
+    cx_idx = next((i for i, name in enumerate(lower_names) if "cx" in name), None)
+    cy_idx = next((i for i, name in enumerate(lower_names) if "cy" in name), None)
+
+    cx_name = channels[cx_idx] if cx_idx is not None else None
+    cy_name = channels[cy_idx] if cy_idx is not None else None
+
+    if cx_name and cy_name:
+        return cx_name, cy_name
+
+    remaining = [ch for ch in channels if ch not in (cx_name, cy_name)]
+    if cx_name is None:
+        cx_name = remaining[0] if remaining else channels[0]
+        remaining = [ch for ch in remaining if ch != cx_name]
+    if cy_name is None:
+        cy_name = remaining[0] if remaining else channels[1]
+
+    return cx_name, cy_name
+
+
 def _calculate_filtered_group_fields(
     sorted_keys: List[Tuple],
     group_fields: List[str],
@@ -238,6 +262,7 @@ def _plot_task(task: Dict[str, Any]) -> None:
             x=np.asarray(task["x"], dtype=float),
             channels=task.get("channels"),
             grid_layout=task.get("grid_layout"),
+            cop_channels=task.get("cop_channels"),
             window_spans=task["window_spans"],
             window_span_alpha=task.get("window_span_alpha"),
             style=task["style"],
@@ -302,6 +327,7 @@ def _plot_task(task: Dict[str, Any]) -> None:
             time_start_ms=task["time_start_ms"],
             time_end_ms=task["time_end_ms"],
             device_rate=float(task["device_rate"]),
+            cop_channels=task["cop_channels"],
             cop_style=task["cop_style"],
             common_style=common_style,
             window_spans=task["window_spans"],
@@ -324,6 +350,7 @@ def _plot_overlay_generic(
     x: np.ndarray,
     channels: Optional[List[str]],
     grid_layout: Optional[List[int]],
+    cop_channels: Optional[Sequence[str]],
     window_spans: List[Dict[str, Any]],
     window_span_alpha: Optional[float],
     style: Dict[str, Any],
@@ -342,6 +369,7 @@ def _plot_overlay_generic(
             sorted_keys=sorted_keys,
             x=x,
             window_spans=window_spans,
+            cop_channels=cop_channels or (),
             cop_style=style,
             common_style=common_style,
             filtered_group_fields=filtered_group_fields,
@@ -810,15 +838,19 @@ def _plot_cop(
     time_start_ms: float,
     time_end_ms: float,
     device_rate: float,
+    cop_channels: Sequence[str],
     cop_style: Dict[str, Any],
     common_style: Dict[str, Any],
     window_spans: List[Dict[str, Any]],
 ) -> None:
     import matplotlib.pyplot as plt
 
-    cx = aggregated.get("Cx")
-    cy = aggregated.get("Cy")
+    cx_name, cy_name = _resolve_cop_channel_names(cop_channels)
+    cx = aggregated.get(cx_name)
+    cy = aggregated.get(cy_name)
     if cx is None or cy is None:
+        available = ", ".join(sorted(aggregated.keys()))
+        print(f"[cop] missing channels: Cx={cx_name!r}, Cy={cy_name!r}. Available: {available}")
         return
 
     x = x_axis
@@ -964,12 +996,15 @@ def _plot_cop_overlay(
     sorted_keys: List[Tuple],
     x: np.ndarray,
     window_spans: List[Dict[str, Any]],
+    cop_channels: Sequence[str],
     cop_style: Dict[str, Any],
     common_style: Dict[str, Any],
     filtered_group_fields: List[str],
     color_by_fields: Optional[List[str]] = None,
 ) -> None:
     import matplotlib.pyplot as plt
+
+    cx_name, cy_name = _resolve_cop_channel_names(cop_channels)
 
     fig, axes = plt.subplots(1, 3, figsize=cop_style["subplot_size"], dpi=common_style["dpi"])
     ax_cx, ax_cy, ax_scatter = axes
@@ -1008,15 +1043,15 @@ def _plot_cop_overlay(
 
     # Time series: Cx / Cy
     for ax, ch, y_label in (
-        (ax_cx, "Cx", cop_style.get("y_label_cx", "Cx")),
-        (ax_cy, "Cy", cop_style.get("y_label_cy", "Cy")),
+        (ax_cx, cx_name, cop_style.get("y_label_cx", "Cx")),
+        (ax_cy, cy_name, cop_style.get("y_label_cy", "Cy")),
     ):
         seen_labels: set[str] = set()
         for key in sorted_keys:
             series = aggregated_by_key.get(key, {}).get(ch)
             if series is None:
                 continue
-            y = (-series) if (ch == "Cy" and cop_style["y_invert"]) else series
+            y = (-series) if (ch == cy_name and cop_style["y_invert"]) else series
             color = key_to_color.get(key, "C0")
             if color_by_fields:
                 field_to_value = dict(zip(group_fields, key))
@@ -1057,8 +1092,8 @@ def _plot_cop_overlay(
         if not mask.any():
             continue
         for key in sorted_keys:
-            cx = aggregated_by_key.get(key, {}).get("Cx")
-            cy = aggregated_by_key.get(key, {}).get("Cy")
+            cx = aggregated_by_key.get(key, {}).get(cx_name)
+            cy = aggregated_by_key.get(key, {}).get(cy_name)
             if cx is None or cy is None:
                 continue
             y_vals = (-cy) if cop_style["y_invert"] else cy
@@ -1701,7 +1736,12 @@ class AggregatedSignalVisualizer:
             return task
 
         if signal_group == "cop":
-            task.update({"style": self.cop_style})
+            task.update(
+                {
+                    "style": self.cop_style,
+                    "cop_channels": self.config["signal_groups"]["cop"]["columns"],
+                }
+            )
             return task
 
         raise ValueError(f"Unknown signal_group for overlay task: {signal_group!r}")
@@ -1790,6 +1830,7 @@ class AggregatedSignalVisualizer:
             "time_start_ms": self.time_start_ms,
             "time_end_ms": self.time_end_ms,
             "device_rate": self.device_rate,
+            "cop_channels": self.config["signal_groups"]["cop"]["columns"],
             "cop_style": self.cop_style,
             "common_style": self.common_style,
             "window_spans": window_spans,
