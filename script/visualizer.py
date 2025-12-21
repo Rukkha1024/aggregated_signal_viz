@@ -937,6 +937,25 @@ def _plot_cop(
                 label="max",
             )
 
+    ax_cx.set_title(
+        cx_name,
+        fontsize=common_style["title_fontsize"],
+        fontweight=common_style["title_fontweight"],
+        pad=common_style["title_pad"],
+    )
+    ax_cy.set_title(
+        cy_name,
+        fontsize=common_style["title_fontsize"],
+        fontweight=common_style["title_fontweight"],
+        pad=common_style["title_pad"],
+    )
+    ax_scatter.set_title(
+        "Cxy",
+        fontsize=common_style["title_fontsize"],
+        fontweight=common_style["title_fontweight"],
+        pad=common_style["title_pad"],
+    )
+
     for ax in (ax_cx, ax_cy, ax_scatter):
         ax.grid(True, alpha=common_style["grid_alpha"])
         ax.tick_params(labelsize=common_style["tick_labelsize"])
@@ -1085,6 +1104,20 @@ def _plot_cop_overlay(
         ax.set_xlabel(cop_style.get("x_label_time", "Normalized time (0-1)"), fontsize=common_style["label_fontsize"])
         ax.set_ylabel(y_label, fontsize=common_style["label_fontsize"])
 
+    # Add titles to Cx and Cy subplots
+    ax_cx.set_title(
+        cx_name,
+        fontsize=common_style["title_fontsize"],
+        fontweight=common_style["title_fontweight"],
+        pad=common_style["title_pad"],
+    )
+    ax_cy.set_title(
+        cy_name,
+        fontsize=common_style["title_fontsize"],
+        fontweight=common_style["title_fontweight"],
+        pad=common_style["title_pad"],
+    )
+
     # Scatter: Cx vs Cy (window color as facecolor, group as marker/edgecolor)
     scatter_edgewidth = float(cop_style.get("overlay_scatter_edgewidth", 0.6))
     for span in window_spans:
@@ -1167,6 +1200,12 @@ def _plot_cop_overlay(
             loc=common_style["legend_loc"],
             framealpha=common_style["legend_framealpha"],
         )
+    ax_scatter.set_title(
+        "Cxy",
+        fontsize=common_style["title_fontsize"],
+        fontweight=common_style["title_fontweight"],
+        pad=common_style["title_pad"],
+    )
     ax_scatter.set_xlabel(cop_style["x_label"], fontsize=common_style["label_fontsize"])
     ax_scatter.set_ylabel(cop_style["y_label"], fontsize=common_style["label_fontsize"])
     ax_scatter.set_aspect("equal", adjustable="datalim")
