@@ -27,9 +27,6 @@ The primary goal is to centralize shared values across multiple scripts. This en
 5.  **Tunable Analysis Parameters:** Specify parameters that researchers might adjust (e.g., filter cutoffs, normalization methods).
 6.  **Shared Texts:** Centralize common log messages or report headers (e.g., `STAGE03_SUMMARY_HEADER`).
 
-### **Exclusion Rule:**
-- **Visualization Settings:** Do not include settings related to the visual appearance of plots (e.g., colors, fonts, line styles).
-
 ---
 ### **Codebase Rule: Configuration Management**
 

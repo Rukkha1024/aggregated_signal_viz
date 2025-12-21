@@ -6,7 +6,7 @@ aggregation_modes:
     output_dir: "output/grand_mean"
     filename_pattern: "grand_mean_{signal_group}.png"
   subject_mean:
-    enabled: false
+    enabled: true
     groupby: ["subject"]
     output_dir: "output/subject_mean"
     filename_pattern: "{subject}_mean_{signal_group}.png"
@@ -14,24 +14,39 @@ aggregation_modes:
 # age_group:young vs. old 
   age_group_mean:
     enabled: true
+    filter:
+      column: "mixed"
+      value: 1
     groupby: ["age_group"]
     output_dir: "output/age_group_mean"
     filename_pattern: "{age_group}_mean_{signal_group}.png"  
   diff_age_group_mean:
     enabled: true
+    filter:
+      column: "mixed"
+      value: 1
     groupby: ["age_group"]
+    color_by: ["age_group"]
     overlay: true
     output_dir: "output/diff"
     filename_pattern: "diff_age_group_{signal_group}.png" 
   diff_age_group_subject_mean:
     enabled: true
+    filter:
+      column: "mixed"
+      value: 1
     groupby: ["age_group","subject"]
+    color_by: ["age_group"]
     overlay: true
     output_dir: "output/diff"
     filename_pattern: "diff_age_group_subject_mean_{signal_group}.png"
   diff_age_group_step_TF_mean: 
     enabled: true
+    filter:
+      column: "mixed"
+      value: 1
     groupby: ["age_group","step_TF"]
+    color_by: ["age_group","step_TF"]
     overlay: true
     output_dir: "output/diff"
     filename_pattern: "diff_age_group_step_TF_mean_{signal_group}.png"
@@ -39,24 +54,39 @@ aggregation_modes:
 # step_TF: step vs. nonstep 
   step_TF_mean:
     enabled: true
+    filter:
+      column: "mixed"
+      value: 1
     groupby: ["step_TF"]
     output_dir: "output/step_TF_mean"
     filename_pattern: "{step_TF}_mean_{signal_group}.png"  
   diff_step_TF_mean:
     enabled: true
+    filter:
+      column: "mixed"
+      value: 1
     groupby: ["step_TF"]
+    color_by: ["step_TF"]
     overlay: true
     output_dir: "output/diff"
     filename_pattern: "diff_step_TF_{signal_group}.png"
   diff_step_TF_subject_mean:
     enabled: true
+    filter:
+      column: "mixed"
+      value: 1
     groupby: ["step_TF","subject"]
+    color_by: ["step_TF"]
     overlay: true
     output_dir: "output/diff"
     filename_pattern: "diff_step_TF_subject_mean_{signal_group}.png"
   diff_step_TF_age_group_mean: 
     enabled: true
+    filter:
+      column: "mixed"
+      value: 1
     groupby: ["step_TF","age_group"]
+    color_by: ["step_TF","age_group"]
     overlay: true
     output_dir: "output/diff"
     filename_pattern: "diff_step_TF_age_group_mean_{signal_group}.png"
