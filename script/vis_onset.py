@@ -27,37 +27,37 @@ class VizConfig:
     hue_column: str = "step_TF"
 
     # Plot Dimensions & Style
-    figure_size: Tuple[int, int] = (12, 10)  # Base size, adjustable per facet count
-    dpi: int = 300
-    font_family: str = "NanumGothic"
+    figure_size: Tuple[int, int] = (12, 10)  # (가로, 세로) 인치. facet 개수/라벨 길이에 따라 조절 권장
+    dpi: int = 300  # 저장 이미지 해상도. 논문/보고서용이면 300 이상 권장
+    font_family: str = "NanumGothic"  # 한글 깨짐 방지용 폰트 패밀리(시스템에 설치되어 있어야 함)
     
     # Colors (Hue Palette)
-    # Using a high-contrast palette. Can be extended.
+    # hue_col 범주별 색상 팔레트(고대비 기본값). 범주 수가 많아지면 리스트를 확장하세요.
     colors: List[str] = field(default_factory=lambda: [
         "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", 
         "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf"
     ])
     
     # Bar & Marker Style
-    marker_fmt: str = "o"
-    marker_size: int = 6
-    cap_size: int = 4
-    bar_width: float = 0.6  # Total width allocated for one muscle tick
-    alpha: float = 0.8
+    marker_fmt: str = "o"  # 평균값 마커 모양(Matplotlib marker fmt)
+    marker_size: int = 6  # 평균값 마커 크기(points)
+    cap_size: int = 4  # 에러바 끝 캡(cap) 크기
+    bar_width: float = 0.6  # 한 muscle tick에 할당되는 전체 폭(여러 hue가 있으면 내부에서 분할)
+    alpha: float = 0.8  # 마커/에러바 투명도(0~1)
     
     # Text Style
-    text_fontsize: int = 8
-    text_offset_x: float = 5.0  # ms offset for text
-    title_fontsize: int = 14
-    label_fontsize: int = 10
-    tick_labelsize: int = 9
+    text_fontsize: int = 8  # bar 옆에 표시되는 값(예: mean±std, n) 텍스트 크기
+    text_offset_x: float = 5.0  # 텍스트를 x축 방향으로 밀어내는 오프셋(데이터 단위; onset timing이면 ms로 해석)
+    title_fontsize: int = 14  # 전체 제목(suptitle) 크기
+    label_fontsize: int = 10  # 축 라벨 크기
+    tick_labelsize: int = 9  # tick 라벨 크기(근육명/범례 등)
     
     # Layout
-    grid_alpha: float = 0.3
-    layout_rect: Tuple[float, float, float, float] = (0, 0, 1, 0.95)
+    grid_alpha: float = 0.3  # 그리드 선 투명도(가독성 조절)
+    layout_rect: Tuple[float, float, float, float] = (0, 0, 1, 0.95)  # tight_layout 적용 영역(left, bottom, right, top)
 
     # Output
-    output_dir: str = "output/onset"
+    output_dir: str = "output/onset"  # 결과 이미지 저장 폴더(상대경로 기준: 프로젝트 루트)
 
 VIZ_CFG = VizConfig()
 
