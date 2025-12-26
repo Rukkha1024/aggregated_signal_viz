@@ -47,3 +47,9 @@ description: Create and refactor figure-generating scripts in aggregated_signal_
 
 - Summary grid template: `templates/summary_grid_template.py`
 - Channel grid template: `templates/channel_grid_template.py`
+- Matplotlib style template (copy into each vis script): `templates/mpl_style_template.py`
+
+## Example PNGs (visual check)
+
+- Summary plot example: `assets/examples/example_onset_summary.png`
+- Channel-grid example: `assets/examples/example_emg_channel_grid.png`
