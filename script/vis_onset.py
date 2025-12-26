@@ -308,15 +308,16 @@ def plot_onset_timing(
         ax.axis("off")
 
     if hue_col:
-        handles, labels = axes_flat[0].get_legend_handles_labels()
-        if handles:
-            fig.legend(
-                handles, labels, 
-                loc="lower center", 
-                bbox_to_anchor=(0.5, 0.01), 
-                ncol=n_hues, 
+        for ax in axes_flat[: len(facets)]:
+            handles, labels = ax.get_legend_handles_labels()
+            if not handles:
+                continue
+            ax.legend(
+                handles,
+                labels,
+                loc="best",
                 frameon=False,
-                fontsize=VIZ_CFG.label_fontsize
+                fontsize=VIZ_CFG.label_fontsize,
             )
 
     plt.tight_layout(rect=VIZ_CFG.layout_rect)

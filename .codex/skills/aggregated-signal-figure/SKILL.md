@@ -18,6 +18,7 @@ description: Create and refactor figure-generating scripts in aggregated_signal_
   - summary-grid layout: `figure_layout.summary_plots.<plot_type>.max_cols`
   - output base dir: `output.base_dir`
 - Do not use `config.yaml: plot_style` in new `vis_*.py` scripts (legacy: only `script/visualizer.py`).
+- Always include a legend inside each subplot (use `ax.legend(...)`, not `fig.legend(...)`).
 
 ## Grid policy (match script/visualizer.py)
 
@@ -25,11 +26,13 @@ description: Create and refactor figure-generating scripts in aggregated_signal_
   - Build `rows, cols = config["signal_groups"][group]["grid_layout"]`.
   - Create `plt.subplots(rows, cols, ...)`, flatten axes, fill per channel order.
   - Hide unused subplots with `ax.axis("off")`.
+  - Include subplot legend (match `script/visualizer.py`).
 - Summary plots (onset/boxplot/etc):
   - Build a panel list (e.g., facet values).
   - Read `max_cols = config["figure_layout"]["summary_plots"][plot_type]["max_cols"]`.
   - Compute `cols = min(max_cols, n_panels)` and `rows = ceil(n_panels / cols)`.
   - Create a grid and hide unused axes (same off-policy).
+  - Include subplot legend for each panel when labels exist.
 
 ## Output policy
 

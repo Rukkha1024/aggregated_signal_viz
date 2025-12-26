@@ -49,6 +49,20 @@ def finalize_axes(ax, style: MplStyle) -> None:
     ax.spines["right"].set_visible(False)
 
 
+def add_subplot_legend(ax, style: MplStyle) -> None:
+    """
+    Always prefer subplot-level legends (ax.legend) over figure-level legends.
+    """
+    handles, labels = ax.get_legend_handles_labels()
+    if not handles:
+        return
+    ax.legend(
+        fontsize=style.legend_fontsize,
+        loc=style.legend_loc,
+        framealpha=style.legend_framealpha,
+    )
+
+
 def save_png(fig, output_path: Path, style: MplStyle) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(
