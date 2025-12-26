@@ -1,6 +1,6 @@
 ---
 name: aggregated-signal-figure
-description: Create and refactor figure-generating scripts in aggregated_signal_viz (script/vis_*.py) using Polars (no pandas). Follow script/visualizer.py grid conventions: channel plots use config.yaml signal_groups.<group>.columns and grid_layout; summary plots use config.yaml figure_layout.summary_plots.<plot_type>.max_cols. Save PNG (300dpi) under Path(output.base_dir)/<plot_type>/ and keep EMG muscle order from config.yaml signal_groups.emg.columns. Triggers on onset plot, boxplot, summary plot, grid plot, aggregated signal figure.
+description: Create and refactor figure-generating scripts in aggregated_signal_viz (script/vis_*.py) using Polars (no pandas). Use config.yaml for channel grid_layout (signal_groups.<group>.grid_layout) and summary max_cols (figure_layout.summary_plots.<plot_type>.max_cols). Save PNG (300dpi) under Path(output.base_dir)/<plot_type>/ and keep EMG muscle order from config.yaml signal_groups.emg.columns. Triggers on onset plot, boxplot, summary plot, grid plot, aggregated signal figure.
 ---
 
 # Aggregated Signal Figure Skill
@@ -17,16 +17,16 @@ description: Create and refactor figure-generating scripts in aggregated_signal_
   - analysis windows: `windows.definitions` (when needed)
   - summary-grid layout: `figure_layout.summary_plots.<plot_type>.max_cols`
   - output base dir: `output.base_dir`
-- Do not use `config.yaml: plot_style` in new `vis_*.py` scripts (legacy: only `script/visualizer.py`).
+- Do not read `config.yaml: plot_style` in new `vis_*.py` scripts (keep style in the script).
 - Always include a legend inside each subplot (use `ax.legend(...)`, not `fig.legend(...)`).
 
-## Grid policy (match script/visualizer.py)
+## Grid policy
 
 - Channel plots (EMG/forceplate):
   - Build `rows, cols = config["signal_groups"][group]["grid_layout"]`.
   - Create `plt.subplots(rows, cols, ...)`, flatten axes, fill per channel order.
   - Hide unused subplots with `ax.axis("off")`.
-  - Include subplot legend (match `script/visualizer.py`).
+  - Include subplot legend in each subplot.
 - Summary plots (onset/boxplot/etc):
   - Build a panel list (e.g., facet values).
   - Read `max_cols = config["figure_layout"]["summary_plots"][plot_type]["max_cols"]`.
@@ -51,6 +51,7 @@ description: Create and refactor figure-generating scripts in aggregated_signal_
 - Summary grid template: `templates/summary_grid_template.py`
 - Channel grid template: `templates/channel_grid_template.py`
 - Matplotlib style template (copy into each vis script): `templates/mpl_style_template.py`
+- Vis script skeleton (copy/modify per plot): `templates/vis_script_skeleton.py`
 
 ## Example PNGs (visual check)
 
