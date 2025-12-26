@@ -61,60 +61,43 @@ class VizConfig:
 
 VIZ_CFG = VizConfig()
 
-# =============================================================================
 # 2. DATA LOADER & PROCESSOR
-# =============================================================================
 
 def load_config(config_path: Path) -> Dict[str, Any]:
     with config_path.open("r", encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 def load_and_merge_data(config: Dict[str, Any], base_dir: Path) -> pl.DataFrame:
-    """
-    Loads 'input_file' (Parquet) and 'features_file' (CSV), then merges them.
-    This ensures we have both the task filtering info and the calculated features.
-    """
-    # 1. Load Parquet (Input File) - Main source for Trial IDs
+    """Load input (parquet) + features (csv) and join by trial keys."""
     input_path_str = config["data"]["input_file"]
     input_path = (base_dir / input_path_str).resolve() if not Path(input_path_str).is_absolute() else Path(input_path_str)
     
     print(f"Loading input file: {input_path}")
     lf_input = pl.scan_parquet(str(input_path))
     
-    # Select only necessary ID columns from input to avoid memory bloat
-    # We assume 'final_dataset.csv' has the metrics, but we use input for filtering context if needed.
     id_cols = list(config["data"]["id_columns"].values())
-    # Ensure distinct trial identification
     key_cols = [config["data"]["id_columns"]["subject"], 
                 config["data"]["id_columns"]["trial"], 
                 config["data"]["id_columns"]["velocity"]]
     
-    # Get unique trials from input file (aggregated by key)
-    # This acts as a filter for valid trials present in the signal data
     df_trials = lf_input.select(key_cols).unique().collect()
 
-    # 2. Load Features (CSV) - Source of 'TKEO_AGLR_emg_onset_timing'
     feature_path_str = config["data"]["features_file"]
     feature_path = (base_dir / feature_path_str).resolve() if not Path(feature_path_str).is_absolute() else Path(feature_path_str)
     
     print(f"Loading features file: {feature_path}")
     df_features = pl.read_csv(str(feature_path))
     
-    # Remove BOM if present
     df_features = df_features.rename({c: c.lstrip("\ufeff") for c in df_features.columns})
 
-    # 3. Merge
-    # We prefer Inner Join to keep only trials that exist in both
-    # Cast key columns to ensure types match (csv often reads as int, parquet as float or int)
+    # Inner join keeps only trials present in both files.
     for col in key_cols:
         if col in df_features.columns and col in df_trials.columns:
-            # simple cast to matching types if needed, usually polars handles this well
             pass
 
     merged = df_trials.join(df_features, on=key_cols, how="inner")
     
     print(f"Merged Data Shape: {merged.shape}")
-    # print(f"Merged Columns: {merged.columns}")
     return merged
 
 def process_stats(
@@ -123,25 +106,17 @@ def process_stats(
     facet_col: Optional[str], 
     hue_col: Optional[str]
 ) -> pl.DataFrame:
-    """
-    Filters data, groups by (Facet, Hue, Muscle), and calculates Mean, STD, Count.
-    Excludes NaNs in the target column.
-    """
+    """Group by (facet, hue, muscle) and compute mean/std/count (+ total_count)."""
     target_col = VIZ_CFG.target_column
     muscle_col = VIZ_CFG.muscle_column_in_feature
     
     print(f"\n[Process Stats] Target Column: {target_col}")
     print(f"[Process Stats] Initial Data Shape: {df.shape}")
 
-    # 1. Filter by configured muscles FIRST
     df_muscle_filtered = df.filter(pl.col(muscle_col).is_in(muscle_order))
     print(f"[Process Stats] Shape after filtering muscles: {df_muscle_filtered.shape}")
 
-    # 2. Filter Valid Data (for valid_count)
-    # Drop rows where target is null/NaN
-    # CRITICAL: polars distinguishes between NULL and NaN
-    # - drop_nulls() only removes SQL NULL values
-    # - We must also filter out float NaN values explicitly
+    # Drop rows where target is NULL/NaN (polars treats them differently).
     df_clean = df_muscle_filtered.filter(
         pl.col(target_col).is_not_null() &
         ~pl.col(target_col).is_nan()
@@ -152,26 +127,22 @@ def process_stats(
         print("[Process Stats] WARNING: Data is empty after filtering!")
         return pl.DataFrame()
 
-    # 2. Grouping
     group_cols = [muscle_col]
     if facet_col and facet_col in df.columns:
         group_cols.append(facet_col)
     if hue_col and hue_col in df.columns:
         group_cols.append(hue_col)
 
-    # 3. Calculate total_count (before NaN filtering)
     totals_df = df_muscle_filtered.group_by(group_cols).agg([
         pl.col(target_col).count().alias("total_count")
     ])
 
-    # 4. Calculate valid stats (after NaN filtering)
     stats = df_clean.group_by(group_cols).agg([
         pl.col(target_col).mean().alias("mean"),
         pl.col(target_col).std().alias("std"),
         pl.col(target_col).count().alias("count")
     ])
 
-    # 5. Merge total_count into stats
     stats = stats.join(totals_df, on=group_cols, how="left")
     stats = stats.with_columns(pl.col("total_count").fill_null(0))
 
@@ -180,9 +151,7 @@ def process_stats(
 
     return stats
 
-# =============================================================================
 # 3. PLOTTING
-# =============================================================================
 
 def plot_onset_timing(
     stats_df: pl.DataFrame,
@@ -191,13 +160,9 @@ def plot_onset_timing(
     hue_col: Optional[str],
     output_filename: str
 ):
-    """
-    Generates the Horizontal Error Bar Plot (Vertical Forest Plot style).
-    """
+    """Generate horizontal error-bar plot and save to output."""
     import matplotlib.pyplot as plt
     
-    # Setup Data Structures
-    # Determine unique facets
     if facet_col and facet_col in stats_df.columns:
         facets = sorted(stats_df[facet_col].unique().to_list())
     else:
@@ -205,7 +170,6 @@ def plot_onset_timing(
         stats_df = stats_df.with_columns(pl.lit("All Data").alias("_facet_dummy"))
         facet_col = "_facet_dummy"
 
-    # Determine unique hues
     if hue_col and hue_col in stats_df.columns:
         hues = sorted(stats_df[hue_col].unique().to_list())
     else:
@@ -214,7 +178,6 @@ def plot_onset_timing(
     n_facets = len(facets)
     n_hues = len(hues)
     
-    # Configure Figure
     fig, axes = plt.subplots(
         1, n_facets, 
         figsize=(VIZ_CFG.figure_size[0] * (n_facets / 2 + 0.5), VIZ_CFG.figure_size[1]), 
@@ -224,31 +187,22 @@ def plot_onset_timing(
     )
     axes = axes.flatten()
     
-    # Font setup
     plt.rcParams["font.family"] = VIZ_CFG.font_family
     plt.rcParams["axes.unicode_minus"] = False
 
-    # Calculate dodging (offset) logic
-    # Total width available per muscle tick = VIZ_CFG.bar_width
-    # Width per hue group
     group_height = VIZ_CFG.bar_width / n_hues
     
-    # Filter muscles that actually exist in the stats (Remove empty rows)
     existing_muscles = set(stats_df[VIZ_CFG.muscle_column_in_feature].unique().to_list())
     valid_muscles = [m for m in muscle_order if m in existing_muscles]
-    # Reverse order for plotting (Top=First in list)
     valid_muscles_reversed = valid_muscles[::-1]
     
     y_indices = np.arange(len(valid_muscles_reversed))
     muscle_to_y = {m: i for i, m in enumerate(valid_muscles_reversed)}
 
-    # --- Plotting Loop ---
     for ax, facet_val in zip(axes, facets):
-        # Filter for current facet
         facet_data = stats_df.filter(pl.col(facet_col) == facet_val)
         
         for hue_idx, hue_val in enumerate(hues):
-            # Filter for current hue
             if hue_col:
                 subset = facet_data.filter(pl.col(hue_col) == hue_val)
                 label = f"{hue_col}: {hue_val}"
@@ -259,33 +213,17 @@ def plot_onset_timing(
             if subset.is_empty():
                 continue
                 
-            # Extract data
             muscles = subset[VIZ_CFG.muscle_column_in_feature].to_list()
             means = subset["mean"].to_numpy()
             stds = subset["std"].to_numpy()
             counts = subset["count"].to_numpy()  # valid count
             total_counts = subset["total_count"].to_numpy()  # total count
             
-            # Calculate Y positions
-            # Center is y_indices. Shift up/down based on hue_idx
-            # Example: 2 hues. idx 0 -> shift +0.15, idx 1 -> shift -0.15
-            # Formula: offset = (hue_idx - (n_hues - 1) / 2) * group_height * -1 (inverted axis logic)
-            # Actually, standard logic: 
-            # Top of group = index + width/2
-            # Bottom of group = index - width/2
-            
-            offset = (hue_idx - (n_hues - 1) / 2) * group_height
-            # Invert offset direction because Y axis 0 is usually bottom, but we correspond list index
-            # Let's stick to standard math: 
-            # if hue_idx is large (last), we want it lower visually if we fill from top? 
-            # Usually: Hue 0 (Top), Hue 1 (Bottom) within the band.
-            # So offset should decrease as hue_idx increases.
-            offset = -1 * offset 
+            offset = -1 * (hue_idx - (n_hues - 1) / 2) * group_height
 
             ys = [muscle_to_y[m] + offset for m in muscles]
             color = VIZ_CFG.colors[hue_idx % len(VIZ_CFG.colors)]
             
-            # Error Bar Plot
             ax.errorbar(
                 means, 
                 ys, 
@@ -298,13 +236,9 @@ def plot_onset_timing(
                 alpha=VIZ_CFG.alpha
             )
             
-            # Add 'valid/total' text
             for idx, (x, y, c, tc) in enumerate(zip(means, ys, counts, total_counts)):
-                # Skip NaN values
                 if np.isnan(x):
                     continue
-                # Place text to the right of the error bar
-                # x + std + offset
                 text_x = x + stds[idx] + VIZ_CFG.text_offset_x
                 ax.text(
                     text_x,
@@ -316,8 +250,6 @@ def plot_onset_timing(
                     color=color
                 )
 
-        # Style the Ax
-        # Dynamic title generation
         title = f"{facet_col}: {facet_val}"
         ax.set_title(title, fontsize=VIZ_CFG.title_fontsize, fontweight="bold")
         ax.set_yticks(y_indices)
@@ -325,12 +257,9 @@ def plot_onset_timing(
         ax.set_xlabel("Onset Timing (ms)", fontsize=VIZ_CFG.label_fontsize)
         ax.grid(True, axis="x", alpha=VIZ_CFG.grid_alpha, linestyle="--")
         
-        # Remove top/right spines
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
 
-    # Global Stuff
-    # Add legend only to the first plot (or outside)
     if hue_col:
         handles, labels = axes[0].get_legend_handles_labels()
         if handles:
@@ -345,7 +274,6 @@ def plot_onset_timing(
 
     plt.tight_layout(rect=VIZ_CFG.layout_rect)
     
-    # Save
     out_dir = Path(VIZ_CFG.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / output_filename
@@ -353,9 +281,7 @@ def plot_onset_timing(
     plt.savefig(out_path, dpi=VIZ_CFG.dpi, bbox_inches="tight", facecolor="white")
     plt.close(fig)
 
-# =============================================================================
 # 4. MAIN EXECUTION
-# =============================================================================
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Visualize Onset Timing (Vertical Forest Plot)")
@@ -378,22 +304,17 @@ def parse_args():
 def main():
     args = parse_args()
     
-    # 1. Load Config & Data
     config_path = Path(args.config)
     config = load_config(config_path)
     base_dir = config_path.parent
     
     df = load_and_merge_data(config, base_dir)
     
-    # 2. Pre-filter (User constraints)
-    # Filter velocity if specified in args or strictly use config logic if needed.
-    # Here we support command line override for flexibility
     if args.velocity is not None:
         if "velocity" in df.columns:
             print(f"Filtering velocity = {args.velocity}")
             df = df.filter(pl.col("velocity") == args.velocity)
     
-    # 3. Get Muscle Order from Config
     try:
         muscle_order = config["signal_groups"]["emg"]["columns"]
         print(f"Using muscle order from config: {muscle_order}")
@@ -402,7 +323,6 @@ def main():
         muscle_order = sorted(df[VIZ_CFG.muscle_column_in_feature].unique().to_list())
         print(f"Using data-driven muscle order: {muscle_order}")
         
-    # 4. Calculate Stats
     stats = process_stats(
         df, 
         muscle_order=muscle_order, 
@@ -417,8 +337,6 @@ def main():
     print("Final Stats for Plotting:")
     print(stats)
 
-    # 5. Generate Plot
-    # Construct filename
     fname_parts = ["onset_viz"]
     if args.facet: fname_parts.append(f"facet-{args.facet}")
     if args.hue: fname_parts.append(f"hue-{args.hue}")
