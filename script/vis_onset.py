@@ -17,11 +17,15 @@ import yaml
 @dataclass
 class VizConfig:
     """Configuration for visualization style and parameters."""
-    
+
     # File & Column Settings
     target_column: str = "TKEO_AGLR_emg_onset_timing"
     muscle_column_in_feature: str = "emg_channel"  # Column name in CSV holding 'TA', 'SOL' etc.
-    
+
+    # Facet & Hue Configuration (Default values)
+    facet_column: str = "step_TF"
+    hue_column: str = "age_group"
+
     # Plot Dimensions & Style
     figure_size: Tuple[int, int] = (12, 10)  # Base size, adjustable per facet count
     dpi: int = 300
@@ -238,7 +242,7 @@ def plot_onset_timing(
             # Filter for current hue
             if hue_col:
                 subset = facet_data.filter(pl.col(hue_col) == hue_val)
-                label = f"{hue_col}={hue_val}"
+                label = f"{hue_col}: {hue_val}"
             else:
                 subset = facet_data
                 label = None
@@ -303,7 +307,9 @@ def plot_onset_timing(
                 )
 
         # Style the Ax
-        ax.set_title(str(facet_val), fontsize=VIZ_CFG.title_fontsize, fontweight="bold")
+        # Dynamic title generation
+        title = f"{facet_col}: {facet_val}"
+        ax.set_title(title, fontsize=VIZ_CFG.title_fontsize, fontweight="bold")
         ax.set_yticks(y_indices)
         ax.set_yticklabels(valid_muscles_reversed, fontsize=VIZ_CFG.tick_labelsize)
         ax.set_xlabel("Onset Timing (ms)", fontsize=VIZ_CFG.label_fontsize)
@@ -344,8 +350,18 @@ def plot_onset_timing(
 def parse_args():
     parser = argparse.ArgumentParser(description="Visualize Onset Timing (Vertical Forest Plot)")
     parser.add_argument("--config", type=str, default="config.yaml", help="Path to config.yaml")
-    parser.add_argument("--facet", type=str, default="step_TF", help="Column for Faceting (Subplots)")
-    parser.add_argument("--hue", type=str, default="age_group", help="Column for Hue (Colors)")
+    parser.add_argument(
+        "--facet",
+        type=str,
+        default=VIZ_CFG.facet_column,
+        help=f"Column for Faceting (Subplots). Default: {VIZ_CFG.facet_column}"
+    )
+    parser.add_argument(
+        "--hue",
+        type=str,
+        default=VIZ_CFG.hue_column,
+        help=f"Column for Hue (Colors). Default: {VIZ_CFG.hue_column}"
+    )
     parser.add_argument("--velocity", type=float, default=None, help="Filter by velocity (optional)")
     return parser.parse_args()
 
