@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass, field
+from math import ceil
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -57,7 +58,8 @@ class VizConfig:
     layout_rect: Tuple[float, float, float, float] = (0, 0, 1, 0.95)  # tight_layout 적용 영역(left, bottom, right, top)
 
     # Output
-    output_dir: str = "output/onset"  # 결과 이미지 저장 폴더(상대경로 기준: 프로젝트 루트)
+    # NOTE: output base dir comes from config.yaml (output.base_dir).
+    output_dir: str = "onset"  # plot-type subfolder under output.base_dir (e.g., output/onset)
 
 VIZ_CFG = VizConfig()
 
@@ -153,12 +155,44 @@ def process_stats(
 
 # 3. PLOTTING
 
+def resolve_summary_grid_layout(
+    config: Dict[str, Any],
+    plot_type: str,
+    n_panels: int,
+) -> Tuple[int, int]:
+    """
+    Summary-plot grid policy (config-driven):
+      - figure_layout.summary_plots.<plot_type>.max_cols controls columns upper bound
+      - rows is derived from n_panels and cols
+    """
+    if n_panels <= 0:
+        return 1, 1
+
+    max_cols_raw = (
+        config.get("figure_layout", {})
+        .get("summary_plots", {})
+        .get(plot_type, {})
+        .get("max_cols")
+    )
+    try:
+        max_cols = int(max_cols_raw) if max_cols_raw is not None else n_panels
+    except (TypeError, ValueError):
+        max_cols = n_panels
+    max_cols = max(1, max_cols)
+
+    cols = min(max_cols, n_panels)
+    rows = int(ceil(n_panels / cols))
+    return rows, cols
+
+
 def plot_onset_timing(
     stats_df: pl.DataFrame,
     muscle_order: List[str],
     facet_col: Optional[str],
     hue_col: Optional[str],
-    output_filename: str
+    output_dir: Path,
+    output_filename: str,
+    config: Dict[str, Any],
 ):
     """Generate horizontal error-bar plot and save to output."""
     import matplotlib.pyplot as plt
@@ -177,15 +211,25 @@ def plot_onset_timing(
     
     n_facets = len(facets)
     n_hues = len(hues)
+
+    grid_rows, grid_cols = resolve_summary_grid_layout(
+        config=config,
+        plot_type=VIZ_CFG.output_dir,
+        n_panels=n_facets,
+    )
     
     fig, axes = plt.subplots(
-        1, n_facets, 
-        figsize=(VIZ_CFG.figure_size[0] * (n_facets / 2 + 0.5), VIZ_CFG.figure_size[1]), 
+        grid_rows,
+        grid_cols,
+        figsize=(
+            VIZ_CFG.figure_size[0] * (grid_cols / 2 + 0.5),
+            VIZ_CFG.figure_size[1] * grid_rows,
+        ),
         dpi=VIZ_CFG.dpi, 
         sharey=True,
         squeeze=False
     )
-    axes = axes.flatten()
+    axes_flat = axes.flatten()
     
     plt.rcParams["font.family"] = VIZ_CFG.font_family
     plt.rcParams["axes.unicode_minus"] = False
@@ -199,7 +243,7 @@ def plot_onset_timing(
     y_indices = np.arange(len(valid_muscles_reversed))
     muscle_to_y = {m: i for i, m in enumerate(valid_muscles_reversed)}
 
-    for ax, facet_val in zip(axes, facets):
+    for ax, facet_val in zip(axes_flat, facets):
         facet_data = stats_df.filter(pl.col(facet_col) == facet_val)
         
         for hue_idx, hue_val in enumerate(hues):
@@ -260,8 +304,11 @@ def plot_onset_timing(
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
 
+    for ax in axes_flat[len(facets):]:
+        ax.axis("off")
+
     if hue_col:
-        handles, labels = axes[0].get_legend_handles_labels()
+        handles, labels = axes_flat[0].get_legend_handles_labels()
         if handles:
             fig.legend(
                 handles, labels, 
@@ -273,10 +320,9 @@ def plot_onset_timing(
             )
 
     plt.tight_layout(rect=VIZ_CFG.layout_rect)
-    
-    out_dir = Path(VIZ_CFG.output_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / output_filename
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    out_path = output_dir / output_filename
     print(f"Saving plot to: {out_path}")
     plt.savefig(out_path, dpi=VIZ_CFG.dpi, bbox_inches="tight", facecolor="white")
     plt.close(fig)
@@ -341,13 +387,20 @@ def main():
     if args.facet: fname_parts.append(f"facet-{args.facet}")
     if args.hue: fname_parts.append(f"hue-{args.hue}")
     filename = "_".join(fname_parts) + ".png"
+
+    output_base_dir = Path(config.get("output", {}).get("base_dir", "output"))
+    if not output_base_dir.is_absolute():
+        output_base_dir = (base_dir / output_base_dir).resolve()
+    output_dir = output_base_dir / VIZ_CFG.output_dir
     
     plot_onset_timing(
         stats_df=stats,
         muscle_order=muscle_order,
         facet_col=args.facet,
         hue_col=args.hue,
-        output_filename=filename
+        output_dir=output_dir,
+        output_filename=filename,
+        config=config,
     )
 
 if __name__ == "__main__":

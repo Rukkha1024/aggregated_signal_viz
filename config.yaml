@@ -245,6 +245,12 @@ windows:
       start_ms: 600
       end_ms: 800
 
+# === Figure Layout ===
+figure_layout:
+  summary_plots:
+    onset:
+      max_cols: 99
+
 # === Output Settings ===
 output:
   base_dir: "output"
