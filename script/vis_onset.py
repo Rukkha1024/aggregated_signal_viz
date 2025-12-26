@@ -23,8 +23,8 @@ class VizConfig:
     muscle_column_in_feature: str = "emg_channel"  # Column name in CSV holding 'TA', 'SOL' etc.
 
     # Facet & Hue Configuration (Default values)
-    facet_column: str = "step_TF"
-    hue_column: str = "age_group"
+    facet_column: str = "age_group"
+    hue_column: str = "step_TF"
 
     # Plot Dimensions & Style
     figure_size: Tuple[int, int] = (12, 10)  # Base size, adjustable per facet count
@@ -133,20 +133,20 @@ def process_stats(
     print(f"\n[Process Stats] Target Column: {target_col}")
     print(f"[Process Stats] Initial Data Shape: {df.shape}")
 
-    # 1. Filter Valid Data
+    # 1. Filter by configured muscles FIRST
+    df_muscle_filtered = df.filter(pl.col(muscle_col).is_in(muscle_order))
+    print(f"[Process Stats] Shape after filtering muscles: {df_muscle_filtered.shape}")
+
+    # 2. Filter Valid Data (for valid_count)
     # Drop rows where target is null/NaN
     # CRITICAL: polars distinguishes between NULL and NaN
     # - drop_nulls() only removes SQL NULL values
     # - We must also filter out float NaN values explicitly
-    df_clean = df.filter(
-        pl.col(target_col).is_not_null() & 
+    df_clean = df_muscle_filtered.filter(
+        pl.col(target_col).is_not_null() &
         ~pl.col(target_col).is_nan()
     )
     print(f"[Process Stats] Shape after filtering nulls/NaNs('{target_col}'): {df_clean.shape}")
-    
-    # Filter only configured muscles
-    df_clean = df_clean.filter(pl.col(muscle_col).is_in(muscle_order))
-    print(f"[Process Stats] Shape after filtering muscles: {df_clean.shape}")
 
     if df_clean.is_empty():
         print("[Process Stats] WARNING: Data is empty after filtering!")
@@ -158,17 +158,26 @@ def process_stats(
         group_cols.append(facet_col)
     if hue_col and hue_col in df.columns:
         group_cols.append(hue_col)
-    
-    # 3. Aggregation
+
+    # 3. Calculate total_count (before NaN filtering)
+    totals_df = df_muscle_filtered.group_by(group_cols).agg([
+        pl.col(target_col).count().alias("total_count")
+    ])
+
+    # 4. Calculate valid stats (after NaN filtering)
     stats = df_clean.group_by(group_cols).agg([
         pl.col(target_col).mean().alias("mean"),
         pl.col(target_col).std().alias("std"),
         pl.col(target_col).count().alias("count")
     ])
-    
+
+    # 5. Merge total_count into stats
+    stats = stats.join(totals_df, on=group_cols, how="left")
+    stats = stats.with_columns(pl.col("total_count").fill_null(0))
+
     print("\n[Process Stats] Calculated Stats Summary:")
     print(stats)
-    
+
     return stats
 
 # =============================================================================
@@ -254,7 +263,8 @@ def plot_onset_timing(
             muscles = subset[VIZ_CFG.muscle_column_in_feature].to_list()
             means = subset["mean"].to_numpy()
             stds = subset["std"].to_numpy()
-            counts = subset["count"].to_numpy()
+            counts = subset["count"].to_numpy()  # valid count
+            total_counts = subset["total_count"].to_numpy()  # total count
             
             # Calculate Y positions
             # Center is y_indices. Shift up/down based on hue_idx
@@ -288,8 +298,8 @@ def plot_onset_timing(
                 alpha=VIZ_CFG.alpha
             )
             
-            # Add 'n=XX' text
-            for idx, (x, y, c) in enumerate(zip(means, ys, counts)):
+            # Add 'valid/total' text
+            for idx, (x, y, c, tc) in enumerate(zip(means, ys, counts, total_counts)):
                 # Skip NaN values
                 if np.isnan(x):
                     continue
@@ -297,12 +307,12 @@ def plot_onset_timing(
                 # x + std + offset
                 text_x = x + stds[idx] + VIZ_CFG.text_offset_x
                 ax.text(
-                    text_x, 
-                    y, 
-                    f"n={c}", 
-                    va="center", 
-                    ha="left", 
-                    fontsize=VIZ_CFG.text_fontsize, 
+                    text_x,
+                    y,
+                    f"{int(c)}/{int(tc)}",
+                    va="center",
+                    ha="left",
+                    fontsize=VIZ_CFG.text_fontsize,
                     color=color
                 )
 
