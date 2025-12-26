@@ -6,7 +6,7 @@ aggregation_modes:
     output_dir: "output/grand_mean"
     filename_pattern: "grand_mean_{signal_group}.png"
   subject_mean:
-    enabled: true
+    enabled: false
     groupby: ["subject"]
     output_dir: "output/subject_mean"
     filename_pattern: "{subject}_mean_{signal_group}.png"

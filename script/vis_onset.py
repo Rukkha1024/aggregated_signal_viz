@@ -110,6 +110,7 @@ def load_and_merge_data(config: Dict[str, Any], base_dir: Path) -> pl.DataFrame:
     merged = df_trials.join(df_features, on=key_cols, how="inner")
     
     print(f"Merged Data Shape: {merged.shape}")
+    # print(f"Merged Columns: {merged.columns}")
     return merged
 
 def process_stats(
@@ -125,12 +126,27 @@ def process_stats(
     target_col = VIZ_CFG.target_column
     muscle_col = VIZ_CFG.muscle_column_in_feature
     
+    print(f"\n[Process Stats] Target Column: {target_col}")
+    print(f"[Process Stats] Initial Data Shape: {df.shape}")
+
     # 1. Filter Valid Data
     # Drop rows where target is null/NaN
-    df_clean = df.filter(pl.col(target_col).is_not_null())
+    # CRITICAL: polars distinguishes between NULL and NaN
+    # - drop_nulls() only removes SQL NULL values
+    # - We must also filter out float NaN values explicitly
+    df_clean = df.filter(
+        pl.col(target_col).is_not_null() & 
+        ~pl.col(target_col).is_nan()
+    )
+    print(f"[Process Stats] Shape after filtering nulls/NaNs('{target_col}'): {df_clean.shape}")
     
     # Filter only configured muscles
     df_clean = df_clean.filter(pl.col(muscle_col).is_in(muscle_order))
+    print(f"[Process Stats] Shape after filtering muscles: {df_clean.shape}")
+
+    if df_clean.is_empty():
+        print("[Process Stats] WARNING: Data is empty after filtering!")
+        return pl.DataFrame()
 
     # 2. Grouping
     group_cols = [muscle_col]
@@ -145,6 +161,9 @@ def process_stats(
         pl.col(target_col).std().alias("std"),
         pl.col(target_col).count().alias("count")
     ])
+    
+    print("\n[Process Stats] Calculated Stats Summary:")
+    print(stats)
     
     return stats
 
@@ -351,9 +370,11 @@ def main():
     # 3. Get Muscle Order from Config
     try:
         muscle_order = config["signal_groups"]["emg"]["columns"]
+        print(f"Using muscle order from config: {muscle_order}")
     except KeyError:
         print("Warning: EMG columns not found in config. Using data-driven muscle list.")
         muscle_order = sorted(df[VIZ_CFG.muscle_column_in_feature].unique().to_list())
+        print(f"Using data-driven muscle order: {muscle_order}")
         
     # 4. Calculate Stats
     stats = process_stats(
@@ -366,6 +387,9 @@ def main():
     if stats.is_empty():
         print("No data available after filtering. Exiting.")
         return
+
+    print("Final Stats for Plotting:")
+    print(stats)
 
     # 5. Generate Plot
     # Construct filename
