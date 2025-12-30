@@ -1336,7 +1336,8 @@ class AggregatedSignalVisualizer:
                 needed.append(col)
             filter_cfg = mode_cfg.get("filter")
             if filter_cfg and isinstance(filter_cfg, dict):
-                needed.append(filter_cfg.get("column"))
+                for col_name in filter_cfg.keys():
+                    needed.append(col_name)
         out: List[str] = []
         for col in needed:
             if not col or col in out:
