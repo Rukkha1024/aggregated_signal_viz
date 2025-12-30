@@ -1700,12 +1700,27 @@ class AggregatedSignalVisualizer:
         idx = np.arange(meta_df.height, dtype=int)
         if not filter_cfg:
             return idx
-        col = filter_cfg.get("column")
-        value = filter_cfg.get("value")
-        if col is None or col not in meta_df.columns:
-            return idx if value is None else np.array([], dtype=int)
-        series = meta_df[col].to_numpy()
-        mask = series == value
+
+        # 기존 방식: {column: "mixed", value: 1} (하위 호환성 유지)
+        if "column" in filter_cfg and "value" in filter_cfg:
+            col = filter_cfg.get("column")
+            value = filter_cfg.get("value")
+            if col is None or col not in meta_df.columns:
+                return idx if value is None else np.array([], dtype=int)
+            series = meta_df[col].to_numpy()
+            mask = series == value
+            return idx[mask]
+
+        # 새로운 방식: {mixed: 1, age_group: "young"} - 다중 컬럼 필터링
+        # 모든 조건을 AND로 결합
+        mask = np.ones(meta_df.height, dtype=bool)
+        for col, value in filter_cfg.items():
+            if col not in meta_df.columns:
+                print(f"[filter] Warning: column '{col}' not found in metadata, skipping this filter")
+                continue
+            series = meta_df[col].to_numpy()
+            mask &= (series == value)
+
         return idx[mask]
 
     def _group_indices(
