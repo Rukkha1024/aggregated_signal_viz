@@ -1556,47 +1556,97 @@ class AggregatedSignalVisualizer:
         tasks: List[Dict[str, Any]] = []
 
         if overlay:
+            overlay_within = mode_cfg.get("overlay_within")
+
+            # Aggregate all keys first (common for both old and new logic)
             aggregated_by_key: Dict[Tuple, Dict[str, np.ndarray]] = {}
             markers_by_key: Dict[Tuple, Dict[str, Any]] = {}
             for key, idx in grouped.items():
                 aggregated_by_key[key] = self._aggregate_tensor(tensor, meta_df, idx, channels)
                 markers_by_key[key] = self._collect_markers(signal_group, key, group_fields, mode_cfg.get("filter"))
 
-            sorted_keys = _sort_overlay_keys(list(aggregated_by_key.keys()), group_fields)
-            filtered_group_fields = _calculate_filtered_group_fields(
-                sorted_keys,
-                group_fields,
-                threshold=self.legend_label_threshold
-            )
-
             output_dir = Path(self.base_dir, mode_cfg["output_dir"])
             output_dir.mkdir(parents=True, exist_ok=True)
             filename_pattern = mode_cfg["filename_pattern"]
-            try:
-                filename = self._render_filename(filename_pattern, ("all",), signal_group, group_fields=[])
-            except KeyError as e:
-                print(
-                    f"[overlay] filename_pattern missing key {e!s}; filling group fields with 'overlay' for mode '{mode_name}'"
-                )
-                mapping = {field: "overlay" for field in group_fields}
-                mapping["signal_group"] = signal_group
-                filename = filename_pattern.format(**mapping)
-            output_path = output_dir / filename
 
-            tasks.append(
-                self._task_overlay(
-                    signal_group=signal_group,
-                    aggregated_by_key=aggregated_by_key,
-                    markers_by_key=markers_by_key,
-                    output_path=output_path,
-                    mode_name=mode_name,
-                    group_fields=group_fields,
-                    sorted_keys=sorted_keys,
-                    window_spans=window_spans,
-                    filtered_group_fields=filtered_group_fields,
-                    color_by_fields=mode_cfg.get("color_by") if signal_group in ("emg", "cop") else None,
+            # OLD BEHAVIOR: overlay_within not specified -> all keys in one file
+            if not overlay_within:
+                sorted_keys = _sort_overlay_keys(list(aggregated_by_key.keys()), group_fields)
+                filtered_group_fields = _calculate_filtered_group_fields(
+                    sorted_keys,
+                    group_fields,
+                    threshold=self.legend_label_threshold
                 )
-            )
+
+                try:
+                    filename = self._render_filename(filename_pattern, ("all",), signal_group, group_fields=[])
+                except KeyError as e:
+                    print(
+                        f"[overlay] filename_pattern missing key {e!s}; filling group fields with 'overlay' for mode '{mode_name}'"
+                    )
+                    mapping = {field: "overlay" for field in group_fields}
+                    mapping["signal_group"] = signal_group
+                    filename = filename_pattern.format(**mapping)
+                output_path = output_dir / filename
+
+                tasks.append(
+                    self._task_overlay(
+                        signal_group=signal_group,
+                        aggregated_by_key=aggregated_by_key,
+                        markers_by_key=markers_by_key,
+                        output_path=output_path,
+                        mode_name=mode_name,
+                        group_fields=group_fields,
+                        sorted_keys=sorted_keys,
+                        window_spans=window_spans,
+                        filtered_group_fields=filtered_group_fields,
+                        color_by_fields=mode_cfg.get("color_by") if signal_group in ("emg", "cop") else None,
+                    )
+                )
+                return tasks
+
+            # NEW BEHAVIOR: overlay_within specified -> separate files by non-overlay fields
+            from collections import defaultdict
+
+            file_fields = [f for f in group_fields if f not in overlay_within]
+
+            # Group keys by file_fields
+            file_groups: Dict[Tuple, List[Tuple]] = defaultdict(list)
+            for key in aggregated_by_key.keys():
+                field_to_value = dict(zip(group_fields, key))
+                file_key = tuple(field_to_value[f] for f in file_fields) if file_fields else ("all",)
+                file_groups[file_key].append(key)
+
+            # Create one task per file_key
+            for file_key, keys_in_file in file_groups.items():
+                file_aggregated = {k: aggregated_by_key[k] for k in keys_in_file}
+                file_markers = {k: markers_by_key[k] for k in keys_in_file}
+
+                sorted_keys = _sort_overlay_keys(keys_in_file, group_fields)
+                filtered_group_fields = _calculate_filtered_group_fields(
+                    sorted_keys,
+                    group_fields,
+                    threshold=self.legend_label_threshold
+                )
+
+                filename = self._render_filename(filename_pattern, file_key, signal_group, file_fields)
+                output_path = output_dir / filename
+
+                tasks.append(
+                    self._task_overlay(
+                        signal_group=signal_group,
+                        aggregated_by_key=file_aggregated,
+                        markers_by_key=file_markers,
+                        output_path=output_path,
+                        mode_name=mode_name,
+                        group_fields=group_fields,
+                        sorted_keys=sorted_keys,
+                        window_spans=window_spans,
+                        filtered_group_fields=filtered_group_fields,
+                        color_by_fields=mode_cfg.get("color_by") if signal_group in ("emg", "cop") else None,
+                    )
+                )
+
             return tasks
 
         for key, idx in grouped.items():
