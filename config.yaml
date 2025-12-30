@@ -38,18 +38,14 @@ interpolation:
 
 # === Aggregation Modes ===
 # Filter 옵션 설명:
-#   - 기존 방식 (단일 컬럼): filter: { column: "mixed", value: 1 }
-#   - 새로운 방식 (다중 컬럼): filter: { mixed: 1, age_group: "young" }
-#   - 다중 필터는 모두 AND 조건으로 결합됩니다
+#   - 딕셔너리 형식: filter: { mixed: 1, age_group: "young" }
+#   - 단일 컬럼: filter: { mixed: 1 }
+#   - 다중 컬럼: 모든 조건을 AND로 결합
 aggregation_modes:
   diff_subject_step_TF_mean:
     enabled: true
     filter:
-      column: "mixed"
-      value: 1
-      # 다중 컬럼 필터링 예시 (위의 column/value 방식 대신 사용 가능):
-      # mixed: 1
-      # age_group: "young"
+      mixed: 1
     groupby: ["subject","step_TF"]
     overlay: true
     overlay_within: ["step_TF"]  # NEW: overlay only step_TF, separate files by subject
@@ -59,11 +55,7 @@ aggregation_modes:
   diff_step_TF_mean:
     enabled: true
     filter:
-      column: "mixed"
-      value: 1
-      # 다중 컬럼 필터링 예시 (위의 column/value 방식 대신 사용 가능):
-      # mixed: 1
-      # age_group: "young"
+      mixed: 1
     groupby: ["step_TF"]
     overlay: true
     overlay_within: ["step_TF"]
