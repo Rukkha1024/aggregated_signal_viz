@@ -2091,13 +2091,26 @@ class AggregatedSignalVisualizer:
             return {}
         df = self.features_df
         if filter_cfg:
-            col = filter_cfg["column"]
-            val = filter_cfg["value"]
-            if col in df.columns:
-                if val is None:
-                    print(f"[markers] skip filter: column '{col}' has None value; skipping marker collection")
-                    return {}
-                df = df.filter(pl.col(col) == val)
+            # 기존 방식: {column: "mixed", value: 1} (하위 호환성 유지)
+            if "column" in filter_cfg and "value" in filter_cfg:
+                col = filter_cfg.get("column")
+                val = filter_cfg.get("value")
+                if col in df.columns:
+                    if val is None:
+                        print(f"[markers] skip filter: column '{col}' has None value; skipping marker collection")
+                        return {}
+                    df = df.filter(pl.col(col) == val)
+            else:
+                # 새로운 방식: {mixed: 1, age_group: "young"} - 다중 컬럼 필터링
+                # 모든 조건을 AND로 결합
+                for col, val in filter_cfg.items():
+                    if col not in df.columns:
+                        print(f"[markers] Warning: column '{col}' not found in features dataframe, skipping this filter")
+                        continue
+                    if val is None:
+                        print(f"[markers] skip filter: column '{col}' has None value; skipping marker collection")
+                        return {}
+                    df = df.filter(pl.col(col) == val)
         for field, value in zip(group_fields, key):
             if field in df.columns:
                 if value is None:
