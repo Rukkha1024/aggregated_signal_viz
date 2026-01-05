@@ -46,16 +46,18 @@ aggregation_modes:
     enabled: true
     filter:
       mixed: 1
+      age_group: "young"
     groupby: ["subject","step_TF"]
     overlay: true
     overlay_within: ["step_TF"]  # NEW: overlay only step_TF, separate files by subject
     color_by: ["step_TF"]
-    output_dir: "output/diff"
+    output_dir: "output/diff_subject"
     filename_pattern: "diff_{subject}_step_TF_mean_{signal_group}.png"
   diff_step_TF_mean:
     enabled: true
     filter:
       mixed: 1
+      age_group: "young"
     groupby: ["step_TF"]
     overlay: true
     overlay_within: ["step_TF"]
