@@ -181,3 +181,27 @@ figure_layout:
 # === Output Settings ===
 output:
   base_dir: "output"
+
+# === CoP Crossing-based EMG Analysis ===
+# NOTE: This analysis computes CoP(step vs nonstep) crossings from merged.parquet directly
+# and defines EMG windows based on those crossings (no precomputed feature reuse).
+cop_crossing_emg_analysis:
+  enabled: true
+  filter:
+    mixed: 1
+    age_group: "young"
+  cop_columns: ["Cx_zero", "Cy_zero"]
+  # If null, fallback to interpolation.start_ms / interpolation.end_ms
+  time_window_ms:
+    start_ms: null
+    end_ms: null
+  crossing:
+    # Moving-average smoothing (ms) applied to CoP diff curve for stable crossing detection.
+    smoothing_ms: 11
+    diff_epsilon: 0.0
+    min_segment_ms: 10
+    primary_crossing_policy: "first_after_onset"
+  crossing_window_ms: 50
+  metrics: ["mean", "iemg", "peak"]
+  output_subdir: "cop_crossing_emg"
+  report_path: "report/cop_crossing_emg_report.md"
