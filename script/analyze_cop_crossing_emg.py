@@ -41,6 +41,75 @@ def _bh_fdr(pvals: np.ndarray) -> np.ndarray:
     return out
 
 
+def _cluster_robust_binary_diff_test(
+    y: np.ndarray,
+    x: np.ndarray,
+    groups: np.ndarray,
+) -> Optional[Dict[str, float]]:
+    """
+    Cluster-robust inference for y ~ 1 + x, where x is binary (0=step, 1=nonstep).
+
+    Returns regression coefficient for x (mean_nonstep - mean_step) and cluster-robust t/p.
+    """
+    y = np.asarray(y, dtype=float)
+    x = np.asarray(x, dtype=float)
+    if y.shape != x.shape:
+        raise ValueError("y and x must have the same shape")
+    mask = ~np.isnan(y) & ~np.isnan(x)
+    if mask.sum() < 3:
+        return None
+    y = y[mask]
+    x = x[mask]
+    g = np.asarray(groups, dtype=object)[mask]
+
+    # Require both groups
+    if not ((x == 0).any() and (x == 1).any()):
+        return None
+
+    # Design matrix: [1, x]
+    X = np.column_stack([np.ones_like(x), x])
+    n = int(X.shape[0])
+    k = int(X.shape[1])
+    if n <= k:
+        return None
+
+    try:
+        XtX_inv = np.linalg.inv(X.T @ X)
+    except np.linalg.LinAlgError:
+        return None
+
+    beta = XtX_inv @ (X.T @ y)
+    resid = y - X @ beta
+
+    uniq = np.unique(g)
+    G = int(uniq.size)
+    if G < 3:
+        return None
+
+    meat = np.zeros((k, k), dtype=float)
+    for gv in uniq.tolist():
+        idx = g == gv
+        if idx.sum() == 0:
+            continue
+        Xg = X[idx]
+        ug = resid[idx]
+        sg = Xg.T @ ug  # (k,)
+        meat += np.outer(sg, sg)
+
+    cov = XtX_inv @ meat @ XtX_inv
+    # Small-sample correction (like statsmodels' default)
+    correction = (G / (G - 1.0)) * ((n - 1.0) / (n - k))
+    cov *= correction
+
+    se = float(np.sqrt(cov[1, 1])) if cov[1, 1] >= 0 else float("nan")
+    if se == 0.0 or math.isnan(se):
+        return None
+
+    t_stat = float(beta[1] / se)
+    p = float(2.0 * stats.t.sf(abs(t_stat), df=G - 1))
+    return {"coef": float(beta[1]), "se": se, "t": t_stat, "p": p, "n": float(n), "n_clusters": float(G)}
+
+
 def _moving_average_nan(y: np.ndarray, window: int) -> np.ndarray:
     if window <= 1:
         return y.astype(float, copy=False)
@@ -332,6 +401,7 @@ def _plot_effect_heatmap(
     *,
     axis: str,
     metric: str,
+    lag_ms: int,
     muscles: Sequence[str],
 ) -> Optional[Path]:
     try:
@@ -343,16 +413,16 @@ def _plot_effect_heatmap(
         return None
 
     phases = ["A_nonstep_gt_step", "A_step_gt_nonstep", "B_pre_cross", "B_post_cross"]
-    sub = stats_df.filter((pl.col("axis") == axis) & (pl.col("metric") == metric))
+    sub = stats_df.filter((pl.col("axis") == axis) & (pl.col("metric") == metric) & (pl.col("lag_ms") == lag_ms))
     if sub.is_empty():
         return None
 
-    # Build dz matrix (phase x muscle)
+    # Build d matrix (phase x muscle)
     mat = np.full((len(phases), len(muscles)), np.nan, dtype=float)
     qmat = np.full((len(phases), len(muscles)), np.nan, dtype=float)
     lookup = {
-        (r["phase"], r["muscle"]): (r["dz"], r["q"])
-        for r in sub.select(["phase", "muscle", "dz", "q"]).iter_rows(named=True)
+        (r["phase"], r["muscle"]): (r["d"], r["q"])
+        for r in sub.select(["phase", "muscle", "d", "q"]).iter_rows(named=True)
     }
     for i, ph in enumerate(phases):
         for j, m in enumerate(muscles):
@@ -366,7 +436,7 @@ def _plot_effect_heatmap(
     vmax = np.nanmax(np.abs(mat)) if np.isfinite(mat).any() else 1.0
     vmax = max(0.5, float(vmax))
     im = ax.imshow(mat, aspect="auto", cmap="coolwarm", vmin=-vmax, vmax=vmax)
-    ax.set_title(f"EMG Effect Size (dz) | {axis} | {metric}", fontsize=12, fontweight="bold")
+    ax.set_title(f"EMG Effect Size (d) | {axis} | {metric} | lag={lag_ms}ms", fontsize=12, fontweight="bold")
     ax.set_yticks(range(len(phases)))
     ax.set_yticklabels(phases, fontsize=8)
     ax.set_xticks(range(len(muscles)))
@@ -380,90 +450,136 @@ def _plot_effect_heatmap(
                 ax.text(j, i, "•", ha="center", va="center", color="black", fontsize=10)
 
     cbar = fig.colorbar(im, ax=ax, fraction=0.02, pad=0.02)
-    cbar.set_label("dz (nonstep - step)", rotation=90)
+    cbar.set_label("d (nonstep - step)", rotation=90)
     ax.set_xlabel("EMG muscle/channel")
     ax.set_ylabel("Phase")
     fig.tight_layout()
-    out_path = out_dir / f"effect_heatmap_{axis}_{metric}.png"
+    out_path = out_dir / f"effect_heatmap_{axis}_{metric}_lag{lag_ms}.png"
     fig.savefig(out_path, bbox_inches="tight", facecolor="white")
     plt.close(fig)
     return out_path
 
 
-def _compute_stats(
-    paired_df: pl.DataFrame,
+def _compute_trial_unit_stats(
+    trial_df: pl.DataFrame,
     *,
     axes: Sequence[str],
     phases: Sequence[str],
+    lags: Sequence[int],
     metrics: Sequence[str],
     muscles: Sequence[str],
+    subject_col: str,
+    velocity_col: str,
+    step_col: str,
 ) -> pl.DataFrame:
     rows: List[Dict[str, Any]] = []
 
     for axis in axes:
-        for phase in phases:
-            sub = paired_df.filter((pl.col("axis") == axis) & (pl.col("phase") == phase))
-            n_pairs = int(sub.height)
-            if n_pairs < 3:
-                continue
-            for metric in metrics:
-                pvals: List[float] = []
-                row_idxs: List[int] = []
-                for muscle in muscles:
-                    col = f"{metric}_{muscle}"
-                    col_step = f"{col}_step"
-                    if col not in sub.columns or col_step not in sub.columns:
-                        continue
+        for lag in lags:
+            for phase in phases:
+                sub = trial_df.filter(
+                    (pl.col("axis") == axis) & (pl.col("lag_ms") == int(lag)) & (pl.col("phase") == phase)
+                )
+                if sub.is_empty():
+                    continue
 
-                    non_vals = sub[col].to_numpy()
-                    step_vals = sub[col_step].to_numpy()
-                    diff = non_vals - step_vals
-                    diff = diff[~np.isnan(diff)]
-                    if diff.size < 3:
-                        continue
+                # Keep only step/nonstep and build cluster id at subject-velocity level.
+                sub = sub.filter(pl.col(step_col).is_in(["step", "nonstep"]))
+                if sub.is_empty():
+                    continue
+                sv_key = (
+                    sub.select(
+                        pl.concat_str(
+                            [pl.col(subject_col), pl.col(velocity_col).round(6).cast(pl.Utf8)],
+                            separator="|",
+                        ).alias("__sv")
+                    )["__sv"]
+                    .to_numpy()
+                )
+                step_vals = sub[step_col].to_numpy()
+                x = np.where(step_vals == "nonstep", 1.0, np.where(step_vals == "step", 0.0, np.nan))
 
-                    t, p = stats.ttest_1samp(diff, popmean=0.0, nan_policy="omit")
-                    mean_diff = float(np.nanmean(diff))
-                    sd_diff = float(np.nanstd(diff, ddof=1)) if diff.size > 1 else float("nan")
-                    dz = mean_diff / sd_diff if sd_diff and not math.isnan(sd_diff) else float("nan")
+                for metric in metrics:
+                    pvals: List[float] = []
+                    row_idxs: List[int] = []
+                    for muscle in muscles:
+                        col = f"{metric}_{muscle}"
+                        if col not in sub.columns:
+                            continue
+                        y = sub[col].to_numpy()
+                        ok = ~np.isnan(y) & ~np.isnan(x)
+                        if ok.sum() < 3:
+                            continue
 
-                    rows.append(
-                        {
-                            "axis": axis,
-                            "phase": phase,
-                            "metric": metric,
-                            "muscle": muscle,
-                            "n_pairs": int(n_pairs),
-                            "mean_nonstep": float(np.nanmean(non_vals)),
-                            "mean_step": float(np.nanmean(step_vals)),
-                            "mean_diff": mean_diff,
-                            "t": float(t),
-                            "p": float(p),
-                            "dz": float(dz),
-                        }
-                    )
-                    pvals.append(float(p))
-                    row_idxs.append(len(rows) - 1)
+                        y_ok = y[ok]
+                        x_ok = x[ok]
+                        g_ok = sv_key[ok]
 
-                # FDR per (axis, phase, metric)
-                if pvals:
-                    qvals = _bh_fdr(np.asarray(pvals, dtype=float))
-                    for idx, q in zip(row_idxs, qvals):
-                        rows[idx]["q"] = float(q)
+                        # Basic group stats
+                        y_step = y_ok[x_ok == 0]
+                        y_non = y_ok[x_ok == 1]
+                        if y_step.size < 2 or y_non.size < 2:
+                            continue
+                        mean_step = float(np.nanmean(y_step))
+                        mean_non = float(np.nanmean(y_non))
+                        mean_diff = mean_non - mean_step
+
+                        # Cohen's d (pooled SD)
+                        sd_step = float(np.nanstd(y_step, ddof=1)) if y_step.size > 1 else float("nan")
+                        sd_non = float(np.nanstd(y_non, ddof=1)) if y_non.size > 1 else float("nan")
+                        denom = ((y_step.size - 1) * (sd_step**2) + (y_non.size - 1) * (sd_non**2))
+                        pooled = math.sqrt(denom / (y_step.size + y_non.size - 2)) if denom >= 0 else float("nan")
+                        d = float(mean_diff / pooled) if pooled and not math.isnan(pooled) else float("nan")
+
+                        test = _cluster_robust_binary_diff_test(y_ok, x_ok, g_ok)
+                        if test is None:
+                            continue
+
+                        rows.append(
+                            {
+                                "axis": axis,
+                                "lag_ms": int(lag),
+                                "phase": phase,
+                                "metric": metric,
+                                "muscle": muscle,
+                                "n_trials_total": int(y_ok.size),
+                                "n_trials_step": int(y_step.size),
+                                "n_trials_nonstep": int(y_non.size),
+                                "n_clusters": int(test["n_clusters"]),
+                                "mean_nonstep": mean_non,
+                                "mean_step": mean_step,
+                                "mean_diff": float(test["coef"]),
+                                "d": d,
+                                "t": float(test["t"]),
+                                "p": float(test["p"]),
+                            }
+                        )
+                        pvals.append(float(test["p"]))
+                        row_idxs.append(len(rows) - 1)
+
+                    # FDR per (axis, lag, phase, metric)
+                    if pvals:
+                        qvals = _bh_fdr(np.asarray(pvals, dtype=float))
+                        for idx, q in zip(row_idxs, qvals):
+                            rows[idx]["q"] = float(q)
 
     out = pl.DataFrame(rows) if rows else pl.DataFrame(
         schema={
             "axis": pl.Utf8,
+            "lag_ms": pl.Int64,
             "phase": pl.Utf8,
             "metric": pl.Utf8,
             "muscle": pl.Utf8,
-            "n_pairs": pl.Int64,
+            "n_trials_total": pl.Int64,
+            "n_trials_step": pl.Int64,
+            "n_trials_nonstep": pl.Int64,
+            "n_clusters": pl.Int64,
             "mean_nonstep": pl.Float64,
             "mean_step": pl.Float64,
             "mean_diff": pl.Float64,
+            "d": pl.Float64,
             "t": pl.Float64,
             "p": pl.Float64,
-            "dz": pl.Float64,
             "q": pl.Float64,
         }
     )
@@ -472,7 +588,7 @@ def _compute_stats(
     # Ensure q exists for all rows (fill with null if missing)
     if "q" not in out.columns:
         out = out.with_columns(pl.lit(None, dtype=pl.Float64).alias("q"))
-    return out.sort(["axis", "metric", "phase", "q", "muscle"])
+    return out.sort(["axis", "metric", "lag_ms", "phase", "q", "muscle"])
 
 
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
@@ -535,6 +651,16 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     primary_policy = str(crossing_cfg.get("primary_crossing_policy", "first_after_onset"))
     crossing_window_ms = int(analysis_cfg.get("crossing_window_ms", 50))
 
+    lag_cfg = analysis_cfg.get("emg_lag_scan_ms", {}) or {}
+    lag_start = int(lag_cfg.get("start_ms", 0))
+    lag_end = int(lag_cfg.get("end_ms", 0))
+    lag_step = int(lag_cfg.get("step_ms", 1))
+    if lag_step <= 0:
+        raise ValueError("cop_crossing_emg_analysis.emg_lag_scan_ms.step_ms must be > 0")
+    if lag_end < lag_start:
+        raise ValueError("cop_crossing_emg_analysis.emg_lag_scan_ms.end_ms must be >= start_ms")
+    lags = list(range(lag_start, lag_end + 1, lag_step))
+
     metrics = list(analysis_cfg.get("metrics") or ["mean", "iemg", "peak"])
     allowed_metrics = {"mean", "iemg", "peak"}
     unknown = [m for m in metrics if m not in allowed_metrics]
@@ -583,18 +709,31 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     if missing_needed:
         raise ValueError(f"Missing required columns in input parquet: {missing_needed}")
 
+    # EMG can lag behind CoP; phase time t uses EMG at (t + lag). To avoid truncation at the
+    # analysis window boundary, load EMG up to (end_ms + max_lag) and from (start_ms + min_lag).
+    lag_min = int(min(lags)) if lags else 0
+    lag_max = int(max(lags)) if lags else 0
+    load_start_ms = start_ms + float(lag_min)
+    load_end_ms = end_ms + float(lag_max)
+
     lf_base = (
         lf.with_columns([aligned_frame, time_ms])
-        .filter((pl.col("time_ms") >= int(math.floor(start_ms))) & (pl.col("time_ms") <= int(math.ceil(end_ms))))
+        .filter(
+            (pl.col("time_ms") >= int(math.floor(load_start_ms)))
+            & (pl.col("time_ms") <= int(math.ceil(load_end_ms)))
+        )
         .select([pl.col(c) for c in needed_cols if c in available or c == "time_ms"])
     )
+    base_df = lf_base.collect()
 
     # Build mean CoP curves per subject-velocity-step_TF-time_ms
+    cop_base_df = base_df.filter(
+        (pl.col("time_ms") >= int(math.floor(start_ms))) & (pl.col("time_ms") <= int(math.ceil(end_ms)))
+    )
     cop_mean_exprs = [pl.mean(c).alias(c) for c in cop_cols]
     cop_mean = (
-        lf_base.group_by([subject_col, velocity_col, step_col, "time_ms"])
+        cop_base_df.group_by([subject_col, velocity_col, step_col, "time_ms"])
         .agg(cop_mean_exprs)
-        .collect()
         .sort([subject_col, velocity_col, step_col, "time_ms"])
     )
 
@@ -638,12 +777,11 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             (pl.col("time_ms") >= int(math.floor(start_ms))) & (pl.col("time_ms") <= int(math.ceil(end_ms)))
         )
 
-    # Join phases onto base rows
-    lf_labeled = lf_base.join(
-        phase_table.lazy(),
-        on=[subject_col, velocity_col, "time_ms"],
-        how="inner",
-    )
+    phases = ["A_nonstep_gt_step", "A_step_gt_nonstep", "B_pre_cross", "B_post_cross"]
+    axes = cop_cols
+
+    # Prepare phase table for lagged join: phase_time t uses EMG at (t + lag)
+    phase_join = phase_table.rename({"time_ms": "phase_time_ms"}) if not phase_table.is_empty() else phase_table
 
     # Per-trial metrics per axis/phase
     metric_exprs: List[pl.Expr] = [pl.len().alias("n_samples")]
@@ -655,35 +793,57 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         if "peak" in metrics:
             metric_exprs.append(pl.max(m).alias(f"peak_{m}"))
 
-    trial_metrics = (
-        lf_labeled.group_by(["axis", "phase", subject_col, velocity_col, trial_col, step_col])
-        .agg(metric_exprs)
-        .collect()
-        .sort(["axis", "phase", subject_col, velocity_col, trial_col, step_col])
-    )
+    # Compute trial-level metrics for each lag (min unit: subject-velocity-trial)
+    trial_metrics_list: List[pl.DataFrame] = []
+    if phase_join.is_empty():
+        trial_metrics = pl.DataFrame()
+    else:
+        for lag in lags:
+            labeled = (
+                base_df.with_columns(
+                    [
+                        (pl.col("time_ms") - int(lag)).alias("phase_time_ms"),
+                        pl.lit(int(lag)).alias("lag_ms"),
+                    ]
+                )
+                .join(phase_join, on=[subject_col, velocity_col, "phase_time_ms"], how="inner")
+                .drop("phase_time_ms")
+            )
+            tm = (
+                labeled.group_by(["lag_ms", "axis", "phase", subject_col, velocity_col, trial_col, step_col])
+                .agg(metric_exprs)
+                .sort(["lag_ms", "axis", "phase", subject_col, velocity_col, trial_col, step_col])
+            )
+            trial_metrics_list.append(tm)
+        trial_metrics = pl.concat(trial_metrics_list, how="vertical") if trial_metrics_list else pl.DataFrame()
 
-    # Subject-velocity aggregation (minimum comparison unit)
-    metric_cols = [c for c in trial_metrics.columns if c.startswith(("mean_", "iemg_", "peak_"))]
-    sv_metrics = (
-        trial_metrics.group_by(["axis", "phase", subject_col, velocity_col, step_col])
-        .agg([pl.mean(c).alias(c) for c in metric_cols] + [pl.len().alias("n_trials")])
-        .sort(["axis", "phase", subject_col, velocity_col, step_col])
-    )
-
-    non = sv_metrics.filter(pl.col(step_col) == "nonstep").drop(step_col)
-    step = sv_metrics.filter(pl.col(step_col) == "step").drop(step_col)
-    paired = non.join(step, on=["axis", "phase", subject_col, velocity_col], how="inner", suffix="_step")
-
-    # Stats across subject-velocity pairs
-    phases = ["A_nonstep_gt_step", "A_step_gt_nonstep", "B_pre_cross", "B_post_cross"]
-    axes = cop_cols
-    stats_df = _compute_stats(
-        paired,
+    stats_df = _compute_trial_unit_stats(
+        trial_metrics,
         axes=axes,
         phases=phases,
+        lags=lags,
         metrics=metrics,
         muscles=muscles,
+        subject_col=subject_col,
+        velocity_col=velocity_col,
+        step_col=step_col,
     )
+
+    # Lag summary (counts of significant muscles) for quick inspection
+    if stats_df.is_empty():
+        lag_summary = pl.DataFrame()
+    else:
+        lag_summary = (
+            stats_df.with_columns((pl.col("q").is_not_null() & (pl.col("q") <= 0.05)).alias("__sig"))
+            .group_by(["axis", "metric", "phase", "lag_ms"])
+            .agg(
+                [
+                    pl.len().alias("n_muscles_tested"),
+                    pl.col("__sig").sum().cast(pl.Int64).alias("n_sig"),
+                ]
+            )
+            .sort(["axis", "metric", "phase", "lag_ms"])
+        )
 
     # Save outputs
     now = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
@@ -701,33 +861,54 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             "primary_crossing_policy": primary_policy,
             "crossing_window_ms": crossing_window_ms,
         },
+        "emg_lag_scan_ms": {"start_ms": lag_start, "end_ms": lag_end, "step_ms": lag_step},
         "metrics": metrics,
         "n_trials_total": int(
-            lf_base.select(pl.struct([subject_col, velocity_col, trial_col]).n_unique()).collect().item()
+            base_df.select(pl.struct([subject_col, velocity_col, trial_col]).n_unique()).item()
         ),
-        "n_subject_velocity_pairs": int(paired.select(pl.struct([subject_col, velocity_col]).n_unique()).item()),
+        "n_subject_velocity_pairs": int(base_df.select(pl.struct([subject_col, velocity_col]).n_unique()).item()),
     }
 
     (out_dir / "run_metadata.json").write_text(json.dumps(run_meta, ensure_ascii=False, indent=2), encoding="utf-8")
     crossing_summary.write_csv(out_dir / "crossing_summary.csv")
     trial_metrics.write_parquet(out_dir / "trial_metrics.parquet")
-    sv_metrics.write_parquet(out_dir / "sv_metrics.parquet")
     stats_df.write_csv(out_dir / "emg_stats.csv")
+    if not lag_summary.is_empty():
+        lag_summary.write_csv(out_dir / "lag_summary.csv")
 
     if not args.no_plots:
         for axis in axes:
             _plot_crossing_hist(out_dir, crossing_summary, axis=axis)
+        # Plot heatmaps at the "best" lag for B-phases (max sig muscles; tie -> smaller lag)
         for axis in axes:
             for metric in metrics:
-                _plot_effect_heatmap(out_dir, stats_df, axis=axis, metric=metric, muscles=muscles)
+                sub = stats_df.filter(
+                    (pl.col("axis") == axis)
+                    & (pl.col("metric") == metric)
+                    & (pl.col("phase").is_in(["B_pre_cross", "B_post_cross"]))
+                    & pl.col("q").is_not_null()
+                )
+                if sub.is_empty():
+                    best_lag = lags[0] if lags else 0
+                else:
+                    by_lag = (
+                        sub.with_columns((pl.col("q") <= 0.05).alias("__sig"))
+                        .group_by("lag_ms")
+                        .agg(pl.col("__sig").sum().cast(pl.Int64).alias("n_sig"))
+                        .sort(["n_sig", "lag_ms"], descending=[True, False])
+                    )
+                    best_lag = int(by_lag["lag_ms"][0]) if by_lag.height else (lags[0] if lags else 0)
+                _plot_effect_heatmap(out_dir, stats_df, axis=axis, metric=metric, lag_ms=best_lag, muscles=muscles)
 
     # Minimal console summary
     print(f"[done] outputs saved under: {out_dir}")
     if not stats_df.is_empty():
-        sig = stats_df.filter(pl.col("q").is_not_null() & (pl.col("q") <= 0.05)).sort(["q", "axis", "phase", "metric"])
+        sig = stats_df.filter(pl.col("q").is_not_null() & (pl.col("q") <= 0.05)).sort(
+            ["q", "axis", "lag_ms", "phase", "metric"]
+        )
         print(f"[stats] significant tests (q<=0.05): {sig.height}")
         if sig.height:
-            print(sig.select(["axis", "phase", "metric", "muscle", "mean_diff", "dz", "q"]).head(30))
+            print(sig.select(["axis", "lag_ms", "phase", "metric", "muscle", "mean_diff", "d", "q"]).head(30))
     else:
         print("[stats] no statistics computed (insufficient pairs or missing data)")
 

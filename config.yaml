@@ -202,6 +202,12 @@ cop_crossing_emg_analysis:
     min_segment_ms: 10
     primary_crossing_policy: "first_after_onset"
   crossing_window_ms: 50
+  # EMG may lag behind CoP changes. We scan a common lag (ms) applied to EMG windows:
+  # phase time t uses EMG at (t + lag).
+  emg_lag_scan_ms:
+    start_ms: 0
+    end_ms: 150
+    step_ms: 10
   metrics: ["mean", "iemg", "peak"]
   output_subdir: "cop_crossing_emg"
   report_path: "report/cop_crossing_emg_report.md"
