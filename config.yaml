@@ -112,6 +112,13 @@ plot_style:
       Fx: "purple"                     # 전후방향 힘 (보라)
       Fy: "brown"                      # 좌우방향 힘 (갈색)
       Fz: "green"                      # 수직 힘 (초록)
+    axis_labels:
+      Fx: "AP Force (Ant: + / Post: -)"
+      Fy: "ML Force (Left: + / Right: -)"
+      Fz: "Vertical Force (Up: + / Down: -)"
+      Mx: "Mx (Left Up: + / Right Up: -)"
+      My: "My (Ant Down: + / Post Down: -)"
+      Mz: "Mz (CCW: + / CW: -)"
     line_width: 1.2                    # 라인 두께
     line_alpha: 0.8                    # 라인 투명도
     window_span_alpha: 0.15            # 윈도우 배경 투명도
@@ -120,7 +127,7 @@ plot_style:
     onset_marker_linewidth: 1.5        # onset 마커 두께
     legend_fontsize: 5                 # legend 폰트 크기 (채널 수가 적어서 크게)
     x_label: "Normalized time (0-1)"   # X축 라벨
-    y_label: "{channel} Value"         # Y축 라벨 (예: "Fx Value", "Fy Value")
+    y_label: "{axis_label}"            # Y축 라벨 (축 방향 설명)
 
   # COP (Center of Pressure) 신호 전용 설정
   cop:
@@ -149,11 +156,11 @@ plot_style:
     max_marker_zorder: 10              # 최댓값 마커 겹침순서 (값 클수록 위에)
     legend_fontsize: 5                 # legend 폰트 크기
     x_label_time: "Normalized time (0-1)"
-    y_label_cx: "Cx (R+/L-)"
-    y_label_cy: "Cy (A+)"
-    x_label: "Cx (R+/L-)"              # X축 라벨 (오른쪽 양수, 왼쪽 음수)
-    y_label: "Cy (A+)"                 # Y축 라벨 (앞쪽 양수)
-    y_invert: true                     # Y축 반전 여부 (true면 위쪽이 음수)
+    y_label_cx: "COP AP (Ant: + / Post: -)"
+    y_label_cy: "COP ML (Left: + / Right: -)"
+    x_label: "COP AP (Ant: + / Post: -)"
+    y_label: "COP ML (Left: + / Right: -)"
+    y_invert: false                    # Y축 반전 여부 (true면 위쪽이 음수)
 
 # === Window Definitions (relative to platform_onset in ms) ===
 windows:

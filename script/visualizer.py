@@ -112,6 +112,15 @@ def _format_label(template: Any, **kwargs: Any) -> str:
         return template
 
 
+def _resolve_forceplate_axis_label(channel: str, axis_labels: Dict[str, str]) -> str:
+    if not axis_labels:
+        return channel
+    if channel in axis_labels:
+        return axis_labels[channel]
+    base = channel[:-5] if channel.endswith("_zero") else channel
+    return axis_labels.get(base, channel)
+
+
 def _format_title(signal_group: str, mode_name: str, group_fields: List[str], key: Tuple) -> str:
     if key == ("all",):
         return f"{mode_name} | {signal_group}"
@@ -718,7 +727,8 @@ def _plot_overlay_timeseries_grid(
                 framealpha=common_style["legend_framealpha"],
             )
             ax.set_xlabel(style["x_label"], fontsize=common_style["label_fontsize"])
-            y_label = _format_label(style.get("y_label", "{channel} Value"), channel=ch)
+            axis_label = _resolve_forceplate_axis_label(ch, style.get("axis_labels", {}))
+            y_label = _format_label(style.get("y_label", "{channel} Value"), channel=ch, axis_label=axis_label)
             ax.set_ylabel(y_label, fontsize=common_style["label_fontsize"])
 
         overlay_by = ", ".join(group_fields) if group_fields else "all"
@@ -808,7 +818,12 @@ def _plot_forceplate(
             framealpha=common_style["legend_framealpha"],
         )
         ax.set_xlabel(forceplate_style["x_label"], fontsize=common_style["label_fontsize"])
-        y_label = _format_label(forceplate_style.get("y_label", "{channel} Value"), channel=ch)
+        axis_label = _resolve_forceplate_axis_label(ch, forceplate_style.get("axis_labels", {}))
+        y_label = _format_label(
+            forceplate_style.get("y_label", "{channel} Value"),
+            channel=ch,
+            axis_label=axis_label,
+        )
         ax.set_ylabel(y_label, fontsize=common_style["label_fontsize"])
 
     fig.suptitle(
@@ -2018,6 +2033,7 @@ class AggregatedSignalVisualizer:
         return {
             "subplot_size": tuple(cfg["subplot_size"]),
             "line_colors": cfg["line_colors"],
+            "axis_labels": dict(cfg.get("axis_labels", {})),
             "line_width": cfg["line_width"],
             "line_alpha": cfg["line_alpha"],
             "window_span_alpha": cfg["window_span_alpha"],
