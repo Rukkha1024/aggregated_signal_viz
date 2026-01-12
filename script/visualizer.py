@@ -152,6 +152,30 @@ def _resolve_cop_channel_names(channels: Sequence[str]) -> Tuple[str, str]:
     return cx_name, cy_name
 
 
+def _resolve_com_channel_names(channels: Sequence[str]) -> Tuple[str, str]:
+    if len(channels) < 2:
+        raise ValueError("COM requires at least 2 channels. Check signal_groups.com.columns in config.yaml.")
+
+    lower_names = [ch.lower() for ch in channels]
+    x_idx = next((i for i, name in enumerate(lower_names) if "comx" in name), None)
+    y_idx = next((i for i, name in enumerate(lower_names) if "comy" in name), None)
+
+    x_name = channels[x_idx] if x_idx is not None else None
+    y_name = channels[y_idx] if y_idx is not None else None
+
+    if x_name and y_name:
+        return x_name, y_name
+
+    remaining = [ch for ch in channels if ch not in (x_name, y_name)]
+    if x_name is None:
+        x_name = remaining[0] if remaining else channels[0]
+        remaining = [ch for ch in remaining if ch != x_name]
+    if y_name is None:
+        y_name = remaining[0] if remaining else channels[1]
+
+    return x_name, y_name
+
+
 def _calculate_filtered_group_fields(
     sorted_keys: List[Tuple],
     group_fields: List[str],
@@ -343,6 +367,25 @@ def _plot_task(task: Dict[str, Any]) -> None:
         )
         return
 
+    if kind == "com":
+        _plot_com(
+            aggregated=task["aggregated"],
+            output_path=output_path,
+            key=tuple(task["key"]),
+            mode_name=task["mode_name"],
+            group_fields=task["group_fields"],
+            markers=task["markers"],
+            x_axis=np.asarray(task["x_axis"], dtype=float) if task["x_axis"] is not None else None,
+            time_start_ms=task["time_start_ms"],
+            time_end_ms=task["time_end_ms"],
+            device_rate=float(task["device_rate"]),
+            com_channels=task["com_channels"],
+            com_style=task["com_style"],
+            common_style=common_style,
+            window_spans=task["window_spans"],
+        )
+        return
+
     plt.close("all")
     raise ValueError(f"Unknown plot task kind: {kind!r}")
 
@@ -380,6 +423,23 @@ def _plot_overlay_generic(
             window_spans=window_spans,
             cop_channels=cop_channels or (),
             cop_style=style,
+            common_style=common_style,
+            filtered_group_fields=filtered_group_fields,
+            color_by_fields=color_by_fields,
+        )
+        return
+
+    if signal_group == "com":
+        _plot_com_overlay(
+            aggregated_by_key=aggregated_by_key,
+            output_path=output_path,
+            mode_name=mode_name,
+            group_fields=group_fields,
+            sorted_keys=sorted_keys,
+            x=x,
+            window_spans=window_spans,
+            com_channels=cop_channels or (),
+            com_style=style,
             common_style=common_style,
             filtered_group_fields=filtered_group_fields,
             color_by_fields=color_by_fields,
@@ -1021,6 +1081,168 @@ def _plot_cop(
     plt.close(fig)
 
 
+def _plot_com(
+    *,
+    aggregated: Dict[str, np.ndarray],
+    output_path: Path,
+    key: Tuple,
+    mode_name: str,
+    group_fields: List[str],
+    markers: Dict[str, Dict[str, float]],
+    x_axis: Optional[np.ndarray],
+    time_start_ms: float,
+    time_end_ms: float,
+    device_rate: float,
+    com_channels: Sequence[str],
+    com_style: Dict[str, Any],
+    common_style: Dict[str, Any],
+    window_spans: List[Dict[str, Any]],
+) -> None:
+    import matplotlib.pyplot as plt
+
+    comx_name, comy_name = _resolve_com_channel_names(com_channels)
+    comx = aggregated.get(comx_name)
+    comy = aggregated.get(comy_name)
+    if comx is None or comy is None:
+        available = ", ".join(sorted(aggregated.keys()))
+        print(f"[com] missing channels: COMx={comx_name!r}, COMy={comy_name!r}. Available: {available}")
+        return
+
+    x = x_axis
+    if x is None:
+        x = np.linspace(0.0, 1.0, num=comx.size, dtype=float)
+
+    x_vals = comx
+    y_vals = -comy if com_style.get("y_invert", False) else comy
+
+    fig, axes = plt.subplots(1, 3, figsize=com_style["subplot_size"], dpi=common_style["dpi"])
+    ax_x, ax_y, ax_scatter = axes
+
+    window_span_alpha = float(com_style.get("window_span_alpha", 0.15))
+    for ax in (ax_x, ax_y):
+        for span in window_spans:
+            ax.axvspan(
+                span["start"],
+                span["end"],
+                color=span["color"],
+                alpha=window_span_alpha,
+                label="_nolegend_",
+            )
+
+    x_color = com_style.get("line_colors", {}).get(comx_name, "blue")
+    y_color = com_style.get("line_colors", {}).get(comy_name, "red")
+
+    ax_x.plot(
+        x,
+        comx,
+        color=x_color,
+        linewidth=com_style.get("line_width", 0.8),
+        alpha=com_style.get("line_alpha", 0.8),
+        label=comx_name,
+    )
+    ax_y.plot(
+        x,
+        y_vals,
+        color=y_color,
+        linewidth=com_style.get("line_width", 0.8),
+        alpha=com_style.get("line_alpha", 0.8),
+        label=comy_name,
+    )
+
+    ax_scatter.scatter(
+        x_vals,
+        y_vals,
+        color=com_style["background_color"],
+        alpha=com_style["background_alpha"],
+        s=com_style["background_size"],
+    )
+
+    if x_axis is not None:
+        for span in window_spans:
+            mask = (x_axis >= span["start"]) & (x_axis <= span["end"])
+            if mask.any():
+                ax_scatter.scatter(
+                    x_vals[mask],
+                    y_vals[mask],
+                    s=com_style["scatter_size"],
+                    alpha=com_style["scatter_alpha"],
+                    color=span["color"],
+                    label=span["label"],
+                )
+
+    if common_style.get("show_max_marker", True):
+        max_time = markers.get("max")
+        if max_time is not None and _is_within_time_axis(max_time, time_start_ms, time_end_ms):
+            pass
+
+    ax_x.set_title(
+        comx_name,
+        fontsize=common_style["title_fontsize"],
+        fontweight=common_style["title_fontweight"],
+        pad=common_style["title_pad"],
+    )
+    ax_y.set_title(
+        comy_name,
+        fontsize=common_style["title_fontsize"],
+        fontweight=common_style["title_fontweight"],
+        pad=common_style["title_pad"],
+    )
+    ax_scatter.set_title(
+        "COMxy",
+        fontsize=common_style["title_fontsize"],
+        fontweight=common_style["title_fontweight"],
+        pad=common_style["title_pad"],
+    )
+
+    for ax in (ax_x, ax_y, ax_scatter):
+        ax.grid(True, alpha=common_style["grid_alpha"])
+        ax.tick_params(labelsize=common_style["tick_labelsize"])
+        ax.legend(
+            fontsize=com_style["legend_fontsize"],
+            loc=common_style["legend_loc"],
+            framealpha=common_style["legend_framealpha"],
+        )
+
+    ax_x.set_xlabel(com_style.get("x_label_time", "Normalized time (0-1)"), fontsize=common_style["label_fontsize"])
+    ax_x.set_ylabel(com_style.get("y_label_comx", comx_name), fontsize=common_style["label_fontsize"])
+    ax_y.set_xlabel(com_style.get("x_label_time", "Normalized time (0-1)"), fontsize=common_style["label_fontsize"])
+    ax_y.set_ylabel(com_style.get("y_label_comy", comy_name), fontsize=common_style["label_fontsize"])
+
+    ax_scatter.set_xlabel(com_style.get("x_label", comx_name), fontsize=common_style["label_fontsize"])
+    ax_scatter.set_ylabel(com_style.get("y_label", comy_name), fontsize=common_style["label_fontsize"])
+    ax_scatter.set_aspect("equal", adjustable="datalim")
+
+    try:
+        import matplotlib.patches as mpatches
+
+        window_handles = [
+            mpatches.Patch(facecolor=span["color"], edgecolor="none", label=span["label"]) for span in window_spans
+        ]
+        if window_handles:
+            window_legend = ax_scatter.legend(
+                handles=window_handles,
+                fontsize=com_style["legend_fontsize"],
+                loc="upper right",
+                framealpha=common_style["legend_framealpha"],
+                title="window",
+            )
+            ax_scatter.add_artist(window_legend)
+    except Exception:
+        pass
+
+    fig.suptitle(
+        _format_title(signal_group="com", mode_name=mode_name, group_fields=group_fields, key=key),
+        fontsize=common_style["title_fontsize"],
+        fontweight=common_style["title_fontweight"],
+    )
+    fig.tight_layout(rect=common_style["tight_layout_rect"])
+    fig.savefig(
+        output_path,
+        facecolor=common_style["savefig_facecolor"],
+    )
+    plt.close(fig)
+
+
 def _plot_cop_overlay(
     *,
     aggregated_by_key: Dict[Tuple, Dict[str, np.ndarray]],
@@ -1239,6 +1461,221 @@ def _plot_cop_overlay(
     plt.close(fig)
 
 
+def _plot_com_overlay(
+    *,
+    aggregated_by_key: Dict[Tuple, Dict[str, np.ndarray]],
+    output_path: Path,
+    mode_name: str,
+    group_fields: List[str],
+    sorted_keys: List[Tuple],
+    x: np.ndarray,
+    window_spans: List[Dict[str, Any]],
+    com_channels: Sequence[str],
+    com_style: Dict[str, Any],
+    common_style: Dict[str, Any],
+    filtered_group_fields: List[str],
+    color_by_fields: Optional[List[str]] = None,
+) -> None:
+    import matplotlib.pyplot as plt
+
+    comx_name, comy_name = _resolve_com_channel_names(com_channels)
+
+    fig, axes = plt.subplots(1, 3, figsize=com_style["subplot_size"], dpi=common_style["dpi"])
+    ax_x, ax_y, ax_scatter = axes
+
+    window_span_alpha = float(com_style.get("window_span_alpha", 0.15))
+    for ax in (ax_x, ax_y):
+        for span in window_spans:
+            ax.axvspan(
+                span["start"],
+                span["end"],
+                color=span["color"],
+                alpha=window_span_alpha,
+                label="_nolegend_",
+            )
+
+    import matplotlib as mpl
+
+    base_colors = mpl.rcParams["axes.prop_cycle"].by_key().get("color", ["C0", "C1", "C2", "C3"])
+    marker_cycle = ["o", "s", "^", "D", "v", "P", "X", "*", "<", ">", "h", "H"]
+    key_to_marker = {k: marker_cycle[i % len(marker_cycle)] for i, k in enumerate(sorted_keys)}
+
+    key_to_color: Dict[Tuple, str] = {}
+    if color_by_fields:
+        color_groups: Dict[Tuple, List[Tuple]] = {}
+        for key in sorted_keys:
+            field_to_value = dict(zip(group_fields, key))
+            color_key = tuple(field_to_value.get(field) for field in color_by_fields)
+            color_groups.setdefault(color_key, []).append(key)
+        for color_idx, (_, keys_list) in enumerate(color_groups.items()):
+            color = base_colors[color_idx % len(base_colors)]
+            for key in keys_list:
+                key_to_color[key] = color
+    else:
+        for i, key in enumerate(sorted_keys):
+            key_to_color[key] = base_colors[i % len(base_colors)]
+
+    for ax, ch, y_label in (
+        (ax_x, comx_name, com_style.get("y_label_comx", comx_name)),
+        (ax_y, comy_name, com_style.get("y_label_comy", comy_name)),
+    ):
+        seen_labels: set[str] = set()
+        for key in sorted_keys:
+            series = aggregated_by_key.get(key, {}).get(ch)
+            if series is None:
+                continue
+            y = (-series) if (ch == comy_name and com_style.get("y_invert", False)) else series
+            color = key_to_color.get(key, "C0")
+            if color_by_fields:
+                field_to_value = dict(zip(group_fields, key))
+                color_key = tuple(field_to_value.get(field) for field in color_by_fields)
+                if len(color_by_fields) == 1:
+                    label = str(color_key[0])
+                else:
+                    label = ", ".join(f"{field}={value}" for field, value in zip(color_by_fields, color_key))
+            else:
+                label = _format_group_label(key, group_fields, filtered_group_fields) or "_nolegend_"
+
+            plot_label = label if label not in seen_labels else "_nolegend_"
+            if plot_label != "_nolegend_":
+                seen_labels.add(label)
+            ax.plot(
+                x,
+                y,
+                color=color,
+                linewidth=com_style.get("line_width", 0.8),
+                alpha=com_style.get("line_alpha", 0.8),
+                label=plot_label,
+            )
+
+        ax.grid(True, alpha=common_style["grid_alpha"])
+        ax.tick_params(labelsize=common_style["tick_labelsize"])
+        ax.legend(
+            fontsize=com_style["legend_fontsize"],
+            loc=common_style["legend_loc"],
+            framealpha=common_style["legend_framealpha"],
+        )
+        ax.set_xlabel(com_style.get("x_label_time", "Normalized time (0-1)"), fontsize=common_style["label_fontsize"])
+        ax.set_ylabel(y_label, fontsize=common_style["label_fontsize"])
+
+    ax_x.set_title(
+        comx_name,
+        fontsize=common_style["title_fontsize"],
+        fontweight=common_style["title_fontweight"],
+        pad=common_style["title_pad"],
+    )
+    ax_y.set_title(
+        comy_name,
+        fontsize=common_style["title_fontsize"],
+        fontweight=common_style["title_fontweight"],
+        pad=common_style["title_pad"],
+    )
+
+    scatter_edgewidth = float(com_style.get("overlay_scatter_edgewidth", 0.6))
+    for span in window_spans:
+        mask = (x >= span["start"]) & (x <= span["end"])
+        if not mask.any():
+            continue
+        for key in sorted_keys:
+            comx = aggregated_by_key.get(key, {}).get(comx_name)
+            comy = aggregated_by_key.get(key, {}).get(comy_name)
+            if comx is None or comy is None:
+                continue
+            y_vals = (-comy) if com_style.get("y_invert", False) else comy
+            marker = key_to_marker.get(key, "o")
+            edgecolor = key_to_color.get(key, "C0")
+            ax_scatter.scatter(
+                comx[mask],
+                y_vals[mask],
+                s=com_style["scatter_size"],
+                alpha=com_style["scatter_alpha"],
+                marker=marker,
+                facecolors=span["color"],
+                edgecolors=edgecolor,
+                linewidths=scatter_edgewidth,
+                label="_nolegend_",
+            )
+
+    ax_scatter.grid(True, alpha=common_style["grid_alpha"])
+    ax_scatter.tick_params(labelsize=common_style["tick_labelsize"])
+    try:
+        import matplotlib.patches as mpatches
+        import matplotlib.lines as mlines
+
+        window_handles = [
+            mpatches.Patch(facecolor=span["color"], edgecolor="none", label=span["label"]) for span in window_spans
+        ]
+        if window_handles:
+            window_legend = ax_scatter.legend(
+                handles=window_handles,
+                fontsize=com_style["legend_fontsize"],
+                loc="upper right",
+                framealpha=common_style["legend_framealpha"],
+                title="window",
+            )
+            ax_scatter.add_artist(window_legend)
+
+        group_handles: List[Any] = []
+        seen_labels: set[str] = set()
+        for key in sorted_keys:
+            label = _format_group_label(key, group_fields, filtered_group_fields)
+            if label is None or label in seen_labels:
+                continue
+            seen_labels.add(label)
+            marker = key_to_marker.get(key, "o")
+            edgecolor = key_to_color.get(key, "C0")
+            group_handles.append(
+                mlines.Line2D(
+                    [],
+                    [],
+                    linestyle="none",
+                    marker=marker,
+                    markersize=6,
+                    markerfacecolor="none",
+                    markeredgecolor=edgecolor,
+                    markeredgewidth=scatter_edgewidth,
+                    label=label,
+                )
+            )
+        if group_handles:
+            ax_scatter.legend(
+                handles=group_handles,
+                fontsize=com_style["legend_fontsize"],
+                loc="lower left",
+                framealpha=common_style["legend_framealpha"],
+                title="group",
+            )
+    except Exception:
+        ax_scatter.legend(
+            fontsize=com_style["legend_fontsize"],
+            loc=common_style["legend_loc"],
+            framealpha=common_style["legend_framealpha"],
+        )
+
+    ax_scatter.set_title(
+        "COMxy",
+        fontsize=common_style["title_fontsize"],
+        fontweight=common_style["title_fontweight"],
+        pad=common_style["title_pad"],
+    )
+    ax_scatter.set_xlabel(com_style.get("x_label", comx_name), fontsize=common_style["label_fontsize"])
+    ax_scatter.set_ylabel(com_style.get("y_label", comy_name), fontsize=common_style["label_fontsize"])
+    ax_scatter.set_aspect("equal", adjustable="datalim")
+
+    overlay_by = ", ".join(group_fields) if group_fields else "all"
+    fig.suptitle(
+        f"{mode_name} | com | overlay by {overlay_by}",
+        fontsize=common_style["title_fontsize"],
+        fontweight=common_style["title_fontweight"],
+    )
+    fig.tight_layout(rect=common_style["tight_layout_rect"])
+    fig.savefig(
+        output_path,
+        facecolor=common_style["savefig_facecolor"],
+    )
+    plt.close(fig)
+
+
 @dataclass(frozen=True)
 class _ResampledGroup:
     meta_df: pl.DataFrame
@@ -1272,6 +1709,7 @@ class AggregatedSignalVisualizer:
         self.emg_style = self._build_emg_style(style_cfg["emg"])
         self.forceplate_style = self._build_forceplate_style(style_cfg["forceplate"])
         self.cop_style = self._build_cop_style(style_cfg["cop"])
+        self.com_style = self._build_com_style(self.cop_style)
         self.window_colors = self.cop_style.get("window_colors", {})
         self.legend_label_threshold = self.common_style.get("legend_label_threshold", 6)
 
@@ -1386,9 +1824,11 @@ class AggregatedSignalVisualizer:
         offset_col = self.id_cfg["offset"]
 
         group_cols = [subject_col, velocity_col, trial_col]
+        onset_mocap = pl.col(onset_col).first().over(group_cols)
         mocap_start = pl.col(mocap_col).min().over(group_cols)
-        onset_device = (pl.col(onset_col).first().over(group_cols) - mocap_start) * self.frame_ratio
+        onset_device = (onset_mocap - mocap_start) * self.frame_ratio
         onset_aligned = pl.col(frame_col) - onset_device
+        aligned_mocap = (pl.col(mocap_col) - onset_mocap) * self.frame_ratio
         offset_rel = (
             (pl.col(offset_col).first().over(group_cols) - pl.col(onset_col).first().over(group_cols))
             * self.frame_ratio
@@ -1398,6 +1838,7 @@ class AggregatedSignalVisualizer:
             [
                 onset_device.alias("onset_device_frame"),
                 onset_aligned.alias("aligned_frame"),
+                aligned_mocap.alias("aligned_mocap_frame"),
                 offset_rel.alias("offset_from_onset"),
             ]
         )
@@ -1455,7 +1896,13 @@ class AggregatedSignalVisualizer:
         time_start_frame = self._ms_to_frame(time_start_ms)
         time_end_frame = self._ms_to_frame(time_end_ms)
 
-        cropped = lf.filter((pl.col("aligned_frame") >= time_start_frame) & (pl.col("aligned_frame") <= time_end_frame))
+        cropped = lf.filter(
+            ((pl.col("aligned_frame") >= time_start_frame) & (pl.col("aligned_frame") <= time_end_frame))
+            | (
+                (pl.col("aligned_mocap_frame") >= time_start_frame)
+                & (pl.col("aligned_mocap_frame") <= time_end_frame)
+            )
+        )
         if cropped.select(pl.len()).collect().item() == 0:
             raise ValueError("No data remains after applying the interpolation time window.")
 
@@ -1480,9 +1927,29 @@ class AggregatedSignalVisualizer:
         group_cfg = self.config["signal_groups"][signal_group]
         channels = list(group_cfg["columns"])
 
-        cols = set(group_cols + ["aligned_frame"] + channels + meta_cols)
+        time_base = str(group_cfg.get("time_base", "device")).strip().lower()
+        if time_base in ("mocap", "mocapframe"):
+            x_col = "aligned_mocap_frame"
+        else:
+            x_col = "aligned_frame"
+
         available_cols = set(self._lazy_columns(lf))
+        missing_channels = [ch for ch in channels if ch not in available_cols]
+        if missing_channels:
+            if bool(group_cfg.get("optional", False)):
+                print(f"[{signal_group}] skip: missing channels: {missing_channels}")
+                return _ResampledGroup(meta_df=pl.DataFrame(), tensor=np.empty((0, 0, 0)), channels=[])
+            raise ValueError(f"Missing required channels for '{signal_group}': {missing_channels}")
+        if x_col not in available_cols:
+            if bool(group_cfg.get("optional", False)):
+                print(f"[{signal_group}] skip: missing time axis column: {x_col!r}")
+                return _ResampledGroup(meta_df=pl.DataFrame(), tensor=np.empty((0, 0, 0)), channels=[])
+            raise ValueError(f"Missing required time axis column for '{signal_group}': {x_col!r}")
+
+        cols = set(group_cols + [x_col] + channels + meta_cols)
         lf_sel = lf.select([pl.col(c) for c in cols if c in available_cols])
+        if self.time_start_frame is not None and self.time_end_frame is not None:
+            lf_sel = lf_sel.filter((pl.col(x_col) >= self.time_start_frame) & (pl.col(x_col) <= self.time_end_frame))
 
         present_meta_cols: List[str] = []
         missing_meta_cols: List[str] = []
@@ -1494,9 +1961,9 @@ class AggregatedSignalVisualizer:
             else:
                 missing_meta_cols.append(col)
 
-        agg_exprs: List[pl.Expr] = [pl.col("aligned_frame").sort().alias("__x")]
+        agg_exprs: List[pl.Expr] = [pl.col(x_col).sort().alias("__x")]
         for ch in channels:
-            agg_exprs.append(pl.col(ch).sort_by("aligned_frame").alias(ch))
+            agg_exprs.append(pl.col(ch).sort_by(x_col).alias(ch))
         for col in present_meta_cols:
             agg_exprs.append(pl.col(col).first().alias(col))
             agg_exprs.append(pl.col(col).n_unique().alias(f"__nuniq_{col}"))
@@ -1616,7 +2083,7 @@ class AggregatedSignalVisualizer:
                         sorted_keys=sorted_keys,
                         window_spans=window_spans,
                         filtered_group_fields=filtered_group_fields,
-                        color_by_fields=mode_cfg.get("color_by") if signal_group in ("emg", "cop") else None,
+                        color_by_fields=mode_cfg.get("color_by") if signal_group in ("emg", "cop", "com") else None,
                     )
                 )
                 return tasks
@@ -1659,7 +2126,7 @@ class AggregatedSignalVisualizer:
                         sorted_keys=sorted_keys,
                         window_spans=window_spans,
                         filtered_group_fields=filtered_group_fields,
-                        color_by_fields=mode_cfg.get("color_by") if signal_group in ("emg", "cop") else None,
+                        color_by_fields=mode_cfg.get("color_by") if signal_group in ("emg", "cop", "com") else None,
                     )
                 )
 
@@ -1700,6 +2167,18 @@ class AggregatedSignalVisualizer:
             elif signal_group == "cop":
                 tasks.append(
                     self._task_cop(
+                        aggregated=aggregated,
+                        output_path=output_path,
+                        key=key,
+                        mode_name=mode_name,
+                        group_fields=group_fields,
+                        markers=markers,
+                        window_spans=window_spans,
+                    )
+                )
+            elif signal_group == "com":
+                tasks.append(
+                    self._task_com(
                         aggregated=aggregated,
                         output_path=output_path,
                         key=key,
@@ -1854,6 +2333,15 @@ class AggregatedSignalVisualizer:
             )
             return task
 
+        if signal_group == "com":
+            task.update(
+                {
+                    "style": self.com_style,
+                    "cop_channels": self.config["signal_groups"]["com"]["columns"],
+                }
+            )
+            return task
+
         raise ValueError(f"Unknown signal_group for overlay task: {signal_group!r}")
 
     def _task_emg(
@@ -1942,6 +2430,35 @@ class AggregatedSignalVisualizer:
             "device_rate": self.device_rate,
             "cop_channels": self.config["signal_groups"]["cop"]["columns"],
             "cop_style": self.cop_style,
+            "common_style": self.common_style,
+            "window_spans": window_spans,
+        }
+
+    def _task_com(
+        self,
+        *,
+        aggregated: Dict[str, np.ndarray],
+        output_path: Path,
+        key: Tuple,
+        mode_name: str,
+        group_fields: List[str],
+        markers: Dict[str, Any],
+        window_spans: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        return {
+            "kind": "com",
+            "output_path": str(output_path),
+            "key": key,
+            "mode_name": mode_name,
+            "group_fields": group_fields,
+            "aggregated": aggregated,
+            "markers": markers,
+            "x_axis": self.x_norm,
+            "time_start_ms": self.time_start_ms,
+            "time_end_ms": self.time_end_ms,
+            "device_rate": self.device_rate,
+            "com_channels": self.config["signal_groups"]["com"]["columns"],
+            "com_style": self.com_style,
             "common_style": self.common_style,
             "window_spans": window_spans,
         }
@@ -2086,6 +2603,22 @@ class AggregatedSignalVisualizer:
             },
             "overlay_scatter_edgewidth": cfg.get("overlay_scatter_edgewidth", 0.6),
         }
+
+    @staticmethod
+    def _build_com_style(cop_style: Dict[str, Any]) -> Dict[str, Any]:
+        base_line_colors = dict(cop_style.get("line_colors", {}) or {})
+        out = dict(cop_style)
+        out["line_colors"] = {
+            "COMx": base_line_colors.get("Cx", "blue"),
+            "COMy": base_line_colors.get("Cy", "red"),
+        }
+        out["y_label_comx"] = "COMx"
+        out["y_label_comy"] = "COMy"
+        out["x_label"] = "COMx"
+        out["y_label"] = "COMy"
+        out.setdefault("x_label_time", "Normalized time (0-1)")
+        out.setdefault("y_invert", False)
+        return out
 
     def _collect_markers(
         self,

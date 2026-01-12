@@ -28,6 +28,11 @@ signal_groups:
   cop:
     columns: [Cx_zero, Cy_zero]
     grid_layout: [1, 3]
+  com:
+    columns: [COMx, COMy]
+    grid_layout: [1, 3]
+    time_base: mocap
+    optional: true
 
 # === Interpolation ===
 interpolation:
