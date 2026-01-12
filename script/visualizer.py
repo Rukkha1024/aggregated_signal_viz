@@ -2023,6 +2023,9 @@ class AggregatedSignalVisualizer:
         tensor = resampled.tensor
         channels = resampled.channels
 
+        if meta_df.is_empty() or tensor.size == 0 or not channels:
+            return []
+
         filtered_idx = self._apply_filter_indices(meta_df, mode_cfg.get("filter"))
         if filtered_idx.size == 0:
             return []
