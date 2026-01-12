@@ -115,10 +115,10 @@ plot_style:
     axis_labels:
       Fx: "AP Force (Ant: + / Post: -)"
       Fy: "ML Force (Left: + / Right: -)"
-      Fz: "Vertical Force (Up: + / Down: -)"
-      Mx: "Mx (Left Up: + / Right Up: -)"
-      My: "My (Ant Down: + / Post Down: -)"
-      Mz: "Mz (CCW: + / CW: -)"
+      Fz: "Vertical Force (Down: + / Up: -)"
+      Mx: "Mx (Ant Down: + / Post Down: -)"
+      My: "My (Left Up: + / Right Up: -)"
+      Mz: "Mz (CW: + / CCW: -)"
     line_width: 1.2                    # 라인 두께
     line_alpha: 0.8                    # 라인 투명도
     window_span_alpha: 0.15            # 윈도우 배경 투명도
