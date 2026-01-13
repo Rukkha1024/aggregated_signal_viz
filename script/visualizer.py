@@ -152,28 +152,38 @@ def _resolve_cop_channel_names(channels: Sequence[str]) -> Tuple[str, str]:
     return cx_name, cy_name
 
 
-def _resolve_com_channel_names(channels: Sequence[str]) -> Tuple[str, str]:
+def _resolve_com_channel_names(channels: Sequence[str]) -> Tuple[str, str, Optional[str]]:
     if len(channels) < 2:
         raise ValueError("COM requires at least 2 channels. Check signal_groups.com.columns in config.yaml.")
 
     lower_names = [ch.lower() for ch in channels]
     x_idx = next((i for i, name in enumerate(lower_names) if "comx" in name), None)
     y_idx = next((i for i, name in enumerate(lower_names) if "comy" in name), None)
+    z_idx = next((i for i, name in enumerate(lower_names) if "comz" in name), None)
 
     x_name = channels[x_idx] if x_idx is not None else None
     y_name = channels[y_idx] if y_idx is not None else None
+    z_name = channels[z_idx] if z_idx is not None else None
 
-    if x_name and y_name:
-        return x_name, y_name
+    if x_name and y_name and z_name:
+        return x_name, y_name, z_name
 
-    remaining = [ch for ch in channels if ch not in (x_name, y_name)]
+    remaining = [ch for ch in channels if ch not in (x_name, y_name, z_name)]
     if x_name is None:
         x_name = remaining[0] if remaining else channels[0]
         remaining = [ch for ch in remaining if ch != x_name]
     if y_name is None:
         y_name = remaining[0] if remaining else channels[1]
+        remaining = [ch for ch in remaining if ch != y_name]
+    if z_name is None:
+        if remaining:
+            z_name = remaining[0]
+        elif len(channels) > 2:
+            z_name = channels[2]
+        else:
+            z_name = None
 
-    return x_name, y_name
+    return x_name, y_name, z_name
 
 
 def _calculate_filtered_group_fields(
@@ -1100,13 +1110,18 @@ def _plot_com(
 ) -> None:
     import matplotlib.pyplot as plt
 
-    comx_name, comy_name = _resolve_com_channel_names(com_channels)
+    comx_name, comy_name, comz_name = _resolve_com_channel_names(com_channels)
     comx = aggregated.get(comx_name)
     comy = aggregated.get(comy_name)
     if comx is None or comy is None:
         available = ", ".join(sorted(aggregated.keys()))
         print(f"[com] missing channels: COMx={comx_name!r}, COMy={comy_name!r}. Available: {available}")
         return
+    comz = aggregated.get(comz_name) if comz_name else None
+    if comz_name is not None and comz is None:
+        available = ", ".join(sorted(aggregated.keys()))
+        print(f"[com] missing channel: COMz={comz_name!r}. Available: {available}")
+        comz_name = None
 
     x = x_axis
     if x is None:
@@ -1115,11 +1130,24 @@ def _plot_com(
     x_vals = comx
     y_vals = -comy if com_style.get("y_invert", False) else comy
 
-    fig, axes = plt.subplots(1, 3, figsize=com_style["subplot_size"], dpi=common_style["dpi"])
-    ax_x, ax_y, ax_scatter = axes
+    n_panels = 4 if comz_name is not None else 3
+    fig_size = com_style["subplot_size"]
+    try:
+        fig_w, fig_h = fig_size
+        fig_size = (float(fig_w) * (n_panels / 3.0), float(fig_h))
+    except (TypeError, ValueError):
+        pass
+
+    fig, axes = plt.subplots(1, n_panels, figsize=fig_size, dpi=common_style["dpi"])
+    axes = np.asarray(axes).ravel()
+    ax_x = axes[0]
+    ax_y = axes[1]
+    ax_z = axes[2] if comz_name is not None else None
+    ax_scatter = axes[-1]
 
     window_span_alpha = float(com_style.get("window_span_alpha", 0.15))
-    for ax in (ax_x, ax_y):
+    time_axes = [ax_x, ax_y] + ([ax_z] if ax_z is not None else [])
+    for ax in time_axes:
         for span in window_spans:
             ax.axvspan(
                 span["start"],
@@ -1131,6 +1159,7 @@ def _plot_com(
 
     x_color = com_style.get("line_colors", {}).get(comx_name, "blue")
     y_color = com_style.get("line_colors", {}).get(comy_name, "red")
+    z_color = com_style.get("line_colors", {}).get(comz_name, "green") if comz_name is not None else None
 
     ax_x.plot(
         x,
@@ -1148,6 +1177,15 @@ def _plot_com(
         alpha=com_style.get("line_alpha", 0.8),
         label=comy_name,
     )
+    if ax_z is not None and comz is not None:
+        ax_z.plot(
+            x,
+            comz,
+            color=z_color,
+            linewidth=com_style.get("line_width", 0.8),
+            alpha=com_style.get("line_alpha", 0.8),
+            label=comz_name,
+        )
 
     ax_scatter.scatter(
         x_vals,
@@ -1187,6 +1225,13 @@ def _plot_com(
         fontweight=common_style["title_fontweight"],
         pad=common_style["title_pad"],
     )
+    if ax_z is not None:
+        ax_z.set_title(
+            comz_name,
+            fontsize=common_style["title_fontsize"],
+            fontweight=common_style["title_fontweight"],
+            pad=common_style["title_pad"],
+        )
     ax_scatter.set_title(
         "COMxy",
         fontsize=common_style["title_fontsize"],
@@ -1194,7 +1239,8 @@ def _plot_com(
         pad=common_style["title_pad"],
     )
 
-    for ax in (ax_x, ax_y, ax_scatter):
+    axes_to_style = [ax_x, ax_y, ax_scatter] + ([ax_z] if ax_z is not None else [])
+    for ax in axes_to_style:
         ax.grid(True, alpha=common_style["grid_alpha"])
         ax.tick_params(labelsize=common_style["tick_labelsize"])
         ax.legend(
@@ -1207,6 +1253,9 @@ def _plot_com(
     ax_x.set_ylabel(com_style.get("y_label_comx", comx_name), fontsize=common_style["label_fontsize"])
     ax_y.set_xlabel(com_style.get("x_label_time", "Normalized time (0-1)"), fontsize=common_style["label_fontsize"])
     ax_y.set_ylabel(com_style.get("y_label_comy", comy_name), fontsize=common_style["label_fontsize"])
+    if ax_z is not None:
+        ax_z.set_xlabel(com_style.get("x_label_time", "Normalized time (0-1)"), fontsize=common_style["label_fontsize"])
+        ax_z.set_ylabel(com_style.get("y_label_comz", comz_name), fontsize=common_style["label_fontsize"])
 
     ax_scatter.set_xlabel(com_style.get("x_label", comx_name), fontsize=common_style["label_fontsize"])
     ax_scatter.set_ylabel(com_style.get("y_label", comy_name), fontsize=common_style["label_fontsize"])
@@ -1478,13 +1527,30 @@ def _plot_com_overlay(
 ) -> None:
     import matplotlib.pyplot as plt
 
-    comx_name, comy_name = _resolve_com_channel_names(com_channels)
+    comx_name, comy_name, comz_name = _resolve_com_channel_names(com_channels)
+    if comz_name is not None and not any(
+        aggregated_by_key.get(key, {}).get(comz_name) is not None for key in sorted_keys
+    ):
+        comz_name = None
 
-    fig, axes = plt.subplots(1, 3, figsize=com_style["subplot_size"], dpi=common_style["dpi"])
-    ax_x, ax_y, ax_scatter = axes
+    n_panels = 4 if comz_name is not None else 3
+    fig_size = com_style["subplot_size"]
+    try:
+        fig_w, fig_h = fig_size
+        fig_size = (float(fig_w) * (n_panels / 3.0), float(fig_h))
+    except (TypeError, ValueError):
+        pass
+
+    fig, axes = plt.subplots(1, n_panels, figsize=fig_size, dpi=common_style["dpi"])
+    axes = np.asarray(axes).ravel()
+    ax_x = axes[0]
+    ax_y = axes[1]
+    ax_z = axes[2] if comz_name is not None else None
+    ax_scatter = axes[-1]
 
     window_span_alpha = float(com_style.get("window_span_alpha", 0.15))
-    for ax in (ax_x, ax_y):
+    time_axes = [ax_x, ax_y] + ([ax_z] if ax_z is not None else [])
+    for ax in time_axes:
         for span in window_spans:
             ax.axvspan(
                 span["start"],
@@ -1515,10 +1581,14 @@ def _plot_com_overlay(
         for i, key in enumerate(sorted_keys):
             key_to_color[key] = base_colors[i % len(base_colors)]
 
-    for ax, ch, y_label in (
+    channel_axes = [
         (ax_x, comx_name, com_style.get("y_label_comx", comx_name)),
         (ax_y, comy_name, com_style.get("y_label_comy", comy_name)),
-    ):
+    ]
+    if ax_z is not None and comz_name is not None:
+        channel_axes.append((ax_z, comz_name, com_style.get("y_label_comz", comz_name)))
+
+    for ax, ch, y_label in channel_axes:
         seen_labels: set[str] = set()
         for key in sorted_keys:
             series = aggregated_by_key.get(key, {}).get(ch)
@@ -1570,6 +1640,13 @@ def _plot_com_overlay(
         fontweight=common_style["title_fontweight"],
         pad=common_style["title_pad"],
     )
+    if ax_z is not None and comz_name is not None:
+        ax_z.set_title(
+            comz_name,
+            fontsize=common_style["title_fontsize"],
+            fontweight=common_style["title_fontweight"],
+            pad=common_style["title_pad"],
+        )
 
     scatter_edgewidth = float(com_style.get("overlay_scatter_edgewidth", 0.6))
     for span in window_spans:
@@ -2610,13 +2687,21 @@ class AggregatedSignalVisualizer:
     @staticmethod
     def _build_com_style(cop_style: Dict[str, Any]) -> Dict[str, Any]:
         base_line_colors = dict(cop_style.get("line_colors", {}) or {})
+        comx_color = base_line_colors.get("Cx", "blue")
+        comy_color = base_line_colors.get("Cy", "red")
+        comz_color = base_line_colors.get("Cz", "green")
         out = dict(cop_style)
         out["line_colors"] = {
-            "COMx": base_line_colors.get("Cx", "blue"),
-            "COMy": base_line_colors.get("Cy", "red"),
+            "COMx": comx_color,
+            "COMx_zero": comx_color,
+            "COMy": comy_color,
+            "COMy_zero": comy_color,
+            "COMz": comz_color,
+            "COMz_zero": comz_color,
         }
         out["y_label_comx"] = "COMx"
         out["y_label_comy"] = "COMy"
+        out["y_label_comz"] = "COMz"
         out["x_label"] = "COMx"
         out["y_label"] = "COMy"
         out.setdefault("x_label_time", "Normalized time (0-1)")
