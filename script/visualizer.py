@@ -942,8 +942,8 @@ def _plot_cop(
     if x is None:
         x = np.linspace(0.0, 1.0, num=cx.size, dtype=float)
 
-    x_vals = cx
-    y_vals = -cy if cop_style["y_invert"] else cy
+    ap_vals = cx
+    ml_vals = -cy if cop_style["y_invert"] else cy
 
     fig, axes = plt.subplots(1, 3, figsize=cop_style["subplot_size"], dpi=common_style["dpi"])
     ax_cx, ax_cy, ax_scatter = axes
@@ -965,7 +965,7 @@ def _plot_cop(
 
     ax_cx.plot(
         x,
-        cx,
+        ap_vals,
         color=cx_color,
         linewidth=cop_style.get("line_width", 0.8),
         alpha=cop_style.get("line_alpha", 0.8),
@@ -973,7 +973,7 @@ def _plot_cop(
     )
     ax_cy.plot(
         x,
-        y_vals,
+        ml_vals,
         color=cy_color,
         linewidth=cop_style.get("line_width", 0.8),
         alpha=cop_style.get("line_alpha", 0.8),
@@ -981,8 +981,8 @@ def _plot_cop(
     )
 
     ax_scatter.scatter(
-        x_vals,
-        y_vals,
+        ml_vals,
+        ap_vals,
         color=cop_style["background_color"],
         alpha=cop_style["background_alpha"],
         s=cop_style["background_size"],
@@ -993,8 +993,8 @@ def _plot_cop(
             mask = (x_axis >= span["start"]) & (x_axis <= span["end"])
             if mask.any():
                 ax_scatter.scatter(
-                    x_vals[mask],
-                    y_vals[mask],
+                    ml_vals[mask],
+                    ap_vals[mask],
                     s=cop_style["scatter_size"],
                     alpha=cop_style["scatter_alpha"],
                     color=span["color"],
@@ -1011,8 +1011,8 @@ def _plot_cop(
             target_frame = _ms_to_frame(max_time, device_rate)
             idx = _closest_index(target_axis, target_frame)
             ax_scatter.scatter(
-                x_vals[idx],
-                y_vals[idx],
+                ml_vals[idx],
+                ap_vals[idx],
                 s=cop_style["max_marker"]["size"],
                 marker=cop_style["max_marker"]["marker"],
                 color=cop_style["max_marker"]["color"],
@@ -1127,8 +1127,8 @@ def _plot_com(
     if x is None:
         x = np.linspace(0.0, 1.0, num=comx.size, dtype=float)
 
-    x_vals = comx
-    y_vals = -comy if com_style.get("y_invert", False) else comy
+    ap_vals = comx
+    ml_vals = -comy if com_style.get("y_invert", False) else comy
 
     n_panels = 4 if comz_name is not None else 3
     fig_size = com_style["subplot_size"]
@@ -1163,7 +1163,7 @@ def _plot_com(
 
     ax_x.plot(
         x,
-        comx,
+        ap_vals,
         color=x_color,
         linewidth=com_style.get("line_width", 0.8),
         alpha=com_style.get("line_alpha", 0.8),
@@ -1171,7 +1171,7 @@ def _plot_com(
     )
     ax_y.plot(
         x,
-        y_vals,
+        ml_vals,
         color=y_color,
         linewidth=com_style.get("line_width", 0.8),
         alpha=com_style.get("line_alpha", 0.8),
@@ -1188,8 +1188,8 @@ def _plot_com(
         )
 
     ax_scatter.scatter(
-        x_vals,
-        y_vals,
+        ml_vals,
+        ap_vals,
         color=com_style["background_color"],
         alpha=com_style["background_alpha"],
         s=com_style["background_size"],
@@ -1200,8 +1200,8 @@ def _plot_com(
             mask = (x_axis >= span["start"]) & (x_axis <= span["end"])
             if mask.any():
                 ax_scatter.scatter(
-                    x_vals[mask],
-                    y_vals[mask],
+                    ml_vals[mask],
+                    ap_vals[mask],
                     s=com_style["scatter_size"],
                     alpha=com_style["scatter_alpha"],
                     color=span["color"],
@@ -1415,12 +1415,12 @@ def _plot_cop_overlay(
             cy = aggregated_by_key.get(key, {}).get(cy_name)
             if cx is None or cy is None:
                 continue
-            y_vals = (-cy) if cop_style["y_invert"] else cy
+            ml_vals = (-cy) if cop_style["y_invert"] else cy
             marker = key_to_marker.get(key, "o")
             edgecolor = key_to_color.get(key, "C0")
             ax_scatter.scatter(
+                ml_vals[mask],
                 cx[mask],
-                y_vals[mask],
                 s=cop_style["scatter_size"],
                 alpha=cop_style["scatter_alpha"],
                 marker=marker,
@@ -1658,12 +1658,12 @@ def _plot_com_overlay(
             comy = aggregated_by_key.get(key, {}).get(comy_name)
             if comx is None or comy is None:
                 continue
-            y_vals = (-comy) if com_style.get("y_invert", False) else comy
+            ml_vals = (-comy) if com_style.get("y_invert", False) else comy
             marker = key_to_marker.get(key, "o")
             edgecolor = key_to_color.get(key, "C0")
             ax_scatter.scatter(
+                ml_vals[mask],
                 comx[mask],
-                y_vals[mask],
                 s=com_style["scatter_size"],
                 alpha=com_style["scatter_alpha"],
                 marker=marker,

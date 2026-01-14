@@ -163,8 +163,8 @@ plot_style:
     x_label_time: "Normalized time (0-1)"
     y_label_cx: "COP AP (Ant: + / Post: -)"
     y_label_cy: "COP ML (Left: + / Right: -)"
-    x_label: "COP AP (Ant: + / Post: -)"
-    y_label: "COP ML (Left: + / Right: -)"
+    x_label: "COP ML (Left: + / Right: -)"
+    y_label: "COP AP (Ant: + / Post: -)"
     y_invert: false                    # Y축 반전 여부 (true면 위쪽이 음수)
 
   # COM (Center of Mass) 신호 전용 설정
@@ -172,8 +172,8 @@ plot_style:
     y_label_comx: "COM AP (Ant: + / Post: -)"
     y_label_comy: "COM ML (Left: + / Right: -)"
     y_label_comz: "COMz"
-    x_label: "COM AP (Ant: + / Post: -)"
-    y_label: "COM ML (Left: + / Right: -)"
+    x_label: "COM ML (Left: + / Right: -)"
+    y_label: "COM AP (Ant: + / Post: -)"
 
 # === Window Definitions (relative to platform_onset in ms) ===
 windows:
