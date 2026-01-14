@@ -1786,7 +1786,7 @@ class AggregatedSignalVisualizer:
         self.emg_style = self._build_emg_style(style_cfg["emg"])
         self.forceplate_style = self._build_forceplate_style(style_cfg["forceplate"])
         self.cop_style = self._build_cop_style(style_cfg["cop"])
-        self.com_style = self._build_com_style(self.cop_style)
+        self.com_style = self._build_com_style(style_cfg.get("com", {}), self.cop_style)
         self.window_colors = self.cop_style.get("window_colors", {})
         self.legend_label_threshold = self.common_style.get("legend_label_threshold", 6)
 
@@ -2685,11 +2685,35 @@ class AggregatedSignalVisualizer:
         }
 
     @staticmethod
-    def _build_com_style(cop_style: Dict[str, Any]) -> Dict[str, Any]:
+    def _build_com_style(com_cfg: Any, cop_style: Dict[str, Any]) -> Dict[str, Any]:
         base_line_colors = dict(cop_style.get("line_colors", {}) or {})
         comx_color = base_line_colors.get("Cx", "blue")
         comy_color = base_line_colors.get("Cy", "red")
         comz_color = base_line_colors.get("Cz", "green")
+
+        if not isinstance(com_cfg, dict):
+            com_cfg = {}
+
+        def _cop_to_com(label: Any, fallback: str) -> str:
+            if label is None:
+                return fallback
+            text = str(label)
+            if not text:
+                return fallback
+            return text.replace("COP", "COM")
+
+        default_y_label_comx = _cop_to_com(cop_style.get("y_label_cx", cop_style.get("x_label")), "COMx")
+        default_y_label_comy = _cop_to_com(cop_style.get("y_label_cy", cop_style.get("y_label")), "COMy")
+        default_x_label = _cop_to_com(cop_style.get("x_label"), "COMx")
+        default_y_label = _cop_to_com(cop_style.get("y_label"), "COMy")
+
+        def _cfg_or_default(key: str, default: str) -> str:
+            val = com_cfg.get(key)
+            if val is None:
+                return default
+            text = str(val)
+            return text if text else default
+
         out = dict(cop_style)
         out["line_colors"] = {
             "COMx": comx_color,
@@ -2699,11 +2723,11 @@ class AggregatedSignalVisualizer:
             "COMz": comz_color,
             "COMz_zero": comz_color,
         }
-        out["y_label_comx"] = "COMx"
-        out["y_label_comy"] = "COMy"
-        out["y_label_comz"] = "COMz"
-        out["x_label"] = "COMx"
-        out["y_label"] = "COMy"
+        out["y_label_comx"] = _cfg_or_default("y_label_comx", default_y_label_comx)
+        out["y_label_comy"] = _cfg_or_default("y_label_comy", default_y_label_comy)
+        out["y_label_comz"] = _cfg_or_default("y_label_comz", "COMz")
+        out["x_label"] = _cfg_or_default("x_label", default_x_label)
+        out["y_label"] = _cfg_or_default("y_label", default_y_label)
         out.setdefault("x_label_time", "Normalized time (0-1)")
         out.setdefault("y_invert", False)
         return out
