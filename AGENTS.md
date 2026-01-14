@@ -43,6 +43,7 @@ The primary goal is to centralize shared values across multiple scripts. This en
 
 #### **Exclusion Rule:**
 - **Visualization Settings:** Do not include settings related to the visual appearance of plots (e.g., colors, fonts, line styles). These should be managed within the visualization code itself.
+- 항상 너가 직접 plot을 열어서 그림을 보고 이게 제대로 되었는지 파악하고 코드 수정을 완료해라. 
 
 ---
 

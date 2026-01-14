@@ -69,6 +69,17 @@ aggregation_modes:
     color_by: ["step_TF"]
     output_dir: "output/diff"
     filename_pattern: "diff_step_TF_mean_{signal_group}.png"
+  diff_subject_trial_step_TF_mean:
+    enabled: true
+    filter:
+      mixed: 1
+      age_group: "young"
+      subject: "조민석"
+    groupby: ["subject","velocity","trial_num"]
+    overlay: false
+    output_dir: "output/diff_subject_trial"
+    filename_pattern: "diff_{subject}_v{velocity}_t{trial_num}_{signal_group}.png"
+
 
 
 

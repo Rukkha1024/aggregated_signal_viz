@@ -24,8 +24,16 @@ class VizConfig:
     muscle_column_in_feature: str = "emg_channel"  # Column name in CSV holding 'TA', 'SOL' etc.
 
     # Facet & Hue Configuration (Default values)
-    facet_column: str = "age_group"
+    facet_column: Optional[str] = None  # No faceting by default
     hue_column: str = "step_TF"
+
+    # Data Filtering (자유롭게 컬럼명: 값 추가/제거 가능)
+    # 예: {"mixed": "1", "age_group": "young", "velocity": 10}
+    # 필터 안 쓰려면 빈 딕셔너리로: {}
+    filters: Dict[str, Any] = field(default_factory=lambda: {
+        "mixed": "1",
+        "age_group": "young"
+    })
 
     # Plot Dimensions & Style
     figure_size: Tuple[int, int] = (12, 10)  # (가로, 세로) 인치. facet 개수/라벨 길이에 따라 조절 권장
@@ -40,18 +48,41 @@ class VizConfig:
     ])
     
     # Bar & Marker Style
-    marker_fmt: str = "o"  # 평균값 마커 모양(Matplotlib marker fmt)
-    marker_size: int = 6  # 평균값 마커 크기(points)
-    cap_size: int = 4  # 에러바 끝 캡(cap) 크기
+    marker_size: int = 10  # 평균값 마커 크기(points)
+    
+    # Marker Palette (Hue별 자동 할당)
+    # hue 값들을 정렬 후 순서대로 마커 할당 (색상 팔레트와 동일한 방식)
+    # 마커 종류: o(원), ^(위삼각), s(사각형), D(다이아몬드), v(아래삼각), *(별), <(왼삼각), >(오른삼각), p(오각형), h(육각형)
+    marker_palette: List[str] = field(default_factory=lambda: [
+        "o",    # 원
+        "^",    # 위쪽 삼각형
+        "s",    # 사각형
+        "D",    # 다이아몬드
+        "v",    # 아래쪽 삼각형
+        "*",    # 별
+        "<",    # 왼쪽 삼각형
+        ">",    # 오른쪽 삼각형
+        "p",    # 오각형
+        "h",    # 육각형
+    ])
+    
     bar_width: float = 0.6  # 한 muscle tick에 할당되는 전체 폭(여러 hue가 있으면 내부에서 분할)
-    alpha: float = 0.8  # 마커/에러바 투명도(0~1)
+    marker_alpha: float = 1.0  # 마커 투명도(0~1)
+    errorbar_alpha: float = 0.6  # 에러바 선/캡 투명도(0~1)
+    
+    # Error Bar Detail Style
+    cap_size: int = 4  # 에러바 끝 캡(cap) 크기
+    errorbar_linewidth: float = 1.5  # 오차 막대 선 두께
+    errorbar_capthick: float = 1.0  # 오차 막대 캡 선 두께
     
     # Text Style
     text_fontsize: int = 8  # bar 옆에 표시되는 값(예: mean±std, n) 텍스트 크기
     text_offset_x: float = 5.0  # 텍스트를 x축 방향으로 밀어내는 오프셋(데이터 단위; onset timing이면 ms로 해석)
-    title_fontsize: int = 14  # 전체 제목(suptitle) 크기
-    label_fontsize: int = 10  # 축 라벨 크기
-    tick_labelsize: int = 9  # tick 라벨 크기(근육명/범례 등)
+    title_fontsize: int = 20  # 전체 제목(suptitle) 크기
+    xlabel_fontsize: int = 15  # x축 라벨 크기
+    legend_fontsize: int = 10  # 범례 크기
+    tick_labelsize: int = 20  # y축 tick 라벨 크기(근육명)
+    xtick_labelsize: int = 20  # x축 tick 라벨 크기(숫자)
     
     # Layout
     grid_alpha: float = 0.3  # 그리드 선 투명도(가독성 조절)
@@ -197,11 +228,17 @@ def plot_onset_timing(
     """Generate horizontal error-bar plot and save to output."""
     import matplotlib.pyplot as plt
     
+    # Build title from active filters
+    filter_title_parts = []
+    for col_name, col_value in VIZ_CFG.filters.items():
+        filter_title_parts.append(f"{col_name}={col_value}")
+    filter_title = ", ".join(filter_title_parts) if filter_title_parts else "All Data"
+    
     if facet_col and facet_col in stats_df.columns:
         facets = sorted(stats_df[facet_col].unique().to_list())
     else:
-        facets = ["All Data"]
-        stats_df = stats_df.with_columns(pl.lit("All Data").alias("_facet_dummy"))
+        facets = [filter_title]
+        stats_df = stats_df.with_columns(pl.lit(filter_title).alias("_facet_dummy"))
         facet_col = "_facet_dummy"
 
     if hue_col and hue_col in stats_df.columns:
@@ -268,17 +305,29 @@ def plot_onset_timing(
             ys = [muscle_to_y[m] + offset for m in muscles]
             color = VIZ_CFG.colors[hue_idx % len(VIZ_CFG.colors)]
             
-            ax.errorbar(
+            # Auto-assign marker from palette (same logic as colors)
+            marker = VIZ_CFG.marker_palette[hue_idx % len(VIZ_CFG.marker_palette)]
+            
+            # Plot errorbar and get handles to set separate alphas
+            line, caps, bars = ax.errorbar(
                 means, 
                 ys, 
                 xerr=stds, 
-                fmt=VIZ_CFG.marker_fmt,
+                fmt=marker,
                 markersize=VIZ_CFG.marker_size,
                 capsize=VIZ_CFG.cap_size,
+                capthick=VIZ_CFG.errorbar_capthick,
+                elinewidth=VIZ_CFG.errorbar_linewidth,
                 color=color,
-                label=label,
-                alpha=VIZ_CFG.alpha
+                label=label
             )
+            
+            # Set separate alphas for marker and errorbars
+            line.set_alpha(VIZ_CFG.marker_alpha)
+            for bar in bars:
+                bar.set_alpha(VIZ_CFG.errorbar_alpha)
+            for cap in caps:
+                cap.set_alpha(VIZ_CFG.errorbar_alpha)
             
             for idx, (x, y, c, tc) in enumerate(zip(means, ys, counts, total_counts)):
                 if np.isnan(x):
@@ -294,11 +343,12 @@ def plot_onset_timing(
                     color=color
                 )
 
-        title = f"{facet_col}: {facet_val}"
+        title = f"{facet_val}" if facet_col != "_facet_dummy" else filter_title
         ax.set_title(title, fontsize=VIZ_CFG.title_fontsize, fontweight="bold")
         ax.set_yticks(y_indices)
         ax.set_yticklabels(valid_muscles_reversed, fontsize=VIZ_CFG.tick_labelsize)
-        ax.set_xlabel("Onset Timing (ms)", fontsize=VIZ_CFG.label_fontsize)
+        ax.set_xlabel("Onset Timing (ms)", fontsize=VIZ_CFG.xlabel_fontsize)
+        ax.tick_params(axis="x", labelsize=VIZ_CFG.xtick_labelsize)
         ax.grid(True, axis="x", alpha=VIZ_CFG.grid_alpha, linestyle="--")
         
         ax.spines["top"].set_visible(False)
@@ -317,7 +367,7 @@ def plot_onset_timing(
                 labels,
                 loc="best",
                 frameon=False,
-                fontsize=VIZ_CFG.label_fontsize,
+                fontsize=VIZ_CFG.legend_fontsize,
             )
 
     plt.tight_layout(rect=VIZ_CFG.layout_rect)
@@ -357,6 +407,32 @@ def main():
     
     df = load_and_merge_data(config, base_dir)
     
+    # Apply filters from VizConfig.filters
+    filter_exprs = []
+    for col_name, col_value in VIZ_CFG.filters.items():
+        if col_name in df.columns:
+            # Auto-convert col_value type to match column dtype
+            col_dtype = df[col_name].dtype
+            if col_dtype in [pl.Int64, pl.Int32, pl.Int16, pl.Int8, pl.UInt64, pl.UInt32, pl.UInt16, pl.UInt8]:
+                try:
+                    col_value = int(col_value)
+                except (ValueError, TypeError):
+                    pass
+            elif col_dtype in [pl.Float64, pl.Float32]:
+                try:
+                    col_value = float(col_value)
+                except (ValueError, TypeError):
+                    pass
+            
+            filter_exprs.append(pl.col(col_name) == col_value)
+            print(f"Applying filter: {col_name} == {col_value!r}")
+        else:
+            print(f"Warning: Filter column '{col_name}' not found in data")
+    
+    if filter_exprs:
+        df = df.filter(pl.all_horizontal(filter_exprs))
+        print(f"Data shape after filtering: {df.shape}")
+    
     if args.velocity is not None:
         if "velocity" in df.columns:
             print(f"Filtering velocity = {args.velocity}")
@@ -384,9 +460,14 @@ def main():
     print("Final Stats for Plotting:")
     print(stats)
 
+    # Build filename from filters
     fname_parts = ["onset_viz"]
-    if args.facet: fname_parts.append(f"facet-{args.facet}")
-    if args.hue: fname_parts.append(f"hue-{args.hue}")
+    for col_name, col_value in VIZ_CFG.filters.items():
+        fname_parts.append(f"{col_name}-{col_value}")
+    if args.facet: 
+        fname_parts.append(f"facet-{args.facet}")
+    if args.hue: 
+        fname_parts.append(f"hue-{args.hue}")
     filename = "_".join(fname_parts) + ".png"
 
     output_base_dir = Path(config.get("output", {}).get("base_dir", "output"))
