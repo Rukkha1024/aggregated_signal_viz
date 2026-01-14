@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import matplotlib.pyplot as plt
+import matplotlib.lines as mlines
 import numpy as np
 import polars as pl
 import yaml
@@ -310,16 +311,16 @@ def plot_onset_timing(
             
             # Plot errorbar and get handles to set separate alphas
             line, caps, bars = ax.errorbar(
-                means, 
-                ys, 
-                xerr=stds, 
+                means,
+                ys,
+                xerr=stds,
                 fmt=marker,
                 markersize=VIZ_CFG.marker_size,
                 capsize=VIZ_CFG.cap_size,
                 capthick=VIZ_CFG.errorbar_capthick,
                 elinewidth=VIZ_CFG.errorbar_linewidth,
                 color=color,
-                label=label
+                label=""  # No label in errorbar (use proxy artist for legend)
             )
             
             # Set separate alphas for marker and errorbars
@@ -358,17 +359,32 @@ def plot_onset_timing(
         ax.axis("off")
 
     if hue_col:
-        for ax in axes_flat[: len(facets)]:
-            handles, labels = ax.get_legend_handles_labels()
-            if not handles:
-                continue
-            ax.legend(
-                handles,
-                labels,
-                loc="best",
-                frameon=False,
-                fontsize=VIZ_CFG.legend_fontsize,
+        # Create proxy artists for legend (marker only, no errorbar)
+        legend_handles = []
+        for hue_idx, hue_val in enumerate(hues):
+            color = VIZ_CFG.colors[hue_idx % len(VIZ_CFG.colors)]
+            marker = VIZ_CFG.marker_palette[hue_idx % len(VIZ_CFG.marker_palette)]
+            label = f"{hue_col}: {hue_val}"
+
+            # Create proxy artist with marker only
+            proxy_artist = mlines.Line2D(
+                [], [],
+                marker=marker,
+                color=color,
+                markersize=VIZ_CFG.marker_size,
+                linestyle='None',
+                label=label
             )
+            legend_handles.append(proxy_artist)
+
+        # Add legend to first facet only
+        first_ax = axes_flat[0]
+        first_ax.legend(
+            handles=legend_handles,
+            loc="best",
+            frameon=False,
+            fontsize=VIZ_CFG.legend_fontsize,
+        )
 
     plt.tight_layout(rect=VIZ_CFG.layout_rect)
 
