@@ -206,9 +206,14 @@ windows:
 # === Event Vertical Lines (data-driven annotations) ===
 # Notes:
 # - Values are interpreted in the same domain as `data.id_columns.onset` (platform_onset; mocap frame).
-# - The visual style is controlled in the visualization code (not config).
+# - The visual style is controlled via `event_vlines.style` (matplotlib axvline kwargs).
 event_vlines:
   columns: ["step_onset"]
+  style:
+    color: "red"
+    linestyle: "--"
+    linewidth: 1.5
+    alpha: 0.9
 
 # === Figure Layout ===
 figure_layout:
