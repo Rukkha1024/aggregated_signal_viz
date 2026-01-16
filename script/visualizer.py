@@ -1982,6 +1982,7 @@ class AggregatedSignalVisualizer:
             if col not in meta_cols_needed:
                 meta_cols_needed.append(col)
 
+        generated_outputs: List[Path] = []
         group_names = self._signal_group_names(selected_groups)
         for group_name in group_names:
             resampled = self._resample_signal_group(lf, group_name, meta_cols_needed)
@@ -1989,6 +1990,8 @@ class AggregatedSignalVisualizer:
             for mode_name, mode_cfg in enabled_modes:
                 tasks.extend(self._build_plot_tasks(resampled, group_name, mode_name, mode_cfg))
             self._run_plot_tasks(tasks)
+            generated_outputs.extend(self._collect_existing_outputs(tasks))
+        self._log_generated_outputs(generated_outputs)
 
     def _run_plot_tasks(self, tasks: List[Dict[str, Any]]) -> None:
         if not tasks:
@@ -2006,6 +2009,48 @@ class AggregatedSignalVisualizer:
             _plot_worker_init(font_family)
             for task in tasks:
                 _plot_task(task)
+
+    @staticmethod
+    def _collect_task_output_paths(tasks: List[Dict[str, Any]]) -> List[Path]:
+        paths: List[Path] = []
+        for task in tasks:
+            output_path = task.get("output_path")
+            if not output_path:
+                continue
+            paths.append(Path(output_path))
+        return paths
+
+    def _collect_existing_outputs(self, tasks: List[Dict[str, Any]]) -> List[Path]:
+        return [path for path in self._collect_task_output_paths(tasks) if path.exists()]
+
+    def _log_generated_outputs(self, output_paths: Iterable[Path]) -> None:
+        seen: set[str] = set()
+        unique_paths: List[Path] = []
+        for path in output_paths:
+            resolved = str(path.resolve())
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            unique_paths.append(path)
+
+        if not unique_paths:
+            print("[run] generated files: none")
+            return
+
+        base_dir = self.base_dir.resolve()
+        counts: Dict[str, int] = {}
+        for path in unique_paths:
+            try:
+                rel_path = path.resolve().relative_to(base_dir)
+                parent = rel_path.parent
+            except ValueError:
+                parent = path.parent
+            parent_str = str(parent)
+            counts[parent_str] = counts.get(parent_str, 0) + 1
+
+        print("[run] generated files (summary):")
+        for parent_str in sorted(counts):
+            print(f"  - {parent_str}: {counts[parent_str]} files")
 
     def _max_workers(self) -> int:
         perf = self.config.get("performance", {}) if isinstance(self.config, dict) else {}
