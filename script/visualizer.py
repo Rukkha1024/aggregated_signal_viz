@@ -103,6 +103,57 @@ def _closest_index(arr: np.ndarray, value: float) -> int:
     return int(np.nanargmin(np.abs(arr - value)))
 
 
+def _parse_event_vlines_config(cfg: Any) -> List[str]:
+    """
+    Returns a de-duplicated list of event column names to render as vertical lines.
+
+    Supported YAML forms:
+      - event_vlines: { columns: [step_onset, ...] }
+      - event_vlines: [step_onset, ...]
+    """
+    if cfg is None:
+        return []
+    if isinstance(cfg, dict):
+        cfg = cfg.get("columns")
+    if not isinstance(cfg, list):
+        return []
+    out: List[str] = []
+    for item in cfg:
+        if item is None:
+            continue
+        name = str(item).strip()
+        if not name or name in out:
+            continue
+        out.append(name)
+    return out
+
+
+def _event_ms_col(event_col: str) -> str:
+    return f"__event_{event_col}_ms"
+
+
+def _nanmean_ignore_nan(values: np.ndarray) -> Optional[float]:
+    arr = np.asarray(values, dtype=float)
+    if arr.size == 0:
+        return None
+    arr = arr[~np.isnan(arr)]
+    if arr.size == 0:
+        return None
+    return float(arr.mean())
+
+
+def _draw_event_vlines(ax: Any, vlines: Sequence[Dict[str, Any]], *, style: Dict[str, Any]) -> None:
+    if not vlines:
+        return
+    kwargs = dict(style) if style else {"color": "red", "linestyle": "--", "linewidth": 1.5}
+    kwargs.setdefault("alpha", 0.9)
+    for v in vlines:
+        x = v.get("x")
+        if x is None:
+            continue
+        ax.axvline(float(x), label="_nolegend_", **kwargs)
+
+
 def _format_label(template: Any, **kwargs: Any) -> str:
     if not isinstance(template, str):
         return str(template)
@@ -298,6 +349,7 @@ def _plot_task(task: Dict[str, Any]) -> None:
             signal_group=task["signal_group"],
             aggregated_by_key=task["aggregated_by_key"],
             markers_by_key=task.get("markers_by_key", {}),
+            event_vlines_by_key=task.get("event_vlines_by_key", {}),
             output_path=output_path,
             mode_name=task["mode_name"],
             group_fields=task["group_fields"],
@@ -325,6 +377,7 @@ def _plot_task(task: Dict[str, Any]) -> None:
             mode_name=task["mode_name"],
             group_fields=task["group_fields"],
             markers=task["markers"],
+            event_vlines=task.get("event_vlines", []),
             x=np.asarray(task["x"], dtype=float),
             channels=task["channels"],
             grid_layout=task["grid_layout"],
@@ -345,6 +398,7 @@ def _plot_task(task: Dict[str, Any]) -> None:
             mode_name=task["mode_name"],
             group_fields=task["group_fields"],
             markers=task["markers"],
+            event_vlines=task.get("event_vlines", []),
             x=np.asarray(task["x"], dtype=float),
             channels=task["channels"],
             grid_layout=task["grid_layout"],
@@ -365,6 +419,7 @@ def _plot_task(task: Dict[str, Any]) -> None:
             mode_name=task["mode_name"],
             group_fields=task["group_fields"],
             markers=task["markers"],
+            event_vlines=task.get("event_vlines", []),
             x_axis=np.asarray(task["x_axis"], dtype=float) if task["x_axis"] is not None else None,
             target_axis=np.asarray(task["target_axis"], dtype=float) if task["target_axis"] is not None else None,
             time_start_ms=task["time_start_ms"],
@@ -385,6 +440,7 @@ def _plot_task(task: Dict[str, Any]) -> None:
             mode_name=task["mode_name"],
             group_fields=task["group_fields"],
             markers=task["markers"],
+            event_vlines=task.get("event_vlines", []),
             x_axis=np.asarray(task["x_axis"], dtype=float) if task["x_axis"] is not None else None,
             time_start_ms=task["time_start_ms"],
             time_end_ms=task["time_end_ms"],
@@ -405,6 +461,7 @@ def _plot_overlay_generic(
     signal_group: str,
     aggregated_by_key: Dict[Tuple, Dict[str, np.ndarray]],
     markers_by_key: Dict[Tuple, Dict[str, Any]],
+    event_vlines_by_key: Dict[Tuple, List[Dict[str, Any]]],
     output_path: Path,
     mode_name: str,
     group_fields: List[str],
@@ -425,6 +482,7 @@ def _plot_overlay_generic(
     if signal_group == "cop":
         _plot_cop_overlay(
             aggregated_by_key=aggregated_by_key,
+            event_vlines_by_key=event_vlines_by_key,
             output_path=output_path,
             mode_name=mode_name,
             group_fields=group_fields,
@@ -442,6 +500,7 @@ def _plot_overlay_generic(
     if signal_group == "com":
         _plot_com_overlay(
             aggregated_by_key=aggregated_by_key,
+            event_vlines_by_key=event_vlines_by_key,
             output_path=output_path,
             mode_name=mode_name,
             group_fields=group_fields,
@@ -462,6 +521,7 @@ def _plot_overlay_generic(
     _plot_overlay_timeseries_grid(
         aggregated_by_key=aggregated_by_key,
         markers_by_key=markers_by_key,
+        event_vlines_by_key=event_vlines_by_key,
         output_path=output_path,
         mode_name=mode_name,
         signal_group=signal_group,
@@ -489,6 +549,7 @@ def _plot_emg(
     mode_name: str,
     group_fields: List[str],
     markers: Dict[str, Any],
+    event_vlines: List[Dict[str, Any]],
     x: np.ndarray,
     channels: List[str],
     grid_layout: List[int],
@@ -504,6 +565,8 @@ def _plot_emg(
     rows, cols = grid_layout
     fig, axes = plt.subplots(rows, cols, figsize=emg_style["subplot_size"], dpi=common_style["dpi"])
     axes_flat = axes.flatten()
+
+    vline_style = dict(emg_style.get("onset_marker") or {})
 
     for ax, ch in zip(axes_flat, channels):
         y = aggregated.get(ch)
@@ -527,6 +590,8 @@ def _plot_emg(
                 alpha=window_span_alpha,
                 label=span["label"],
             )
+
+        _draw_event_vlines(ax, event_vlines, style=vline_style)
 
         marker_info = markers.get(ch, {})
         if common_style.get("show_onset_marker", True):
@@ -580,6 +645,7 @@ def _plot_overlay_timeseries_grid(
     *,
     aggregated_by_key: Dict[Tuple, Dict[str, np.ndarray]],
     markers_by_key: Dict[Tuple, Dict[str, Any]],
+    event_vlines_by_key: Dict[Tuple, List[Dict[str, Any]]],
     output_path: Path,
     mode_name: str,
     signal_group: str,
@@ -691,6 +757,10 @@ def _plot_overlay_timeseries_grid(
                         label=plot_label,
                     )
 
+            vline_style = dict(style.get("onset_marker") or {})
+            for key in sorted_keys:
+                _draw_event_vlines(ax, event_vlines_by_key.get(key, []), style=vline_style)
+
             for key in sorted_keys:
                 marker_info = markers_by_key.get(key, {}).get(ch, {})
                 marker_label = _format_group_label(key, group_fields)
@@ -772,6 +842,10 @@ def _plot_overlay_timeseries_grid(
                     label=plot_label,
                 )
 
+            vline_style = dict(style.get("onset_marker") or {})
+            for key in sorted_keys:
+                _draw_event_vlines(ax, event_vlines_by_key.get(key, []), style=vline_style)
+
             if common_style.get("show_onset_marker", True):
                 for key in sorted_keys:
                     onset_time = markers_by_key.get(key, {}).get(ch, {}).get("onset")
@@ -828,6 +902,7 @@ def _plot_forceplate(
     mode_name: str,
     group_fields: List[str],
     markers: Dict[str, Any],
+    event_vlines: List[Dict[str, Any]],
     x: np.ndarray,
     channels: List[str],
     grid_layout: List[int],
@@ -842,6 +917,8 @@ def _plot_forceplate(
 
     rows, cols = grid_layout
     fig, axes = plt.subplots(rows, cols, figsize=forceplate_style["subplot_size"], dpi=common_style["dpi"])
+
+    vline_style = dict(forceplate_style.get("onset_marker") or {})
 
     for ax, ch in zip(np.ravel(axes), channels):
         y = aggregated.get(ch)
@@ -866,6 +943,8 @@ def _plot_forceplate(
                 alpha=window_span_alpha,
                 label=span["label"],
             )
+
+        _draw_event_vlines(ax, event_vlines, style=vline_style)
 
         if common_style.get("show_onset_marker", True):
             onset_time = markers.get(ch, {}).get("onset")
@@ -918,6 +997,7 @@ def _plot_cop(
     mode_name: str,
     group_fields: List[str],
     markers: Dict[str, Dict[str, float]],
+    event_vlines: List[Dict[str, Any]],
     x_axis: Optional[np.ndarray],
     target_axis: Optional[np.ndarray],
     time_start_ms: float,
@@ -979,6 +1059,10 @@ def _plot_cop(
         alpha=cop_style.get("line_alpha", 0.8),
         label="Cy",
     )
+
+    vline_style = dict(cop_style.get("event_vline_marker") or {})
+    _draw_event_vlines(ax_cx, event_vlines, style=vline_style)
+    _draw_event_vlines(ax_cy, event_vlines, style=vline_style)
 
     ax_scatter.scatter(
         ml_vals,
@@ -1099,6 +1183,7 @@ def _plot_com(
     mode_name: str,
     group_fields: List[str],
     markers: Dict[str, Dict[str, float]],
+    event_vlines: List[Dict[str, Any]],
     x_axis: Optional[np.ndarray],
     time_start_ms: float,
     time_end_ms: float,
@@ -1186,6 +1271,10 @@ def _plot_com(
             alpha=com_style.get("line_alpha", 0.8),
             label=comz_name,
         )
+
+    vline_style = dict(com_style.get("event_vline_marker") or {})
+    for ax in time_axes:
+        _draw_event_vlines(ax, event_vlines, style=vline_style)
 
     ax_scatter.scatter(
         ml_vals,
@@ -1295,6 +1384,7 @@ def _plot_com(
 def _plot_cop_overlay(
     *,
     aggregated_by_key: Dict[Tuple, Dict[str, np.ndarray]],
+    event_vlines_by_key: Dict[Tuple, List[Dict[str, Any]]],
     output_path: Path,
     mode_name: str,
     group_fields: List[str],
@@ -1379,6 +1469,15 @@ def _plot_cop_overlay(
                 alpha=cop_style.get("line_alpha", 0.8),
                 label=plot_label,
             )
+
+        vline_base = dict(cop_style.get("event_vline_marker") or {})
+        for key in sorted_keys:
+            vlines = event_vlines_by_key.get(key, [])
+            if not vlines:
+                continue
+            vline_style = dict(vline_base)
+            vline_style["color"] = key_to_color.get(key, vline_style["color"])
+            _draw_event_vlines(ax, vlines, style=vline_style)
 
         ax.grid(True, alpha=common_style["grid_alpha"])
         ax.tick_params(labelsize=common_style["tick_labelsize"])
@@ -1513,6 +1612,7 @@ def _plot_cop_overlay(
 def _plot_com_overlay(
     *,
     aggregated_by_key: Dict[Tuple, Dict[str, np.ndarray]],
+    event_vlines_by_key: Dict[Tuple, List[Dict[str, Any]]],
     output_path: Path,
     mode_name: str,
     group_fields: List[str],
@@ -1617,6 +1717,15 @@ def _plot_com_overlay(
                 alpha=com_style.get("line_alpha", 0.8),
                 label=plot_label,
             )
+
+        vline_base = dict(com_style.get("event_vline_marker") or {})
+        for key in sorted_keys:
+            vlines = event_vlines_by_key.get(key, [])
+            if not vlines:
+                continue
+            vline_style = dict(vline_base)
+            vline_style["color"] = key_to_color.get(key, vline_style["color"])
+            _draw_event_vlines(ax, vlines, style=vline_style)
 
         ax.grid(True, alpha=common_style["grid_alpha"])
         ax.tick_params(labelsize=common_style["tick_labelsize"])
@@ -1771,6 +1880,9 @@ class AggregatedSignalVisualizer:
         mocap_rate = float(self.config["data"].get("mocap_sample_rate", 100))
         self.frame_ratio = int(self.config["data"].get("frame_ratio") or int(self.device_rate / mocap_rate))
 
+        self.event_vline_columns = _parse_event_vlines_config(self.config.get("event_vlines"))
+        self.event_vline_meta_cols = [_event_ms_col(col) for col in self.event_vline_columns]
+
         self.target_length = int(self.config["interpolation"]["target_length"])
         self.target_axis: Optional[np.ndarray] = None
         self.x_norm: Optional[np.ndarray] = None
@@ -1817,6 +1929,9 @@ class AggregatedSignalVisualizer:
         ensure_output_dirs(self.base_dir, self.config)
 
         meta_cols_needed = self._collect_needed_meta_columns(enabled_modes)
+        for col in self.event_vline_meta_cols:
+            if col not in meta_cols_needed:
+                meta_cols_needed.append(col)
 
         group_names = self._signal_group_names(selected_groups)
         for group_name in group_names:
@@ -1911,6 +2026,19 @@ class AggregatedSignalVisualizer:
             * self.frame_ratio
         )
 
+        extra_event_exprs: List[pl.Expr] = []
+        if self.event_vline_columns:
+            available_cols = set(self._lazy_columns(lf))
+            ms_per_frame = 1000.0 / float(self.device_rate)
+            for event_col in self.event_vline_columns:
+                if event_col not in available_cols:
+                    print(f"[event_vlines] Warning: column '{event_col}' not found in input; skipping")
+                    continue
+                # Interpret event in the same domain as `platform_onset` (mocap frame) and convert to ms.
+                event_mocap = pl.col(event_col).max().over(group_cols)  # ignores nulls
+                event_rel_frame = (event_mocap - onset_mocap) * self.frame_ratio
+                extra_event_exprs.append((event_rel_frame * ms_per_frame).alias(_event_ms_col(event_col)))
+
         return lf.with_columns(
             [
                 onset_device.alias("onset_device_frame"),
@@ -1918,6 +2046,7 @@ class AggregatedSignalVisualizer:
                 aligned_mocap.alias("aligned_mocap_frame"),
                 offset_rel.alias("offset_from_onset"),
             ]
+            + extra_event_exprs
         )
 
     @staticmethod
@@ -2127,6 +2256,7 @@ class AggregatedSignalVisualizer:
             for key, idx in grouped.items():
                 aggregated_by_key[key] = self._aggregate_tensor(tensor, meta_df, idx, channels)
                 markers_by_key[key] = self._collect_markers(signal_group, key, group_fields, mode_cfg.get("filter"))
+            event_vlines_by_key = {key: self._collect_event_vlines(meta_df, idx) for key, idx in grouped.items()}
 
             output_dir = Path(self.base_dir, mode_cfg["output_dir"])
             output_dir.mkdir(parents=True, exist_ok=True)
@@ -2157,6 +2287,7 @@ class AggregatedSignalVisualizer:
                         signal_group=signal_group,
                         aggregated_by_key=aggregated_by_key,
                         markers_by_key=markers_by_key,
+                        event_vlines_by_key=event_vlines_by_key,
                         output_path=output_path,
                         mode_name=mode_name,
                         group_fields=group_fields,
@@ -2184,6 +2315,7 @@ class AggregatedSignalVisualizer:
             for file_key, keys_in_file in file_groups.items():
                 file_aggregated = {k: aggregated_by_key[k] for k in keys_in_file}
                 file_markers = {k: markers_by_key[k] for k in keys_in_file}
+                file_event_vlines = {k: event_vlines_by_key.get(k, []) for k in keys_in_file}
 
                 sorted_keys = _sort_overlay_keys(keys_in_file, group_fields)
                 filtered_group_fields = _calculate_filtered_group_fields(
@@ -2200,6 +2332,7 @@ class AggregatedSignalVisualizer:
                         signal_group=signal_group,
                         aggregated_by_key=file_aggregated,
                         markers_by_key=file_markers,
+                        event_vlines_by_key=file_event_vlines,
                         output_path=output_path,
                         mode_name=mode_name,
                         group_fields=group_fields,
@@ -2219,6 +2352,7 @@ class AggregatedSignalVisualizer:
             output_dir.mkdir(parents=True, exist_ok=True)
             output_path = output_dir / filename
             markers = self._collect_markers(signal_group, key, group_fields, mode_cfg.get("filter"))
+            event_vlines = self._collect_event_vlines(meta_df, idx)
 
             if signal_group == "emg":
                 tasks.append(
@@ -2229,6 +2363,7 @@ class AggregatedSignalVisualizer:
                         mode_name=mode_name,
                         group_fields=group_fields,
                         markers=markers,
+                        event_vlines=event_vlines,
                         window_spans=window_spans,
                     )
                 )
@@ -2241,6 +2376,7 @@ class AggregatedSignalVisualizer:
                         mode_name=mode_name,
                         group_fields=group_fields,
                         markers=markers,
+                        event_vlines=event_vlines,
                         window_spans=window_spans,
                     )
                 )
@@ -2253,6 +2389,7 @@ class AggregatedSignalVisualizer:
                         mode_name=mode_name,
                         group_fields=group_fields,
                         markers=markers,
+                        event_vlines=event_vlines,
                         window_spans=window_spans,
                     )
                 )
@@ -2265,6 +2402,7 @@ class AggregatedSignalVisualizer:
                         mode_name=mode_name,
                         group_fields=group_fields,
                         markers=markers,
+                        event_vlines=event_vlines,
                         window_spans=window_spans,
                     )
                 )
@@ -2348,12 +2486,38 @@ class AggregatedSignalVisualizer:
             )
         return spans
 
+    def _collect_event_vlines(self, meta_df: pl.DataFrame, indices: np.ndarray) -> List[Dict[str, Any]]:
+        if not self.event_vline_columns:
+            return []
+        if self.time_start_ms is None or self.time_end_ms is None:
+            return []
+        if indices.size == 0:
+            return []
+
+        out: List[Dict[str, Any]] = []
+        for event_col in self.event_vline_columns:
+            ms_col = _event_ms_col(event_col)
+            if ms_col not in meta_df.columns:
+                continue
+            vals = meta_df[ms_col].to_numpy()
+            mean_ms = _nanmean_ignore_nan(vals[indices])
+            if mean_ms is None:
+                continue
+            if not _is_within_time_axis(mean_ms, self.time_start_ms, self.time_end_ms):
+                continue
+            x = _ms_to_norm(mean_ms, self.time_start_ms, self.time_end_ms)
+            if x is None:
+                continue
+            out.append({"name": event_col, "x": float(x)})
+        return out
+
     def _task_overlay(
         self,
         *,
         signal_group: str,
         aggregated_by_key: Dict[Tuple, Dict[str, np.ndarray]],
         markers_by_key: Dict[Tuple, Dict[str, Any]],
+        event_vlines_by_key: Dict[Tuple, List[Dict[str, Any]]],
         output_path: Path,
         mode_name: str,
         group_fields: List[str],
@@ -2371,6 +2535,7 @@ class AggregatedSignalVisualizer:
             "sorted_keys": sorted_keys,
             "aggregated_by_key": aggregated_by_key,
             "markers_by_key": markers_by_key,
+            "event_vlines_by_key": event_vlines_by_key,
             "x": self.x_norm,
             "window_spans": window_spans,
             "common_style": self.common_style,
@@ -2433,6 +2598,7 @@ class AggregatedSignalVisualizer:
         mode_name: str,
         group_fields: List[str],
         markers: Dict[str, Any],
+        event_vlines: List[Dict[str, Any]],
         window_spans: List[Dict[str, Any]],
     ) -> Dict[str, Any]:
         return {
@@ -2443,6 +2609,7 @@ class AggregatedSignalVisualizer:
             "group_fields": group_fields,
             "aggregated": aggregated,
             "markers": markers,
+            "event_vlines": event_vlines,
             "x": self.x_norm,
             "channels": self.config["signal_groups"]["emg"]["columns"],
             "grid_layout": self.config["signal_groups"]["emg"]["grid_layout"],
@@ -2463,6 +2630,7 @@ class AggregatedSignalVisualizer:
         mode_name: str,
         group_fields: List[str],
         markers: Dict[str, Any],
+        event_vlines: List[Dict[str, Any]],
         window_spans: List[Dict[str, Any]],
     ) -> Dict[str, Any]:
         return {
@@ -2473,6 +2641,7 @@ class AggregatedSignalVisualizer:
             "group_fields": group_fields,
             "aggregated": aggregated,
             "markers": markers,
+            "event_vlines": event_vlines,
             "x": self.x_norm,
             "channels": self.config["signal_groups"]["forceplate"]["columns"],
             "grid_layout": self.config["signal_groups"]["forceplate"]["grid_layout"],
@@ -2493,6 +2662,7 @@ class AggregatedSignalVisualizer:
         mode_name: str,
         group_fields: List[str],
         markers: Dict[str, Any],
+        event_vlines: List[Dict[str, Any]],
         window_spans: List[Dict[str, Any]],
     ) -> Dict[str, Any]:
         return {
@@ -2503,6 +2673,7 @@ class AggregatedSignalVisualizer:
             "group_fields": group_fields,
             "aggregated": aggregated,
             "markers": markers,
+            "event_vlines": event_vlines,
             "x_axis": self.x_norm,
             "target_axis": self.target_axis,
             "time_start_ms": self.time_start_ms,
@@ -2523,6 +2694,7 @@ class AggregatedSignalVisualizer:
         mode_name: str,
         group_fields: List[str],
         markers: Dict[str, Any],
+        event_vlines: List[Dict[str, Any]],
         window_spans: List[Dict[str, Any]],
     ) -> Dict[str, Any]:
         return {
@@ -2533,6 +2705,7 @@ class AggregatedSignalVisualizer:
             "group_fields": group_fields,
             "aggregated": aggregated,
             "markers": markers,
+            "event_vlines": event_vlines,
             "x_axis": self.x_norm,
             "time_start_ms": self.time_start_ms,
             "time_end_ms": self.time_end_ms,
@@ -2648,7 +2821,7 @@ class AggregatedSignalVisualizer:
         }
 
     def _build_cop_style(self, cfg: Dict[str, Any]) -> Dict[str, Any]:
-        return {
+        out = {
             "subplot_size": tuple(cfg["subplot_size"]),
             "scatter_size": cfg["scatter_size"],
             "scatter_alpha": cfg["scatter_alpha"],
@@ -2683,6 +2856,8 @@ class AggregatedSignalVisualizer:
             },
             "overlay_scatter_edgewidth": cfg.get("overlay_scatter_edgewidth", 0.6),
         }
+        out["event_vline_marker"] = dict(getattr(self, "forceplate_style", {}).get("onset_marker", {}) or {})
+        return out
 
     @staticmethod
     def _build_com_style(com_cfg: Any, cop_style: Dict[str, Any]) -> Dict[str, Any]:

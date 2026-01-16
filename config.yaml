@@ -203,6 +203,13 @@ windows:
       start_ms: 600
       end_ms: 800
 
+# === Event Vertical Lines (data-driven annotations) ===
+# Notes:
+# - Values are interpreted in the same domain as `data.id_columns.onset` (platform_onset; mocap frame).
+# - The visual style is controlled in the visualization code (not config).
+event_vlines:
+  columns: ["step_onset"]
+
 # === Figure Layout ===
 figure_layout:
   summary_plots:
