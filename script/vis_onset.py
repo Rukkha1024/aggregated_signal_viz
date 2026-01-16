@@ -10,7 +10,11 @@ import matplotlib.pyplot as plt
 import matplotlib.lines as mlines
 import numpy as np
 import polars as pl
-import yaml
+
+try:
+    from script.config_utils import load_config, resolve_path, strip_bom_columns
+except ModuleNotFoundError:  # Allows running as `python script/vis_onset.py`
+    from config_utils import load_config, resolve_path, strip_bom_columns
 
 # =============================================================================
 # 1. VISUALIZATION CONFIGURATION (CONSTANTS)
@@ -95,16 +99,10 @@ class VizConfig:
 
 VIZ_CFG = VizConfig()
 
-# 2. DATA LOADER & PROCESSOR
-
-def load_config(config_path: Path) -> Dict[str, Any]:
-    with config_path.open("r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
-
 def load_and_merge_data(config: Dict[str, Any], base_dir: Path) -> pl.DataFrame:
     """Load input (parquet) + features (csv) and join by trial keys."""
     input_path_str = config["data"]["input_file"]
-    input_path = (base_dir / input_path_str).resolve() if not Path(input_path_str).is_absolute() else Path(input_path_str)
+    input_path = resolve_path(base_dir, input_path_str)
     
     print(f"Loading input file: {input_path}")
     lf_input = pl.scan_parquet(str(input_path))
@@ -117,12 +115,12 @@ def load_and_merge_data(config: Dict[str, Any], base_dir: Path) -> pl.DataFrame:
     df_trials = lf_input.select(key_cols).unique().collect()
 
     feature_path_str = config["data"]["features_file"]
-    feature_path = (base_dir / feature_path_str).resolve() if not Path(feature_path_str).is_absolute() else Path(feature_path_str)
+    feature_path = resolve_path(base_dir, feature_path_str)
     
     print(f"Loading features file: {feature_path}")
     df_features = pl.read_csv(str(feature_path))
-    
-    df_features = df_features.rename({c: c.lstrip("\ufeff") for c in df_features.columns})
+
+    df_features = strip_bom_columns(df_features)
 
     # Inner join keeps only trials present in both files.
     for col in key_cols:
@@ -420,6 +418,12 @@ def main():
     config_path = Path(args.config)
     config = load_config(config_path)
     base_dir = config_path.parent
+
+    onset_cols = config.get("data", {}).get("emg_onset_timing_columns")
+    if isinstance(onset_cols, list) and onset_cols:
+        first = str(onset_cols[0]).strip()
+        if first:
+            VIZ_CFG.target_column = first
     
     df = load_and_merge_data(config, base_dir)
     

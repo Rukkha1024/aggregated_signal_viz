@@ -10,20 +10,14 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 import polars as pl
-import yaml
 from scipy import stats
 
-
-def _load_config(path: Path) -> Dict[str, Any]:
-    with path.open("r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
-
-
-def _resolve_path(base_dir: Path, maybe_path: str) -> Path:
-    path = Path(maybe_path)
-    if path.is_absolute():
-        return path
-    return (base_dir / path).resolve()
+try:
+    from script.config_utils import load_config as _load_config
+    from script.config_utils import resolve_path as _resolve_path
+except ModuleNotFoundError:  # Allows running as `python script/analyze_cop_crossing_emg.py`
+    from config_utils import load_config as _load_config
+    from config_utils import resolve_path as _resolve_path
 
 
 def _bh_fdr(pvals: np.ndarray) -> np.ndarray:

@@ -9,12 +9,11 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 import polars as pl
-import yaml
 
-
-def load_config(config_path: Path) -> Dict[str, Any]:
-    with config_path.open("r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+try:
+    from script.config_utils import bom_rename_map, load_config, resolve_path, strip_bom_columns
+except ModuleNotFoundError:  # Allows running as `python script/visualizer.py`
+    from config_utils import bom_rename_map, load_config, resolve_path, strip_bom_columns
 
 
 def ensure_output_dirs(base_path: Path, config: Dict[str, Any]) -> None:
@@ -2041,14 +2040,11 @@ class AggregatedSignalVisualizer:
         return out
 
     def _load_and_align_lazy(self) -> pl.LazyFrame:
-        input_path = Path(self.config["data"]["input_file"])
-        if not input_path.is_absolute():
-            input_path = (self.base_dir / input_path).resolve()
+        input_path = resolve_path(self.base_dir, self.config["data"]["input_file"])
 
         lf = pl.scan_parquet(str(input_path))
 
-        cols = self._lazy_columns(lf)
-        rename_map = {c: c.lstrip("\ufeff") for c in cols if c.startswith("\ufeff")}
+        rename_map = bom_rename_map(self._lazy_columns(lf))
         if rename_map:
             lf = lf.rename(rename_map)
 
@@ -2998,11 +2994,7 @@ class AggregatedSignalVisualizer:
 
     def _collect_emg_markers(self, df: pl.DataFrame) -> Dict[str, Dict[str, float]]:
         channels = self.config["signal_groups"]["emg"]["columns"]
-        onset_cols = [
-            "TKEO_AGLR_emg_onset_timing",
-            "TKEO_TH_emg_onset_timing",
-            "non_TKEO_TH_onset_timing",
-        ]
+        onset_cols = self._emg_onset_timing_columns()
         markers: Dict[str, Dict[str, float]] = {}
         for ch in channels:
             ch_df = df.filter(pl.col("emg_channel") == ch)
@@ -3020,9 +3012,29 @@ class AggregatedSignalVisualizer:
                 marker_info["onset"] = onset_val
             if max_val is not None:
                 marker_info["max"] = max_val
-            if marker_info:
-                markers[ch] = marker_info
+        if marker_info:
+            markers[ch] = marker_info
         return markers
+
+    def _emg_onset_timing_columns(self) -> List[str]:
+        defaults = [
+            "TKEO_AGLR_emg_onset_timing",
+            "TKEO_TH_emg_onset_timing",
+            "non_TKEO_TH_onset_timing",
+        ]
+        cfg = self.config.get("data", {}) if isinstance(self.config, dict) else {}
+        raw = cfg.get("emg_onset_timing_columns") if isinstance(cfg, dict) else None
+        if not isinstance(raw, list):
+            return list(defaults)
+        cols: List[str] = []
+        for col in raw:
+            if col is None:
+                continue
+            name = str(col).strip()
+            if not name:
+                continue
+            cols.append(name)
+        return cols or list(defaults)
 
     def _collect_forceplate_markers(self, df: pl.DataFrame) -> Dict[str, Dict[str, float]]:
         mapping = {"Fx": "fx_onset_timing", "Fy": "fy_onset_timing", "Fz": "fz_onset_timing"}
@@ -3048,14 +3060,11 @@ class AggregatedSignalVisualizer:
         features_path = self.config["data"].get("features_file")
         if not features_path:
             return None
-        path = Path(features_path)
-        if not path.is_absolute():
-            path = (self.base_dir / path).resolve()
+        path = resolve_path(self.base_dir, features_path)
         if not path.exists():
             return None
         df = pl.read_csv(path)
-        df = df.rename({c: c.lstrip("\ufeff") for c in df.columns})
-        return df
+        return strip_bom_columns(df)
 
 
 def parse_args() -> argparse.Namespace:

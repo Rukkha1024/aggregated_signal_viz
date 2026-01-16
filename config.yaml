@@ -16,6 +16,11 @@ data:
   device_sample_rate: 1000
   mocap_sample_rate: 100
   frame_ratio: 10
+  # EMG onset timing columns (priority order; first usable value wins)
+  emg_onset_timing_columns:
+    - "TKEO_AGLR_emg_onset_timing"
+    - "TKEO_TH_emg_onset_timing"
+    - "non_TKEO_TH_onset_timing"
 
 # === Signal Groups ===
 signal_groups:
