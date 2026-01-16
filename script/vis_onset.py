@@ -418,12 +418,6 @@ def main():
     config_path = Path(args.config)
     config = load_config(config_path)
     base_dir = config_path.parent
-
-    onset_cols = config.get("data", {}).get("emg_onset_timing_columns")
-    if isinstance(onset_cols, list) and onset_cols:
-        first = str(onset_cols[0]).strip()
-        if first:
-            VIZ_CFG.target_column = first
     
     df = load_and_merge_data(config, base_dir)
     

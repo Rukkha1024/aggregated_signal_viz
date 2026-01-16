@@ -2994,7 +2994,11 @@ class AggregatedSignalVisualizer:
 
     def _collect_emg_markers(self, df: pl.DataFrame) -> Dict[str, Dict[str, float]]:
         channels = self.config["signal_groups"]["emg"]["columns"]
-        onset_cols = self._emg_onset_timing_columns()
+        onset_cols = [
+            "TKEO_AGLR_emg_onset_timing",
+            "TKEO_TH_emg_onset_timing",
+            "non_TKEO_TH_onset_timing",
+        ]
         markers: Dict[str, Dict[str, float]] = {}
         for ch in channels:
             ch_df = df.filter(pl.col("emg_channel") == ch)
@@ -3012,29 +3016,9 @@ class AggregatedSignalVisualizer:
                 marker_info["onset"] = onset_val
             if max_val is not None:
                 marker_info["max"] = max_val
-        if marker_info:
-            markers[ch] = marker_info
+            if marker_info:
+                markers[ch] = marker_info
         return markers
-
-    def _emg_onset_timing_columns(self) -> List[str]:
-        defaults = [
-            "TKEO_AGLR_emg_onset_timing",
-            "TKEO_TH_emg_onset_timing",
-            "non_TKEO_TH_onset_timing",
-        ]
-        cfg = self.config.get("data", {}) if isinstance(self.config, dict) else {}
-        raw = cfg.get("emg_onset_timing_columns") if isinstance(cfg, dict) else None
-        if not isinstance(raw, list):
-            return list(defaults)
-        cols: List[str] = []
-        for col in raw:
-            if col is None:
-                continue
-            name = str(col).strip()
-            if not name:
-                continue
-            cols.append(name)
-        return cols or list(defaults)
 
     def _collect_forceplate_markers(self, df: pl.DataFrame) -> Dict[str, Dict[str, float]]:
         mapping = {"Fx": "fx_onset_timing", "Fy": "fy_onset_timing", "Fz": "fz_onset_timing"}
