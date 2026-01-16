@@ -25,8 +25,11 @@ class VizConfig:
     """Configuration for visualization style and parameters."""
 
     # File & Column Settings
+    # Any numeric feature column in the features CSV can be used here.
     target_column: str = "TKEO_AGLR_emg_onset_timing"
     muscle_column_in_feature: str = "emg_channel"  # Column name in CSV holding 'TA', 'SOL' etc.
+    x_label: str = "Onset Timing (ms)"
+    file_prefix: str = "onset_viz"
 
     # Facet & Hue Configuration (Default values)
     facet_column: Optional[str] = None  # No faceting by default
@@ -346,7 +349,7 @@ def plot_onset_timing(
         ax.set_title(title, fontsize=VIZ_CFG.title_fontsize, fontweight="bold")
         ax.set_yticks(y_indices)
         ax.set_yticklabels(valid_muscles_reversed, fontsize=VIZ_CFG.tick_labelsize)
-        ax.set_xlabel("Onset Timing (ms)", fontsize=VIZ_CFG.xlabel_fontsize)
+        ax.set_xlabel(VIZ_CFG.x_label, fontsize=VIZ_CFG.xlabel_fontsize)
         ax.tick_params(axis="x", labelsize=VIZ_CFG.xtick_labelsize)
         ax.grid(True, axis="x", alpha=VIZ_CFG.grid_alpha, linestyle="--")
         
@@ -475,7 +478,7 @@ def main():
     print(stats)
 
     # Build filename from filters
-    fname_parts = ["onset_viz"]
+    fname_parts = [VIZ_CFG.file_prefix]
     for col_name, col_value in VIZ_CFG.filters.items():
         fname_parts.append(f"{col_name}-{col_value}")
     if args.facet: 
