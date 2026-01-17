@@ -1,7 +1,7 @@
 ## Work Procedure
 Always follow this procedure when performing tasks:
 1. **Plan the changes**: Before making any code modifications, create a detailed plan outlining what will be changed and why
-2. **Get user confirmation**: Present the plan to the user and wait for explicit confirmation before proceeding
+2. **Get user confirmation**: Present the plan to the user and wait for explicit confirmation before proceeding. get user's approval typing "proceed". 
 3. **Modify code**: Make the necessary code changes according to the confirmed plan
 4. **Git commit in Korean**: Commit your changes with a Korean commit message
 5. **Run the modified code**: Execute the modified code to verify your work
