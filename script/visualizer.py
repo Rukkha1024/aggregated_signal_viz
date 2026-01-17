@@ -321,11 +321,59 @@ def _build_group_legend_handles(
     return handles
 
 
+def _build_event_vline_legend_handles(
+    vlines: Sequence[Dict[str, Any]],
+    *,
+    style: Dict[str, Any],
+) -> List[Any]:
+    if not vlines:
+        return []
+    try:
+        import matplotlib.lines as mlines
+    except Exception:
+        return []
+
+    base_kwargs = dict(style) if style else {"color": "red", "linestyle": "--", "linewidth": 1.5}
+    base_kwargs.setdefault("alpha", 0.9)
+
+    linestyle = base_kwargs.get("linestyle", "--")
+    linewidth = float(base_kwargs.get("linewidth", 1.5))
+    alpha = float(base_kwargs.get("alpha", 0.9))
+    base_color = base_kwargs.get("color", "red")
+
+    handles: List[Any] = []
+    seen: set[str] = set()
+    for v in vlines:
+        name = v.get("name")
+        if name is None:
+            continue
+        label = str(name).strip()
+        if not label or label in seen:
+            continue
+        seen.add(label)
+        color = v.get("color")
+        resolved_color = str(color).strip() if color is not None and str(color).strip() else str(base_color)
+        handles.append(
+            mlines.Line2D(
+                [],
+                [],
+                color=resolved_color,
+                linestyle=linestyle,
+                linewidth=linewidth,
+                alpha=alpha,
+                label=label,
+            )
+        )
+    return handles
+
+
 def _apply_window_group_legends(
     ax: Any,
     *,
     window_spans: Sequence[Dict[str, Any]],
     group_handles: Sequence[Any],
+    event_vlines: Sequence[Dict[str, Any]] = (),
+    event_vline_style: Optional[Dict[str, Any]] = None,
     legend_fontsize: float,
     framealpha: float,
     loc: str = "best",
@@ -346,6 +394,14 @@ def _apply_window_group_legends(
             continue
         seen_labels.add(label)
         handles.append(handle)
+
+    if event_vlines:
+        for handle in _build_event_vline_legend_handles(event_vlines, style=event_vline_style or {}):
+            label = str(getattr(handle, "get_label", lambda: "")()).strip()
+            if not label or label == "_nolegend_" or label in seen_labels:
+                continue
+            seen_labels.add(label)
+            handles.append(handle)
 
     existing_handles, existing_labels = ax.get_legend_handles_labels()
     for handle, label in zip(existing_handles, existing_labels):
@@ -892,10 +948,15 @@ def _plot_emg(
         )
         ax.grid(True, alpha=common_style["grid_alpha"])
         ax.tick_params(labelsize=common_style["tick_labelsize"])
-        ax.legend(
-            fontsize=emg_style["legend_fontsize"],
-            loc=common_style["legend_loc"],
+        _apply_window_group_legends(
+            ax,
+            window_spans=window_spans,
+            group_handles=[],
+            event_vlines=event_vlines,
+            event_vline_style=event_vline_style,
+            legend_fontsize=emg_style["legend_fontsize"],
             framealpha=common_style["legend_framealpha"],
+            loc=common_style["legend_loc"],
         )
 
     for ax in axes_flat[len(channels) :]:
@@ -954,6 +1015,7 @@ def _plot_overlay_timeseries_grid(
         use_group_colors = common_style.get("use_group_colors", False)
         key_to_color = _build_group_color_map(sorted_keys, group_fields, color_by_fields, base_colors) if use_group_colors else {}
         key_to_linestyle = _build_group_linestyles(sorted_keys, common_style.get("group_linestyles", ("-", "--", ":", "-.")))
+        event_vlines_all = [v for key in sorted_keys for v in event_vlines_by_key.get(key, [])]
 
         for ax, ch in zip(axes_flat, channels):
             seen_labels: set[str] = set()
@@ -1015,10 +1077,15 @@ def _plot_overlay_timeseries_grid(
             )
             ax.grid(True, alpha=common_style["grid_alpha"])
             ax.tick_params(labelsize=common_style["tick_labelsize"])
-            ax.legend(
-                fontsize=style["legend_fontsize"],
-                loc=common_style["legend_loc"],
+            _apply_window_group_legends(
+                ax,
+                window_spans=window_spans,
+                group_handles=[],
+                event_vlines=event_vlines_all,
+                event_vline_style=event_vline_style,
+                legend_fontsize=style["legend_fontsize"],
                 framealpha=common_style["legend_framealpha"],
+                loc=common_style["legend_loc"],
             )
 
         for ax in axes_flat[len(channels) :]:
@@ -1049,6 +1116,7 @@ def _plot_overlay_timeseries_grid(
         use_group_colors = common_style.get("use_group_colors", False)
         key_to_color = _build_group_color_map(sorted_keys, group_fields, color_by_fields, base_colors) if use_group_colors else {}
         key_to_linestyle = _build_group_linestyles(sorted_keys, common_style.get("group_linestyles", ("-", "--", ":", "-.")))
+        event_vlines_all = [v for key in sorted_keys for v in event_vlines_by_key.get(key, [])]
 
         for ax, ch in zip(np.ravel(axes), channels):
             seen_labels: set[str] = set()
@@ -1095,10 +1163,15 @@ def _plot_overlay_timeseries_grid(
             )
             ax.grid(True, alpha=common_style["grid_alpha"])
             ax.tick_params(labelsize=common_style["tick_labelsize"])
-            ax.legend(
-                fontsize=style["legend_fontsize"],
-                loc=common_style["legend_loc"],
+            _apply_window_group_legends(
+                ax,
+                window_spans=window_spans,
+                group_handles=[],
+                event_vlines=event_vlines_all,
+                event_vline_style=event_vline_style,
+                legend_fontsize=style["legend_fontsize"],
                 framealpha=common_style["legend_framealpha"],
+                loc=common_style["legend_loc"],
             )
             ax.set_xlabel(style["x_label"], fontsize=common_style["label_fontsize"])
             axis_label = _resolve_forceplate_axis_label(ch, style.get("axis_labels", {}))
@@ -1183,10 +1256,15 @@ def _plot_forceplate(
         )
         ax.grid(True, alpha=common_style["grid_alpha"])
         ax.tick_params(labelsize=common_style["tick_labelsize"])
-        ax.legend(
-            fontsize=forceplate_style["legend_fontsize"],
-            loc=common_style["legend_loc"],
+        _apply_window_group_legends(
+            ax,
+            window_spans=window_spans,
+            group_handles=[],
+            event_vlines=event_vlines,
+            event_vline_style=event_vline_style,
+            legend_fontsize=forceplate_style["legend_fontsize"],
             framealpha=common_style["legend_framealpha"],
+            loc=common_style["legend_loc"],
         )
         ax.set_xlabel(forceplate_style["x_label"], fontsize=common_style["label_fontsize"])
         axis_label = _resolve_forceplate_axis_label(ch, forceplate_style.get("axis_labels", {}))
@@ -1361,10 +1439,15 @@ def _plot_cop(
     for ax in (ax_cx, ax_cy):
         ax.grid(True, alpha=common_style["grid_alpha"])
         ax.tick_params(labelsize=common_style["tick_labelsize"])
-        ax.legend(
-            fontsize=cop_style["legend_fontsize"],
-            loc=common_style["legend_loc"],
+        _apply_window_group_legends(
+            ax,
+            window_spans=[],
+            group_handles=[],
+            event_vlines=event_vlines,
+            event_vline_style=event_vline_style,
+            legend_fontsize=cop_style["legend_fontsize"],
             framealpha=common_style["legend_framealpha"],
+            loc=common_style["legend_loc"],
         )
 
     ax_cx.set_xlabel(cop_style.get("x_label_time", "Normalized time (0-1)"), fontsize=common_style["label_fontsize"])
@@ -1596,10 +1679,15 @@ def _plot_com(
     for ax in axes_to_style:
         ax.grid(True, alpha=common_style["grid_alpha"])
         ax.tick_params(labelsize=common_style["tick_labelsize"])
-        ax.legend(
-            fontsize=com_style["legend_fontsize"],
-            loc=common_style["legend_loc"],
+        _apply_window_group_legends(
+            ax,
+            window_spans=[],
+            group_handles=[],
+            event_vlines=event_vlines,
+            event_vline_style=event_vline_style,
+            legend_fontsize=com_style["legend_fontsize"],
             framealpha=common_style["legend_framealpha"],
+            loc=common_style["legend_loc"],
         )
 
     ax_mag.grid(True, alpha=common_style["grid_alpha"])
@@ -1608,6 +1696,8 @@ def _plot_com(
         ax_mag,
         window_spans=window_spans,
         group_handles=[],
+        event_vlines=event_vlines,
+        event_vline_style=event_vline_style,
         legend_fontsize=com_style["legend_fontsize"],
         framealpha=common_style["legend_framealpha"],
         loc=common_style["legend_loc"],
@@ -1705,6 +1795,7 @@ def _plot_cop_overlay(
     use_group_colors = common_style.get("use_group_colors", False)
     key_to_linestyle = _build_group_linestyles(sorted_keys, common_style.get("group_linestyles", ("-", "--", ":", "-.")))
     key_to_color = _build_group_color_map(sorted_keys, group_fields, color_by_fields, base_colors) if use_group_colors else {}
+    event_vlines_all = [v for key in sorted_keys for v in event_vlines_by_key.get(key, [])]
 
     # Time series: Cx / Cy
     for ax, ch, y_label in (
@@ -1743,10 +1834,15 @@ def _plot_cop_overlay(
 
         ax.grid(True, alpha=common_style["grid_alpha"])
         ax.tick_params(labelsize=common_style["tick_labelsize"])
-        ax.legend(
-            fontsize=cop_style["legend_fontsize"],
-            loc=common_style["legend_loc"],
+        _apply_window_group_legends(
+            ax,
+            window_spans=[],
+            group_handles=[],
+            event_vlines=event_vlines_all,
+            event_vline_style=event_vline_style,
+            legend_fontsize=cop_style["legend_fontsize"],
             framealpha=common_style["legend_framealpha"],
+            loc=common_style["legend_loc"],
         )
         ax.set_xlabel(cop_style.get("x_label_time", "Normalized time (0-1)"), fontsize=common_style["label_fontsize"])
         ax.set_ylabel(y_label, fontsize=common_style["label_fontsize"])
@@ -1779,7 +1875,7 @@ def _plot_cop_overlay(
                 continue
             ml_vals = (-cy) if cop_style["y_invert"] else cy
             linestyle = key_to_linestyle.get(key, "-")
-    ax_scatter.plot(
+            ax_scatter.plot(
                 ml_vals[mask],
                 cx[mask],
                 color=span["color"],
@@ -1894,6 +1990,7 @@ def _plot_com_overlay(
     use_group_colors = common_style.get("use_group_colors", False)
     key_to_linestyle = _build_group_linestyles(sorted_keys, common_style.get("group_linestyles", ("-", "--", ":", "-.")))
     key_to_color = _build_group_color_map(sorted_keys, group_fields, color_by_fields, base_colors) if use_group_colors else {}
+    event_vlines_all = [v for key in sorted_keys for v in event_vlines_by_key.get(key, [])]
 
     channel_axes = [
         (ax_x, comx_name, com_style.get("y_label_comx", comx_name)),
@@ -1935,10 +2032,15 @@ def _plot_com_overlay(
 
         ax.grid(True, alpha=common_style["grid_alpha"])
         ax.tick_params(labelsize=common_style["tick_labelsize"])
-        ax.legend(
-            fontsize=com_style["legend_fontsize"],
-            loc=common_style["legend_loc"],
+        _apply_window_group_legends(
+            ax,
+            window_spans=[],
+            group_handles=[],
+            event_vlines=event_vlines_all,
+            event_vline_style=event_vline_style,
+            legend_fontsize=com_style["legend_fontsize"],
             framealpha=common_style["legend_framealpha"],
+            loc=common_style["legend_loc"],
         )
         ax.set_xlabel(com_style.get("x_label_time", "Normalized time (0-1)"), fontsize=common_style["label_fontsize"])
         ax.set_ylabel(y_label, fontsize=common_style["label_fontsize"])
@@ -1987,6 +2089,8 @@ def _plot_com_overlay(
         ax_mag,
         window_spans=window_spans,
         group_handles=group_handles,
+        event_vlines=event_vlines_all,
+        event_vline_style=event_vline_style,
         legend_fontsize=com_style["legend_fontsize"],
         framealpha=common_style["legend_framealpha"],
         loc=common_style["legend_loc"],
