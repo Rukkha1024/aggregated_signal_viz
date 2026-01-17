@@ -90,7 +90,6 @@ plot_style:
     savefig_bbox_inches: "tight"       # 저장 시 테두리 처리 ("tight"로 여백 최소화)
     savefig_facecolor: "white"         # 배경색 ("white", "gray" 등)
     font_family: "NanumGothic"         # 폰트 ("NanumGothic", "Arial" 등)
-    show_onset_marker: false           # platform_onset 마커 표시 여부
     show_max_marker: false             # 최댓값 마커 표시 여부
     use_group_colors: false            # 그룹별 색상 사용 여부 (true=색상, false=라인스타일만)
     # group_linestyles 사용법:
@@ -105,9 +104,6 @@ plot_style:
     line_width: 1.2                    # 라인 두께 (포인트)
     line_alpha: 0.8                    # 라인 투명도 (0=투명, 1=불투명)
     window_span_alpha: 0.15            # 윈도우 배경 투명도 (p1,p2,p3,p4 구간 표시용)
-    onset_marker_color: "red"          # onset 마커 색상
-    onset_marker_linestyle: "--"       # onset 마커 스타일 ("--"=점선, "-"=실선, ":"=점)
-    onset_marker_linewidth: 1.5        # onset 마커 두께
     max_marker_color: "orange"         # 최댓값 마커 색상
     max_marker_linestyle: "--"         # 최댓값 마커 스타일
     max_marker_linewidth: 1.5          # 최댓값 마커 두께
@@ -132,9 +128,6 @@ plot_style:
     line_width: 1.2                    # 라인 두께
     line_alpha: 0.8                    # 라인 투명도
     window_span_alpha: 0.15            # 윈도우 배경 투명도
-    onset_marker_color: "red"          # onset 마커 색상
-    onset_marker_linestyle: "--"       # onset 마커 스타일
-    onset_marker_linewidth: 1.5        # onset 마커 두께
     legend_fontsize: 5                 # legend 폰트 크기 (채널 수가 적어서 크게)
     x_label: "Normalized time (0-1)"   # X축 라벨
     y_label: "{axis_label}"            # Y축 라벨 (축 방향 설명)
@@ -202,7 +195,7 @@ windows:
 # - Values are interpreted in the same domain as `data.id_columns.onset` (platform_onset; mocap frame).
 # - The visual style is controlled via `event_vlines.style` (matplotlib axvline kwargs).
 event_vlines:
-  columns: ["step_onset"]
+  columns: ["platform_onset", "step_onset"]
   style:
     color: "gray"
     linestyle: "--"

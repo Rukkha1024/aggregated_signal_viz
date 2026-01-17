@@ -217,6 +217,22 @@ def _resolve_forceplate_axis_label(channel: str, axis_labels: Dict[str, str]) ->
     return axis_labels.get(base, channel)
 
 
+def _resolve_forceplate_line_color(channel: str, line_colors: Dict[str, Any]) -> str:
+    if not line_colors:
+        return "blue"
+
+    direct = line_colors.get(channel)
+    if direct is not None and str(direct).strip():
+        return str(direct).strip()
+
+    base = channel[:-5] if channel.endswith("_zero") else channel
+    base_color = line_colors.get(base)
+    if base_color is not None and str(base_color).strip():
+        return str(base_color).strip()
+
+    return "blue"
+
+
 def _format_title(signal_group: str, mode_name: str, group_fields: List[str], key: Tuple) -> str:
     if key == ("all",):
         return f"{mode_name} | {signal_group}"
@@ -696,12 +712,6 @@ def _plot_emg(
         _draw_event_vlines(ax, event_vlines, style=event_vline_style)
 
         marker_info = markers.get(ch, {})
-        if common_style.get("show_onset_marker", True):
-            onset_time = marker_info.get("onset")
-            if onset_time is not None and _is_within_time_axis(onset_time, time_start_ms, time_end_ms):
-                onset_norm = _ms_to_norm(onset_time, time_start_ms, time_end_ms)
-                if onset_norm is not None:
-                    ax.axvline(onset_norm, **emg_style["onset_marker"], label="onset")
         if common_style.get("show_max_marker", True):
             max_time = marker_info.get("max")
             if max_time is not None and _is_within_time_axis(max_time, time_start_ms, time_end_ms):
@@ -825,12 +835,6 @@ def _plot_overlay_timeseries_grid(
             for key in sorted_keys:
                 marker_info = markers_by_key.get(key, {}).get(ch, {})
                 marker_label = _format_group_label(key, group_fields)
-                if common_style.get("show_onset_marker", True):
-                    onset_time = marker_info.get("onset")
-                    if onset_time is not None and _is_within_time_axis(onset_time, time_start_ms, time_end_ms):
-                        onset_norm = _ms_to_norm(onset_time, time_start_ms, time_end_ms)
-                        if onset_norm is not None:
-                            ax.axvline(onset_norm, **style["onset_marker"], label=f"{marker_label} onset")
                 if common_style.get("show_max_marker", True):
                     max_time = marker_info.get("max")
                     if max_time is not None and _is_within_time_axis(max_time, time_start_ms, time_end_ms):
@@ -902,7 +906,7 @@ def _plot_overlay_timeseries_grid(
                 else:
                     plot_label = group_label
                     seen_labels.add(group_label)
-                channel_color = style.get("line_colors", {}).get(ch, "blue")
+                channel_color = _resolve_forceplate_line_color(ch, style.get("line_colors", {}) or {})
                 color = key_to_color.get(key, channel_color) if use_group_colors else channel_color
                 linestyle = key_to_linestyle.get(key, "-")
                 ax.plot(
@@ -917,17 +921,6 @@ def _plot_overlay_timeseries_grid(
 
             for key in sorted_keys:
                 _draw_event_vlines(ax, event_vlines_by_key.get(key, []), style=event_vline_style)
-
-            if common_style.get("show_onset_marker", True):
-                for key in sorted_keys:
-                    onset_time = markers_by_key.get(key, {}).get(ch, {}).get("onset")
-                    if onset_time is None or not _is_within_time_axis(onset_time, time_start_ms, time_end_ms):
-                        continue
-                    onset_norm = _ms_to_norm(onset_time, time_start_ms, time_end_ms)
-                    if onset_norm is None:
-                        continue
-                    marker_label = _format_group_label(key, group_fields)
-                    ax.axvline(onset_norm, **style["onset_marker"], label=f"{marker_label} onset")
 
             ax.set_title(
                 ch,
@@ -997,7 +990,7 @@ def _plot_forceplate(
             ax.axis("off")
             continue
 
-        color = forceplate_style["line_colors"].get(ch, "blue")
+        color = _resolve_forceplate_line_color(ch, forceplate_style.get("line_colors", {}) or {})
         ax.plot(
             x,
             y,
@@ -1016,13 +1009,6 @@ def _plot_forceplate(
             )
 
         _draw_event_vlines(ax, event_vlines, style=event_vline_style)
-
-        if common_style.get("show_onset_marker", True):
-            onset_time = markers.get(ch, {}).get("onset")
-            if onset_time is not None and _is_within_time_axis(onset_time, time_start_ms, time_end_ms):
-                onset_norm = _ms_to_norm(onset_time, time_start_ms, time_end_ms)
-                if onset_norm is not None:
-                    ax.axvline(onset_norm, **forceplate_style["onset_marker"], label="onset")
 
         ax.set_title(
             ch,
@@ -3119,7 +3105,6 @@ class AggregatedSignalVisualizer:
             "savefig_bbox_inches": cfg["savefig_bbox_inches"],
             "savefig_facecolor": cfg["savefig_facecolor"],
             "font_family": cfg["font_family"],
-            "show_onset_marker": cfg["show_onset_marker"],
             "show_max_marker": cfg["show_max_marker"],
             "use_group_colors": bool(cfg.get("use_group_colors", False)),
             "group_linestyles": _parse_group_linestyles(cfg.get("group_linestyles")),
@@ -3132,20 +3117,12 @@ class AggregatedSignalVisualizer:
             "line_width": cfg["line_width"],
             "line_alpha": cfg["line_alpha"],
             "window_span_alpha": cfg["window_span_alpha"],
-            "onset_marker_color": cfg["onset_marker_color"],
-            "onset_marker_linestyle": cfg["onset_marker_linestyle"],
-            "onset_marker_linewidth": cfg["onset_marker_linewidth"],
             "max_marker_color": cfg["max_marker_color"],
             "max_marker_linestyle": cfg["max_marker_linestyle"],
             "max_marker_linewidth": cfg["max_marker_linewidth"],
             "legend_fontsize": cfg["legend_fontsize"],
             "x_label": cfg["x_label"],
             "y_label": cfg["y_label"],
-            "onset_marker": {
-                "color": cfg["onset_marker_color"],
-                "linestyle": cfg["onset_marker_linestyle"],
-                "linewidth": cfg["onset_marker_linewidth"],
-            },
             "max_marker": {
                 "color": cfg["max_marker_color"],
                 "linestyle": cfg["max_marker_linestyle"],
@@ -3161,17 +3138,9 @@ class AggregatedSignalVisualizer:
             "line_width": cfg["line_width"],
             "line_alpha": cfg["line_alpha"],
             "window_span_alpha": cfg["window_span_alpha"],
-            "onset_marker_color": cfg["onset_marker_color"],
-            "onset_marker_linestyle": cfg["onset_marker_linestyle"],
-            "onset_marker_linewidth": cfg["onset_marker_linewidth"],
             "legend_fontsize": cfg["legend_fontsize"],
             "x_label": cfg["x_label"],
             "y_label": cfg["y_label"],
-            "onset_marker": {
-                "color": cfg["onset_marker_color"],
-                "linestyle": cfg["onset_marker_linestyle"],
-                "linewidth": cfg["onset_marker_linewidth"],
-            },
         }
 
     def _build_cop_style(self, cfg: Dict[str, Any]) -> Dict[str, Any]:
