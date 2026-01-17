@@ -11,9 +11,23 @@ import numpy as np
 import polars as pl
 
 try:
-    from script.config_utils import bom_rename_map, load_config, resolve_path, strip_bom_columns
+    from script.config_utils import (
+        bom_rename_map,
+        get_frame_ratio,
+        load_config,
+        resolve_output_dir,
+        resolve_path,
+        strip_bom_columns,
+    )
 except ModuleNotFoundError:  # Allows running as `python script/visualizer.py`
-    from config_utils import bom_rename_map, load_config, resolve_path, strip_bom_columns
+    from config_utils import (
+        bom_rename_map,
+        get_frame_ratio,
+        load_config,
+        resolve_output_dir,
+        resolve_path,
+        strip_bom_columns,
+    )
 
 
 def ensure_output_dirs(base_path: Path, config: Dict[str, Any]) -> None:
@@ -21,7 +35,7 @@ def ensure_output_dirs(base_path: Path, config: Dict[str, Any]) -> None:
         out_dir = mode_cfg.get("output_dir")
         if not out_dir:
             continue
-        Path(base_path, out_dir).mkdir(parents=True, exist_ok=True)
+        resolve_output_dir(base_path, config, out_dir).mkdir(parents=True, exist_ok=True)
 
 
 _INTERP_TARGET_AXIS: Optional[np.ndarray] = None
@@ -2202,8 +2216,7 @@ class AggregatedSignalVisualizer:
 
         self.id_cfg = self.config["data"]["id_columns"]
         self.device_rate = float(self.config["data"].get("device_sample_rate", 1000))
-        mocap_rate = float(self.config["data"].get("mocap_sample_rate", 100))
-        self.frame_ratio = int(self.config["data"].get("frame_ratio") or int(self.device_rate / mocap_rate))
+        self.frame_ratio = get_frame_ratio(self.config["data"])
 
         event_vlines_cfg = self.config.get("event_vlines")
         self.event_vline_columns = _parse_event_vlines_config(event_vlines_cfg)
@@ -2628,7 +2641,7 @@ class AggregatedSignalVisualizer:
                 markers_by_key[key] = self._collect_markers(signal_group, key, group_fields, mode_cfg.get("filter"))
             event_vlines_by_key = {key: self._collect_event_vlines(meta_df, idx) for key, idx in grouped.items()}
 
-            output_dir = Path(self.base_dir, mode_cfg["output_dir"])
+            output_dir = resolve_output_dir(self.base_dir, self.config, mode_cfg["output_dir"])
             output_dir.mkdir(parents=True, exist_ok=True)
             filename_pattern = mode_cfg["filename_pattern"]
 
@@ -2718,7 +2731,7 @@ class AggregatedSignalVisualizer:
         for key, idx in grouped.items():
             aggregated = self._aggregate_tensor(tensor, meta_df, idx, channels)
             filename = self._render_filename(mode_cfg["filename_pattern"], key, signal_group, group_fields)
-            output_dir = Path(self.base_dir, mode_cfg["output_dir"])
+            output_dir = resolve_output_dir(self.base_dir, self.config, mode_cfg["output_dir"])
             output_dir.mkdir(parents=True, exist_ok=True)
             output_path = output_dir / filename
             markers = self._collect_markers(signal_group, key, group_fields, mode_cfg.get("filter"))

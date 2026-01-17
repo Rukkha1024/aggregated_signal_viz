@@ -56,7 +56,7 @@ aggregation_modes:
     color_by: ["step_TF"]
     overlay: true
     overlay_within: ["step_TF"]
-    output_dir: "output/step_TF"
+    output_dir: "step_TF"
     filename_pattern: "step_TF_mean_{signal_group}.png"
   diff_step_TF_subject_mean:
     enabled: true
@@ -67,7 +67,7 @@ aggregation_modes:
     color_by: ["step_TF"]
     overlay: true
     overlay_within: ["step_TF"]
-    output_dir: "output/step_TF_subject"
+    output_dir: "step_TF_subject"
     filename_pattern: "step_TF_{subject}_mean_{signal_group}.png"
 
 
