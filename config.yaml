@@ -12,10 +12,9 @@ data:
     offset: "platform_offset"
     task: "task"
   task_filter: "perturb"
-  # Sampling rates and frame ratio (MocapFrame → DeviceFrame)
+  # Sampling rates (MocapFrame → DeviceFrame)
   device_sample_rate: 1000
   mocap_sample_rate: 100
-  frame_ratio: 10
 
 # === Signal Groups ===
 signal_groups:
@@ -36,7 +35,6 @@ signal_groups:
 
 # === Interpolation ===
 interpolation:
-  method: "linear"
   target_length: 500
   start_ms: -100
   end_ms: 800
@@ -92,6 +90,11 @@ plot_style:
     font_family: "NanumGothic"         # 폰트 ("NanumGothic", "Arial" 등)
     show_max_marker: false             # 최댓값 마커 표시 여부
     use_group_colors: false            # 그룹별 색상 사용 여부 (true=색상, false=라인스타일만)
+    window_colors:                     # 각 윈도우 기간별 색상 (p1~p4)
+      p1: "#4E79A7"                    # 0-200ms (파란색)
+      p2: "#F28E2B"                    # 200-400ms (주황색)
+      p3: "#E15759"                    # 400-600ms (빨간색)
+      p4: "#59A14F"                    # 600-800ms (초록색)
     # group_linestyles 사용법:
     # - 기본 값: "-", "--", ":", "-."
     # - 커스텀 dash: [offset, [on, off, on, off, ...]] 형태
@@ -146,11 +149,6 @@ plot_style:
       Cy: "red"
     line_width: 1.2
     line_alpha: 0.8
-    window_colors:                     # 각 윈도우 기간별 색상 (p1~p4)
-      p1: "#4E79A7"                    # 0-200ms (파란색)
-      p2: "#F28E2B"                    # 200-400ms (주황색)
-      p3: "#E15759"                    # 400-600ms (빨간색)
-      p4: "#59A14F"                    # 600-800ms (초록색)
     max_marker_color: "#ED1C24"        # 최댓값 마커 색상 (빨강)
     max_marker_size: 80                # 최댓값 마커 크기 (통상 점보다 큼)
     max_marker_symbol: "*"             # 최댓값 마커 모양 ("*"=별, "o"=원, "s"=사각형)

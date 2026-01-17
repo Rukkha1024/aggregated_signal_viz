@@ -637,6 +637,21 @@ def _parse_group_linestyles(raw_values: Any) -> Tuple[Any, ...]:
     return tuple(styles) if styles else ("-", "--", ":", "-.")
 
 
+def _parse_window_colors(cfg: Any) -> Dict[str, str]:
+    if not isinstance(cfg, dict):
+        return {}
+    out: Dict[str, str] = {}
+    for key, value in cfg.items():
+        if key is None or value is None:
+            continue
+        name = str(key).strip()
+        color = str(value).strip()
+        if not name or not color:
+            continue
+        out[name] = color
+    return out
+
+
 def _build_group_linestyles(sorted_keys: List[Tuple], linestyles: Sequence[Any]) -> Dict[Tuple, Any]:
     if not sorted_keys:
         return {}
@@ -911,6 +926,7 @@ def _plot_task(task: Dict[str, Any]) -> None:
             time_end_ms=task["time_end_ms"],
             device_rate=float(task["device_rate"]),
             cop_channels=task["cop_channels"],
+            grid_layout=task.get("grid_layout"),
             cop_style=task["cop_style"],
             common_style=common_style,
             window_spans=task["window_spans"],
@@ -932,6 +948,7 @@ def _plot_task(task: Dict[str, Any]) -> None:
             time_end_ms=task["time_end_ms"],
             device_rate=float(task["device_rate"]),
             com_channels=task["com_channels"],
+            grid_layout=task.get("grid_layout"),
             com_style=task["com_style"],
             common_style=common_style,
             window_spans=task["window_spans"],
@@ -978,6 +995,7 @@ def _plot_overlay_generic(
             x=x,
             window_spans=window_spans,
             cop_channels=cop_channels or (),
+            grid_layout=grid_layout,
             cop_style=style,
             common_style=common_style,
             filtered_group_fields=filtered_group_fields,
@@ -997,6 +1015,7 @@ def _plot_overlay_generic(
             x=x,
             window_spans=window_spans,
             com_channels=cop_channels or (),
+            grid_layout=grid_layout,
             com_style=style,
             common_style=common_style,
             filtered_group_fields=filtered_group_fields,
@@ -1360,6 +1379,7 @@ def _plot_cop(
     time_end_ms: float,
     device_rate: float,
     cop_channels: Sequence[str],
+    grid_layout: Optional[Sequence[int]],
     cop_style: Dict[str, Any],
     common_style: Dict[str, Any],
     window_spans: List[Dict[str, Any]],
@@ -1381,7 +1401,16 @@ def _plot_cop(
     ap_vals = cx
     ml_vals = -cy if cop_style["y_invert"] else cy
 
-    n_panels = 3
+    rows, cols = 1, 3
+    if grid_layout and len(grid_layout) == 2:
+        try:
+            rows = max(1, int(grid_layout[0]))
+            cols = max(1, int(grid_layout[1]))
+        except (TypeError, ValueError):
+            rows, cols = 1, 3
+    n_panels = rows * cols
+    if n_panels < 3:
+        raise ValueError("COP grid_layout must have at least 3 panels (Cx, Cy, scatter).")
     fig_size = cop_style["subplot_size"]
     try:
         fig_w, fig_h = fig_size
@@ -1389,11 +1418,13 @@ def _plot_cop(
     except (TypeError, ValueError):
         pass
 
-    fig, axes = plt.subplots(1, n_panels, figsize=fig_size, dpi=common_style["dpi"])
+    fig, axes = plt.subplots(rows, cols, figsize=fig_size, dpi=common_style["dpi"])
     axes = np.asarray(axes).ravel()
     ax_cx = axes[0]
     ax_cy = axes[1]
     ax_scatter = axes[2]
+    for ax in axes[3:]:
+        ax.axis("off")
 
     window_span_alpha = float(cop_style.get("window_span_alpha", 0.15))
 
@@ -1525,6 +1556,7 @@ def _plot_com(
     time_end_ms: float,
     device_rate: float,
     com_channels: Sequence[str],
+    grid_layout: Optional[Sequence[int]],
     com_style: Dict[str, Any],
     common_style: Dict[str, Any],
     window_spans: List[Dict[str, Any]],
@@ -1552,7 +1584,20 @@ def _plot_com(
     ml_vals = -comy if com_style.get("y_invert", False) else comy
     mag_vals = np.sqrt((ap_vals**2) + (ml_vals**2))
 
-    n_panels = 5 if comz_name is not None else 4
+    rows, cols = 1, 4
+    if grid_layout and len(grid_layout) == 2:
+        try:
+            rows = max(1, int(grid_layout[0]))
+            cols = max(1, int(grid_layout[1]))
+        except (TypeError, ValueError):
+            rows, cols = 1, 4
+    n_panels = rows * cols
+    if n_panels < 4:
+        raise ValueError("COM grid_layout must have at least 4 panels (COMx, COMy, magnitude, scatter).")
+    if comz_name is not None and n_panels < 5:
+        comz_name = None
+        comz = None
+    n_used_panels = 5 if comz_name is not None else 4
     fig_size = com_style["subplot_size"]
     try:
         fig_w, fig_h = fig_size
@@ -1560,7 +1605,7 @@ def _plot_com(
     except (TypeError, ValueError):
         pass
 
-    fig, axes = plt.subplots(1, n_panels, figsize=fig_size, dpi=common_style["dpi"])
+    fig, axes = plt.subplots(rows, cols, figsize=fig_size, dpi=common_style["dpi"])
     axes = np.asarray(axes).ravel()
     ax_x = axes[0]
     ax_y = axes[1]
@@ -1572,6 +1617,8 @@ def _plot_com(
         ax_z = None
         ax_mag = axes[2]
         ax_scatter = axes[3]
+    for ax in axes[n_used_panels:]:
+        ax.axis("off")
 
     window_span_alpha = float(com_style.get("window_span_alpha", 0.15))
     time_axes = [ax_x, ax_y] + ([ax_z] if ax_z is not None else []) + [ax_mag]
@@ -1782,6 +1829,7 @@ def _plot_cop_overlay(
     x: np.ndarray,
     window_spans: List[Dict[str, Any]],
     cop_channels: Sequence[str],
+    grid_layout: Optional[Sequence[int]],
     cop_style: Dict[str, Any],
     common_style: Dict[str, Any],
     filtered_group_fields: List[str],
@@ -1791,7 +1839,16 @@ def _plot_cop_overlay(
 
     cx_name, cy_name = _resolve_cop_channel_names(cop_channels)
 
-    n_panels = 3
+    rows, cols = 1, 3
+    if grid_layout and len(grid_layout) == 2:
+        try:
+            rows = max(1, int(grid_layout[0]))
+            cols = max(1, int(grid_layout[1]))
+        except (TypeError, ValueError):
+            rows, cols = 1, 3
+    n_panels = rows * cols
+    if n_panels < 3:
+        raise ValueError("COP grid_layout must have at least 3 panels (Cx, Cy, scatter).")
     fig_size = cop_style["subplot_size"]
     try:
         fig_w, fig_h = fig_size
@@ -1799,11 +1856,13 @@ def _plot_cop_overlay(
     except (TypeError, ValueError):
         pass
 
-    fig, axes = plt.subplots(1, n_panels, figsize=fig_size, dpi=common_style["dpi"])
+    fig, axes = plt.subplots(rows, cols, figsize=fig_size, dpi=common_style["dpi"])
     axes = np.asarray(axes).ravel()
     ax_cx = axes[0]
     ax_cy = axes[1]
     ax_scatter = axes[2]
+    for ax in axes[3:]:
+        ax.axis("off")
 
     window_span_alpha = float(cop_style.get("window_span_alpha", 0.15))
     for ax in (ax_cx, ax_cy):
@@ -1936,6 +1995,7 @@ def _plot_com_overlay(
     x: np.ndarray,
     window_spans: List[Dict[str, Any]],
     com_channels: Sequence[str],
+    grid_layout: Optional[Sequence[int]],
     com_style: Dict[str, Any],
     common_style: Dict[str, Any],
     filtered_group_fields: List[str],
@@ -1949,7 +2009,19 @@ def _plot_com_overlay(
     ):
         comz_name = None
 
-    n_panels = 5 if comz_name is not None else 4
+    rows, cols = 1, 4
+    if grid_layout and len(grid_layout) == 2:
+        try:
+            rows = max(1, int(grid_layout[0]))
+            cols = max(1, int(grid_layout[1]))
+        except (TypeError, ValueError):
+            rows, cols = 1, 4
+    n_panels = rows * cols
+    if n_panels < 4:
+        raise ValueError("COM grid_layout must have at least 4 panels (COMx, COMy, magnitude, scatter).")
+    if comz_name is not None and n_panels < 5:
+        comz_name = None
+    n_used_panels = 5 if comz_name is not None else 4
     fig_size = com_style["subplot_size"]
     try:
         fig_w, fig_h = fig_size
@@ -1957,7 +2029,7 @@ def _plot_com_overlay(
     except (TypeError, ValueError):
         pass
 
-    fig, axes = plt.subplots(1, n_panels, figsize=fig_size, dpi=common_style["dpi"])
+    fig, axes = plt.subplots(rows, cols, figsize=fig_size, dpi=common_style["dpi"])
     axes = np.asarray(axes).ravel()
     ax_x = axes[0]
     ax_y = axes[1]
@@ -1969,6 +2041,8 @@ def _plot_com_overlay(
         ax_z = None
         ax_mag = axes[2]
         ax_scatter = axes[3]
+    for ax in axes[n_used_panels:]:
+        ax.axis("off")
 
     window_span_alpha = float(com_style.get("window_span_alpha", 0.15))
     time_axes = [ax_x, ax_y] + ([ax_z] if ax_z is not None else []) + [ax_mag]
@@ -2217,14 +2291,18 @@ class AggregatedSignalVisualizer:
         self.time_end_frame: Optional[float] = None
         self.window_norm_ranges: Dict[str, Tuple[float, float]] = {}
         self.window_ms_ranges: Dict[str, Tuple[float, float]] = {}
+        self.window_reference_shift_ms: float = 0.0
 
         style_cfg = self.config["plot_style"]
-        self.common_style = self._build_common_style(style_cfg["common"])
+        common_style_cfg = style_cfg["common"]
+        self.common_style = self._build_common_style(common_style_cfg)
         self.emg_style = self._build_emg_style(style_cfg["emg"])
         self.forceplate_style = self._build_forceplate_style(style_cfg["forceplate"])
         self.cop_style = self._build_cop_style(style_cfg["cop"])
         self.com_style = self._build_com_style(style_cfg.get("com", {}), self.cop_style)
-        self.window_colors = self.cop_style.get("window_colors", {})
+        self.window_colors = _parse_window_colors(common_style_cfg.get("window_colors"))
+        if not self.window_colors:
+            self.window_colors = _parse_window_colors(style_cfg.get("cop", {}).get("window_colors"))
         self.legend_label_threshold = self.common_style.get("legend_label_threshold", 6)
 
         self.features_df: Optional[pl.DataFrame] = self._load_features()
@@ -2485,6 +2563,7 @@ class AggregatedSignalVisualizer:
         self.time_end_frame = time_end_frame
         self.target_axis = np.linspace(time_start_frame, time_end_frame, self.target_length)
         self.x_norm = np.linspace(0.0, 1.0, self.target_length)
+        self.window_reference_shift_ms = self._compute_window_reference_shift_ms(lf)
         self.window_norm_ranges, self.window_ms_ranges = self._compute_window_norm_ranges()
         return cropped
 
@@ -2942,6 +3021,7 @@ class AggregatedSignalVisualizer:
                 {
                     "style": self.cop_style,
                     "cop_channels": self.config["signal_groups"]["cop"]["columns"],
+                    "grid_layout": self.config["signal_groups"]["cop"]["grid_layout"],
                 }
             )
             return task
@@ -2951,6 +3031,7 @@ class AggregatedSignalVisualizer:
                 {
                     "style": self.com_style,
                     "cop_channels": self.config["signal_groups"]["com"]["columns"],
+                    "grid_layout": self.config["signal_groups"]["com"]["grid_layout"],
                 }
             )
             return task
@@ -3051,6 +3132,7 @@ class AggregatedSignalVisualizer:
             "time_end_ms": self.time_end_ms,
             "device_rate": self.device_rate,
             "cop_channels": self.config["signal_groups"]["cop"]["columns"],
+            "grid_layout": self.config["signal_groups"]["cop"]["grid_layout"],
             "cop_style": self.cop_style,
             "common_style": self.common_style,
             "window_spans": window_spans,
@@ -3083,20 +3165,76 @@ class AggregatedSignalVisualizer:
             "time_end_ms": self.time_end_ms,
             "device_rate": self.device_rate,
             "com_channels": self.config["signal_groups"]["com"]["columns"],
+            "grid_layout": self.config["signal_groups"]["com"]["grid_layout"],
             "com_style": self.com_style,
             "common_style": self.common_style,
             "window_spans": window_spans,
         }
+
+    def _compute_window_reference_shift_ms(self, lf: pl.LazyFrame) -> float:
+        windows_cfg = self.config.get("windows", {})
+        if not isinstance(windows_cfg, dict):
+            return 0.0
+
+        ref_event = windows_cfg.get("reference_event")
+        if ref_event is None:
+            return 0.0
+        ref_col = str(ref_event).strip()
+        if not ref_col:
+            return 0.0
+
+        onset_col = str(self.id_cfg.get("onset") or "").strip()
+        if not onset_col or ref_col == onset_col:
+            return 0.0
+
+        available_cols = set(self._lazy_columns(lf))
+        if ref_col not in available_cols:
+            print(f"[windows] Warning: reference_event column '{ref_col}' not found; windows are not shifted")
+            return 0.0
+        if onset_col not in available_cols:
+            print(f"[windows] Warning: onset column '{onset_col}' not found; windows are not shifted")
+            return 0.0
+
+        subject_col = self.id_cfg["subject"]
+        velocity_col = self.id_cfg["velocity"]
+        trial_col = self.id_cfg["trial"]
+        group_cols = [subject_col, velocity_col, trial_col]
+
+        ms_per_frame = 1000.0 / float(self.device_rate)
+        shift_lf = (
+            lf.group_by(group_cols)
+            .agg(
+                [
+                    pl.col(onset_col).first().alias("__onset_mocap"),
+                    pl.col(ref_col).max().alias("__ref_mocap"),
+                ]
+            )
+            .with_columns(
+                (
+                    (pl.col("__ref_mocap") - pl.col("__onset_mocap"))
+                    * float(self.frame_ratio)
+                    * ms_per_frame
+                ).alias("__shift_ms")
+            )
+        )
+
+        stats = shift_lf.select(pl.col("__shift_ms").drop_nulls().mean().alias("mean")).collect()
+        mean_shift = stats["mean"].item()
+        if mean_shift is None:
+            print(f"[windows] Warning: reference_event '{ref_col}' has no values; windows are not shifted")
+            return 0.0
+        return float(mean_shift)
 
     def _compute_window_norm_ranges(self) -> Tuple[Dict[str, Tuple[float, float]], Dict[str, Tuple[float, float]]]:
         if self.time_start_ms is None or self.time_end_ms is None:
             return {}, {}
         norm_ranges: Dict[str, Tuple[float, float]] = {}
         ms_ranges: Dict[str, Tuple[float, float]] = {}
+        shift_ms = float(self.window_reference_shift_ms or 0.0)
         definitions = self.config.get("windows", {}).get("definitions", {})
         for name, cfg in definitions.items():
-            raw_start = float(cfg["start_ms"])
-            raw_end = float(cfg["end_ms"])
+            raw_start = float(cfg["start_ms"]) + shift_ms
+            raw_end = float(cfg["end_ms"]) + shift_ms
             clamped_start = max(raw_start, self.time_start_ms)
             clamped_end = min(raw_end, self.time_end_ms)
             if clamped_start >= clamped_end:
@@ -3189,7 +3327,6 @@ class AggregatedSignalVisualizer:
             "line_colors": cfg.get("line_colors", {"Cx": "blue", "Cy": "red"}),
             "line_width": cfg.get("line_width", 0.8),
             "line_alpha": cfg.get("line_alpha", 0.8),
-            "window_colors": cfg["window_colors"],
             "max_marker_color": cfg["max_marker_color"],
             "max_marker_size": cfg["max_marker_size"],
             "max_marker_symbol": cfg["max_marker_symbol"],

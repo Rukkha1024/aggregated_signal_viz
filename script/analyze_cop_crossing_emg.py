@@ -15,9 +15,11 @@ from scipy import stats
 try:
     from script.config_utils import load_config as _load_config
     from script.config_utils import resolve_path as _resolve_path
+    from script.config_utils import get_frame_ratio as _get_frame_ratio
 except ModuleNotFoundError:  # Allows running as `python script/analyze_cop_crossing_emg.py`
     from config_utils import load_config as _load_config
     from config_utils import resolve_path as _resolve_path
+    from config_utils import get_frame_ratio as _get_frame_ratio
 
 
 def _bh_fdr(pvals: np.ndarray) -> np.ndarray:
@@ -617,8 +619,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         raise ValueError("Expected 'step_TF' column in merged.parquet.")
 
     device_rate = float(data_cfg.get("device_sample_rate", 1000))
-    mocap_rate = float(data_cfg.get("mocap_sample_rate", 100))
-    frame_ratio = int(data_cfg.get("frame_ratio") or int(device_rate / mocap_rate))
+    frame_ratio = _get_frame_ratio(data_cfg)
     dt_ms = 1000.0 / device_rate
 
     # Time window
