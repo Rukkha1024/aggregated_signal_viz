@@ -1591,33 +1591,51 @@ def _plot_com(
             cols = max(1, int(grid_layout[1]))
         except (TypeError, ValueError):
             rows, cols = 1, 4
-    n_panels = rows * cols
-    if n_panels < 4:
-        raise ValueError("COM grid_layout must have at least 4 panels (COMx, COMy, magnitude, scatter).")
-    if comz_name is not None and n_panels < 5:
+
+    slots = rows * cols
+    if comz_name is not None and slots < 4:
         comz_name = None
         comz = None
-    n_used_panels = 5 if comz_name is not None else 4
+
+    time_panels = 4 if comz_name is not None else 3
+    total_panels = time_panels + 1  # + scatter
+    if slots < time_panels:
+        raise ValueError("COM grid_layout must have enough panels for COMx/COMy/(COMz)/Magnitude.")
+
     fig_size = com_style["subplot_size"]
     try:
         fig_w, fig_h = fig_size
-        fig_size = (float(fig_w) * (n_panels / 3.0), float(fig_h))
+        fig_size = (float(fig_w) * (total_panels / 3.0), float(fig_h))
     except (TypeError, ValueError):
         pass
 
-    fig, axes = plt.subplots(rows, cols, figsize=fig_size, dpi=common_style["dpi"])
-    axes = np.asarray(axes).ravel()
+    include_scatter_in_grid = slots >= total_panels
+    if include_scatter_in_grid:
+        fig, axes = plt.subplots(rows, cols, figsize=fig_size, dpi=common_style["dpi"])
+        axes = np.asarray(axes).ravel()
+    elif rows == 1:
+        fig, axes = plt.subplots(1, total_panels, figsize=fig_size, dpi=common_style["dpi"])
+        axes = np.asarray(axes).ravel()
+    else:
+        from matplotlib.gridspec import GridSpec
+
+        fig = plt.figure(figsize=fig_size, dpi=common_style["dpi"])
+        gs = GridSpec(rows, cols + 1, figure=fig)
+        axes_time = [fig.add_subplot(gs[r, c]) for r in range(rows) for c in range(cols)]
+        ax_scatter = fig.add_subplot(gs[:, cols])
+        axes = np.asarray(axes_time + [ax_scatter], dtype=object)
+
     ax_x = axes[0]
     ax_y = axes[1]
     if comz_name is not None:
         ax_z = axes[2]
         ax_mag = axes[3]
-        ax_scatter = axes[4]
     else:
         ax_z = None
         ax_mag = axes[2]
-        ax_scatter = axes[3]
-    for ax in axes[n_used_panels:]:
+    ax_scatter = axes[time_panels]
+
+    for ax in axes[total_panels:]:
         ax.axis("off")
 
     window_span_alpha = float(com_style.get("window_span_alpha", 0.15))
@@ -2016,32 +2034,50 @@ def _plot_com_overlay(
             cols = max(1, int(grid_layout[1]))
         except (TypeError, ValueError):
             rows, cols = 1, 4
-    n_panels = rows * cols
-    if n_panels < 4:
-        raise ValueError("COM grid_layout must have at least 4 panels (COMx, COMy, magnitude, scatter).")
-    if comz_name is not None and n_panels < 5:
+
+    slots = rows * cols
+    if comz_name is not None and slots < 4:
         comz_name = None
-    n_used_panels = 5 if comz_name is not None else 4
+
+    time_panels = 4 if comz_name is not None else 3
+    total_panels = time_panels + 1  # + scatter
+    if slots < time_panels:
+        raise ValueError("COM grid_layout must have enough panels for COMx/COMy/(COMz)/Magnitude.")
+
     fig_size = com_style["subplot_size"]
     try:
         fig_w, fig_h = fig_size
-        fig_size = (float(fig_w) * (n_panels / 3.0), float(fig_h))
+        fig_size = (float(fig_w) * (total_panels / 3.0), float(fig_h))
     except (TypeError, ValueError):
         pass
 
-    fig, axes = plt.subplots(rows, cols, figsize=fig_size, dpi=common_style["dpi"])
-    axes = np.asarray(axes).ravel()
+    include_scatter_in_grid = slots >= total_panels
+    if include_scatter_in_grid:
+        fig, axes = plt.subplots(rows, cols, figsize=fig_size, dpi=common_style["dpi"])
+        axes = np.asarray(axes).ravel()
+    elif rows == 1:
+        fig, axes = plt.subplots(1, total_panels, figsize=fig_size, dpi=common_style["dpi"])
+        axes = np.asarray(axes).ravel()
+    else:
+        from matplotlib.gridspec import GridSpec
+
+        fig = plt.figure(figsize=fig_size, dpi=common_style["dpi"])
+        gs = GridSpec(rows, cols + 1, figure=fig)
+        axes_time = [fig.add_subplot(gs[r, c]) for r in range(rows) for c in range(cols)]
+        ax_scatter = fig.add_subplot(gs[:, cols])
+        axes = np.asarray(axes_time + [ax_scatter], dtype=object)
+
     ax_x = axes[0]
     ax_y = axes[1]
     if comz_name is not None:
         ax_z = axes[2]
         ax_mag = axes[3]
-        ax_scatter = axes[4]
     else:
         ax_z = None
         ax_mag = axes[2]
-        ax_scatter = axes[3]
-    for ax in axes[n_used_panels:]:
+    ax_scatter = axes[time_panels]
+
+    for ax in axes[total_panels:]:
         ax.axis("off")
 
     window_span_alpha = float(com_style.get("window_span_alpha", 0.15))
