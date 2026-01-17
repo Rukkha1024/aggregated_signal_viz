@@ -194,10 +194,16 @@ windows:
 # Notes:
 # - Values are interpreted in the same domain as `data.id_columns.onset` (platform_onset; mocap frame).
 # - The visual style is controlled via `event_vlines.style` (matplotlib axvline kwargs).
+# - Each column gets a different color from a palette by default.
+# - If you want a specific column color, set it in `event_vlines.colors`.
 event_vlines:
   columns: ["platform_onset", "step_onset"]
+  # Optional:
+  # colors:
+  #   platform_onset: "black"
+  # Optional (default: matplotlib C0..C9):
+  # palette: ["C0", "C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9"]
   style:
-    color: "gray"
     linestyle: "--"
     linewidth: 1.5
     alpha: 0.9

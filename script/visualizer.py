@@ -173,6 +173,69 @@ def _parse_event_vlines_style(cfg: Any) -> Dict[str, Any]:
     return out
 
 
+_DEFAULT_EVENT_VLINE_PALETTE: Tuple[str, ...] = (
+    "C0",
+    "C1",
+    "C2",
+    "C3",
+    "C4",
+    "C5",
+    "C6",
+    "C7",
+    "C8",
+    "C9",
+)
+
+
+def _parse_event_vlines_palette(cfg: Any) -> Tuple[str, ...]:
+    if not isinstance(cfg, dict):
+        return _DEFAULT_EVENT_VLINE_PALETTE
+    raw = cfg.get("palette")
+    if not isinstance(raw, list):
+        return _DEFAULT_EVENT_VLINE_PALETTE
+    palette: List[str] = []
+    for item in raw:
+        if item is None:
+            continue
+        text = str(item).strip()
+        if not text:
+            continue
+        palette.append(text)
+    return tuple(palette) if palette else _DEFAULT_EVENT_VLINE_PALETTE
+
+
+def _parse_event_vlines_color_overrides(cfg: Any) -> Dict[str, str]:
+    if not isinstance(cfg, dict):
+        return {}
+    raw = cfg.get("colors")
+    if not isinstance(raw, dict):
+        return {}
+    out: Dict[str, str] = {}
+    for key, value in raw.items():
+        if key is None or value is None:
+            continue
+        name = str(key).strip()
+        color = str(value).strip()
+        if not name or not color:
+            continue
+        out[name] = color
+    return out
+
+
+def _build_event_vline_color_map(event_columns: Sequence[str], cfg: Any) -> Dict[str, str]:
+    palette = _parse_event_vlines_palette(cfg)
+    if not palette:
+        palette = _DEFAULT_EVENT_VLINE_PALETTE
+    overrides = _parse_event_vlines_color_overrides(cfg)
+    out: Dict[str, str] = {}
+    for idx, event in enumerate(event_columns):
+        if event in overrides:
+            out[event] = overrides[event]
+        else:
+            out[event] = palette[idx % len(palette)]
+    return out
+
+
 def _event_ms_col(event_col: str) -> str:
     return f"__event_{event_col}_ms"
 
@@ -190,12 +253,16 @@ def _nanmean_ignore_nan(values: np.ndarray) -> Optional[float]:
 def _draw_event_vlines(ax: Any, vlines: Sequence[Dict[str, Any]], *, style: Dict[str, Any]) -> None:
     if not vlines:
         return
-    kwargs = dict(style) if style else {"color": "red", "linestyle": "--", "linewidth": 1.5}
-    kwargs.setdefault("alpha", 0.9)
+    base_kwargs = dict(style) if style else {"color": "red", "linestyle": "--", "linewidth": 1.5}
+    base_kwargs.setdefault("alpha", 0.9)
     for v in vlines:
         x = v.get("x")
         if x is None:
             continue
+        kwargs = dict(base_kwargs)
+        color = v.get("color")
+        if color is not None and str(color).strip():
+            kwargs["color"] = str(color).strip()
         ax.axvline(float(x), label="_nolegend_", **kwargs)
 
 
@@ -2170,9 +2237,11 @@ class AggregatedSignalVisualizer:
         mocap_rate = float(self.config["data"].get("mocap_sample_rate", 100))
         self.frame_ratio = int(self.config["data"].get("frame_ratio") or int(self.device_rate / mocap_rate))
 
-        self.event_vline_columns = _parse_event_vlines_config(self.config.get("event_vlines"))
+        event_vlines_cfg = self.config.get("event_vlines")
+        self.event_vline_columns = _parse_event_vlines_config(event_vlines_cfg)
         self.event_vline_meta_cols = [_event_ms_col(col) for col in self.event_vline_columns]
-        self.event_vline_style = _parse_event_vlines_style(self.config.get("event_vlines"))
+        self.event_vline_style = _parse_event_vlines_style(event_vlines_cfg)
+        self.event_vline_colors = _build_event_vline_color_map(self.event_vline_columns, event_vlines_cfg)
 
         self.target_length = int(self.config["interpolation"]["target_length"])
         self.target_axis: Optional[np.ndarray] = None
@@ -2841,7 +2910,7 @@ class AggregatedSignalVisualizer:
             x = _ms_to_norm(mean_ms, self.time_start_ms, self.time_end_ms)
             if x is None:
                 continue
-            out.append({"name": event_col, "x": float(x)})
+            out.append({"name": event_col, "x": float(x), "color": self.event_vline_colors.get(event_col)})
         return out
 
     def _task_overlay(
