@@ -1149,9 +1149,8 @@ def _plot_cop(
 
     ap_vals = cx
     ml_vals = -cy if cop_style["y_invert"] else cy
-    mag_vals = np.sqrt((ap_vals**2) + (ml_vals**2))
 
-    n_panels = 4
+    n_panels = 3
     fig_size = cop_style["subplot_size"]
     try:
         fig_w, fig_h = fig_size
@@ -1163,12 +1162,11 @@ def _plot_cop(
     axes = np.asarray(axes).ravel()
     ax_cx = axes[0]
     ax_cy = axes[1]
-    ax_mag = axes[2]
-    ax_scatter = axes[3]
+    ax_scatter = axes[2]
 
     window_span_alpha = float(cop_style.get("window_span_alpha", 0.15))
 
-    for ax in (ax_cx, ax_cy, ax_mag):
+    for ax in (ax_cx, ax_cy):
         for span in window_spans:
             ax.axvspan(
                 span["start"],
@@ -1197,36 +1195,9 @@ def _plot_cop(
         alpha=cop_style.get("line_alpha", 0.8),
         label="Cy",
     )
-    ax_mag.plot(
-        x,
-        mag_vals,
-        color="0.7",
-        linewidth=cop_style.get("line_width", 0.8),
-        alpha=0.6,
-        label="_nolegend_",
-    )
-    if x_axis is not None:
-        seen_window_labels: set[str] = set()
-        for span in window_spans:
-            mask = (x_axis >= span["start"]) & (x_axis <= span["end"])
-            if not mask.any():
-                continue
-            label = span["label"]
-            plot_label = label if label not in seen_window_labels else "_nolegend_"
-            if plot_label != "_nolegend_":
-                seen_window_labels.add(label)
-            ax_mag.plot(
-                x_axis[mask],
-                mag_vals[mask],
-                color=span["color"],
-                linewidth=cop_style.get("line_width", 0.8),
-                alpha=cop_style.get("line_alpha", 0.8),
-                label=plot_label,
-            )
 
     _draw_event_vlines(ax_cx, event_vlines, style=event_vline_style)
     _draw_event_vlines(ax_cy, event_vlines, style=event_vline_style)
-    _draw_event_vlines(ax_mag, event_vlines, style=event_vline_style)
 
     ax_scatter.scatter(
         ml_vals,
@@ -1282,12 +1253,6 @@ def _plot_cop(
         fontweight=common_style["title_fontweight"],
         pad=common_style["title_pad"],
     )
-    ax_mag.set_title(
-        "Magnitude",
-        fontsize=common_style["title_fontsize"],
-        fontweight=common_style["title_fontweight"],
-        pad=common_style["title_pad"],
-    )
     ax_scatter.set_title(
         "Cxy",
         fontsize=common_style["title_fontsize"],
@@ -1295,7 +1260,7 @@ def _plot_cop(
         pad=common_style["title_pad"],
     )
 
-    for ax in (ax_cx, ax_cy, ax_mag, ax_scatter):
+    for ax in (ax_cx, ax_cy, ax_scatter):
         ax.grid(True, alpha=common_style["grid_alpha"])
         ax.tick_params(labelsize=common_style["tick_labelsize"])
         ax.legend(
@@ -1308,8 +1273,6 @@ def _plot_cop(
     ax_cx.set_ylabel(cop_style.get("y_label_cx", "Cx"), fontsize=common_style["label_fontsize"])
     ax_cy.set_xlabel(cop_style.get("x_label_time", "Normalized time (0-1)"), fontsize=common_style["label_fontsize"])
     ax_cy.set_ylabel(cop_style.get("y_label_cy", "Cy"), fontsize=common_style["label_fontsize"])
-    ax_mag.set_xlabel(cop_style.get("x_label_time", "Normalized time (0-1)"), fontsize=common_style["label_fontsize"])
-    ax_mag.set_ylabel("COP magnitude", fontsize=common_style["label_fontsize"])
 
     ax_scatter.set_xlabel(cop_style["x_label"], fontsize=common_style["label_fontsize"])
     ax_scatter.set_ylabel(cop_style["y_label"], fontsize=common_style["label_fontsize"])
@@ -1615,7 +1578,7 @@ def _plot_cop_overlay(
 
     cx_name, cy_name = _resolve_cop_channel_names(cop_channels)
 
-    n_panels = 4
+    n_panels = 3
     fig_size = cop_style["subplot_size"]
     try:
         fig_w, fig_h = fig_size
@@ -1627,11 +1590,10 @@ def _plot_cop_overlay(
     axes = np.asarray(axes).ravel()
     ax_cx = axes[0]
     ax_cy = axes[1]
-    ax_mag = axes[2]
-    ax_scatter = axes[3]
+    ax_scatter = axes[2]
 
     window_span_alpha = float(cop_style.get("window_span_alpha", 0.15))
-    for ax in (ax_cx, ax_cy, ax_mag):
+    for ax in (ax_cx, ax_cy):
         for span in window_spans:
             ax.axvspan(
                 span["start"],
@@ -1692,96 +1654,6 @@ def _plot_cop_overlay(
         )
         ax.set_xlabel(cop_style.get("x_label_time", "Normalized time (0-1)"), fontsize=common_style["label_fontsize"])
         ax.set_ylabel(y_label, fontsize=common_style["label_fontsize"])
-
-    # Magnitude time series (window color, group line style)
-    for key in sorted_keys:
-        cx = aggregated_by_key.get(key, {}).get(cx_name)
-        cy = aggregated_by_key.get(key, {}).get(cy_name)
-        if cx is None or cy is None:
-            continue
-        ml_vals = (-cy) if cop_style["y_invert"] else cy
-        mag_vals = np.sqrt((cx**2) + (ml_vals**2))
-        linestyle = key_to_linestyle.get(key, "-")
-        for span in window_spans:
-            mask = (x >= span["start"]) & (x <= span["end"])
-            if not mask.any():
-                continue
-            ax_mag.plot(
-                x[mask],
-                mag_vals[mask],
-                color=span["color"],
-                linestyle=linestyle,
-                linewidth=cop_style.get("line_width", 0.8),
-                alpha=cop_style.get("line_alpha", 0.8),
-                label="_nolegend_",
-            )
-
-    for key in sorted_keys:
-        vlines = event_vlines_by_key.get(key, [])
-        if not vlines:
-            continue
-        _draw_event_vlines(ax_mag, vlines, style=event_vline_style)
-
-    ax_mag.grid(True, alpha=common_style["grid_alpha"])
-    ax_mag.tick_params(labelsize=common_style["tick_labelsize"])
-    ax_mag.set_xlabel(cop_style.get("x_label_time", "Normalized time (0-1)"), fontsize=common_style["label_fontsize"])
-    ax_mag.set_ylabel("COP magnitude", fontsize=common_style["label_fontsize"])
-    ax_mag.set_title(
-        "Magnitude",
-        fontsize=common_style["title_fontsize"],
-        fontweight=common_style["title_fontweight"],
-        pad=common_style["title_pad"],
-    )
-
-    try:
-        import matplotlib.patches as mpatches
-        import matplotlib.lines as mlines
-
-        window_handles = [
-            mpatches.Patch(facecolor=span["color"], edgecolor="none", label=span["label"]) for span in window_spans
-        ]
-        if window_handles:
-            window_legend = ax_mag.legend(
-                handles=window_handles,
-                fontsize=cop_style["legend_fontsize"],
-                loc="upper right",
-                framealpha=common_style["legend_framealpha"],
-                title="window",
-            )
-            ax_mag.add_artist(window_legend)
-
-        group_handles: List[Any] = []
-        seen_labels: set[str] = set()
-        for key in sorted_keys:
-            label = _format_group_label(key, group_fields, filtered_group_fields)
-            if label is None or label in seen_labels:
-                continue
-            seen_labels.add(label)
-            linestyle = key_to_linestyle.get(key, "-")
-            group_handles.append(
-                mlines.Line2D(
-                    [],
-                    [],
-                    linestyle=linestyle,
-                    color="0.2",
-                    linewidth=cop_style.get("line_width", 0.8),
-                    label=label,
-                )
-            )
-        if group_handles:
-            ax_mag.legend(
-                handles=group_handles,
-                fontsize=cop_style["legend_fontsize"],
-                loc="lower left",
-                framealpha=common_style["legend_framealpha"],
-                title="group",
-            )
-    except Exception:
-        ax_mag.legend(
-            fontsize=cop_style["legend_fontsize"],
-            loc=common_style["legend_loc"],
-            framealpha=common_style["legend_framealpha"],
-        )
 
     # Add titles to Cx and Cy subplots
     ax_cx.set_title(
