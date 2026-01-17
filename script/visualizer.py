@@ -681,6 +681,142 @@ def _nanmean_3d_over_first_axis(arr: np.ndarray) -> np.ndarray:
     return out
 
 
+def _flatten_axes(axes: Any) -> np.ndarray:
+    return axes.flatten() if isinstance(axes, np.ndarray) else np.asarray([axes])
+
+
+def _draw_window_spans(
+    ax: Any,
+    window_spans: Sequence[Dict[str, Any]],
+    *,
+    alpha: float,
+    with_labels: bool = True,
+) -> None:
+    label_default = "_nolegend_" if not with_labels else None
+    for span in window_spans:
+        label = span.get("label") if with_labels else label_default
+        ax.axvspan(
+            span["start"],
+            span["end"],
+            color=span["color"],
+            alpha=alpha,
+            label=label,
+        )
+
+
+def _prepare_overlay_group_styles(
+    *,
+    sorted_keys: List[Tuple],
+    group_fields: List[str],
+    color_by_fields: Optional[List[str]],
+    common_style: Dict[str, Any],
+) -> Tuple[bool, Dict[Tuple, str], Dict[Tuple, Any]]:
+    import matplotlib as mpl
+
+    base_colors = mpl.rcParams["axes.prop_cycle"].by_key().get("color", ["C0", "C1", "C2", "C3"])
+    use_group_colors = common_style.get("use_group_colors", False)
+    key_to_color = (
+        _build_group_color_map(sorted_keys, group_fields, color_by_fields, base_colors) if use_group_colors else {}
+    )
+    key_to_linestyle = _build_group_linestyles(
+        sorted_keys,
+        common_style.get("group_linestyles", ("-", "--", ":", "-.")),
+    )
+    return use_group_colors, key_to_color, key_to_linestyle
+
+
+def _plot_overlay_channel_series(
+    ax: Any,
+    *,
+    x: np.ndarray,
+    channel: str,
+    sorted_keys: List[Tuple],
+    aggregated_by_key: Dict[Tuple, Dict[str, np.ndarray]],
+    group_fields: List[str],
+    filtered_group_fields: List[str],
+    line_width: float,
+    line_alpha: float,
+    channel_color: str,
+    use_group_colors: bool,
+    key_to_color: Dict[Tuple, str],
+    key_to_linestyle: Dict[Tuple, Any],
+) -> None:
+    seen_labels: set[str] = set()
+    for key in sorted_keys:
+        y = aggregated_by_key.get(key, {}).get(channel)
+        if y is None:
+            continue
+        group_label = _format_group_label(key, group_fields, filtered_group_fields)
+        if group_label is None or group_label in seen_labels:
+            plot_label = "_nolegend_"
+        else:
+            plot_label = group_label
+            seen_labels.add(group_label)
+        color = key_to_color.get(key, channel_color) if use_group_colors else channel_color
+        linestyle = key_to_linestyle.get(key, "-")
+        ax.plot(
+            x,
+            y,
+            color=color,
+            linestyle=linestyle,
+            linewidth=line_width,
+            alpha=line_alpha,
+            label=plot_label,
+        )
+
+
+def _draw_event_vlines_for_keys(
+    ax: Any,
+    *,
+    sorted_keys: List[Tuple],
+    event_vlines_by_key: Dict[Tuple, List[Dict[str, Any]]],
+    style: Dict[str, Any],
+) -> None:
+    for key in sorted_keys:
+        _draw_event_vlines(ax, event_vlines_by_key.get(key, []), style=style)
+
+
+def _style_timeseries_axis(
+    ax: Any,
+    *,
+    title: str,
+    common_style: Dict[str, Any],
+    legend_fontsize: float,
+    window_spans: Sequence[Dict[str, Any]],
+    event_vlines: Sequence[Dict[str, Any]],
+    event_vline_style: Dict[str, Any],
+) -> None:
+    ax.set_title(
+        title,
+        fontsize=common_style["title_fontsize"],
+        fontweight=common_style["title_fontweight"],
+        pad=common_style["title_pad"],
+    )
+    ax.grid(True, alpha=common_style["grid_alpha"])
+    ax.tick_params(labelsize=common_style["tick_labelsize"])
+    _apply_window_group_legends(
+        ax,
+        window_spans=window_spans,
+        group_handles=[],
+        event_vlines=event_vlines,
+        event_vline_style=event_vline_style,
+        legend_fontsize=legend_fontsize,
+        framealpha=common_style["legend_framealpha"],
+        loc=common_style["legend_loc"],
+    )
+
+
+def _savefig_and_close(fig: Any, output_path: Path, common_style: Dict[str, Any], *, bbox: bool = True) -> None:
+    import matplotlib.pyplot as plt
+
+    fig.tight_layout(rect=common_style["tight_layout_rect"])
+    save_kwargs: Dict[str, Any] = {"facecolor": common_style["savefig_facecolor"]}
+    if bbox:
+        save_kwargs["bbox_inches"] = common_style["savefig_bbox_inches"]
+    fig.savefig(output_path, **save_kwargs)
+    plt.close(fig)
+
+
 def _plot_task(task: Dict[str, Any]) -> None:
     import matplotlib.pyplot as plt
 
@@ -919,7 +1055,7 @@ def _plot_emg(
 
     rows, cols = grid_layout
     fig, axes = plt.subplots(rows, cols, figsize=emg_style["subplot_size"], dpi=common_style["dpi"])
-    axes_flat = axes.flatten()
+    axes_flat = _flatten_axes(axes)
 
     for ax, ch in zip(axes_flat, channels):
         y = aggregated.get(ch)
@@ -935,14 +1071,7 @@ def _plot_emg(
             alpha=emg_style["line_alpha"],
         )
 
-        for span in window_spans:
-            ax.axvspan(
-                span["start"],
-                span["end"],
-                color=span["color"],
-                alpha=window_span_alpha,
-                label=span["label"],
-            )
+        _draw_window_spans(ax, window_spans, alpha=window_span_alpha, with_labels=True)
 
         _draw_event_vlines(ax, event_vlines, style=event_vline_style)
 
@@ -954,23 +1083,14 @@ def _plot_emg(
                 if max_norm is not None:
                     ax.axvline(max_norm, **emg_style["max_marker"], label="max")
 
-        ax.set_title(
-            ch,
-            fontsize=common_style["title_fontsize"],
-            fontweight=common_style["title_fontweight"],
-            pad=common_style["title_pad"],
-        )
-        ax.grid(True, alpha=common_style["grid_alpha"])
-        ax.tick_params(labelsize=common_style["tick_labelsize"])
-        _apply_window_group_legends(
+        _style_timeseries_axis(
             ax,
+            title=ch,
+            common_style=common_style,
+            legend_fontsize=emg_style["legend_fontsize"],
             window_spans=window_spans,
-            group_handles=[],
             event_vlines=event_vlines,
             event_vline_style=event_vline_style,
-            legend_fontsize=emg_style["legend_fontsize"],
-            framealpha=common_style["legend_framealpha"],
-            loc=common_style["legend_loc"],
         )
 
     for ax in axes_flat[len(channels) :]:
@@ -984,13 +1104,7 @@ def _plot_emg(
     fig.supxlabel(emg_style["x_label"], fontsize=common_style["label_fontsize"])
     y_label = _format_label(emg_style.get("y_label", "Amplitude"), channel="Amplitude")
     fig.supylabel(y_label, fontsize=common_style["label_fontsize"])
-    fig.tight_layout(rect=common_style["tight_layout_rect"])
-    fig.savefig(
-        output_path,
-        bbox_inches=common_style["savefig_bbox_inches"],
-        facecolor=common_style["savefig_facecolor"],
-    )
-    plt.close(fig)
+    _savefig_and_close(fig, output_path, common_style, bbox=True)
 
 
 def _plot_overlay_timeseries_grid(
@@ -1022,56 +1136,45 @@ def _plot_overlay_timeseries_grid(
     fig, axes = plt.subplots(rows, cols, figsize=style["subplot_size"], dpi=common_style["dpi"])
 
     if signal_group == "emg":
-        axes_flat = axes.flatten() if isinstance(axes, np.ndarray) else np.asarray([axes])
-        import matplotlib as mpl
-
-        base_colors = mpl.rcParams["axes.prop_cycle"].by_key().get("color", ["C0", "C1", "C2", "C3"])
-        use_group_colors = common_style.get("use_group_colors", False)
-        key_to_color = _build_group_color_map(sorted_keys, group_fields, color_by_fields, base_colors) if use_group_colors else {}
-        key_to_linestyle = _build_group_linestyles(sorted_keys, common_style.get("group_linestyles", ("-", "--", ":", "-.")))
+        axes_flat = _flatten_axes(axes)
+        use_group_colors, key_to_color, key_to_linestyle = _prepare_overlay_group_styles(
+            sorted_keys=sorted_keys,
+            group_fields=group_fields,
+            color_by_fields=color_by_fields,
+            common_style=common_style,
+        )
         event_vlines_all = [v for key in sorted_keys for v in event_vlines_by_key.get(key, [])]
 
         for ax, ch in zip(axes_flat, channels):
-            seen_labels: set[str] = set()
             has_any_series = any(aggregated_by_key.get(key, {}).get(ch) is not None for key in sorted_keys)
             if not has_any_series:
                 ax.axis("off")
                 continue
 
-            for span in window_spans:
-                ax.axvspan(
-                    span["start"],
-                    span["end"],
-                    color=span["color"],
-                    alpha=window_span_alpha,
-                    label=span["label"],
-                )
-
             single_color = style.get("line_color", "blue")
-            for key in sorted_keys:
-                y = aggregated_by_key.get(key, {}).get(ch)
-                if y is None:
-                    continue
-                group_label = _format_group_label(key, group_fields, filtered_group_fields)
-                if group_label is None or group_label in seen_labels:
-                    plot_label = "_nolegend_"
-                else:
-                    plot_label = group_label
-                    seen_labels.add(group_label)
-                color = key_to_color.get(key, single_color) if use_group_colors else single_color
-                linestyle = key_to_linestyle.get(key, "-")
-                ax.plot(
-                    x,
-                    y,
-                    color=color,
-                    linestyle=linestyle,
-                    linewidth=style["line_width"],
-                    alpha=style["line_alpha"],
-                    label=plot_label,
-                )
+            _draw_window_spans(ax, window_spans, alpha=window_span_alpha, with_labels=True)
+            _plot_overlay_channel_series(
+                ax,
+                x=x,
+                channel=ch,
+                sorted_keys=sorted_keys,
+                aggregated_by_key=aggregated_by_key,
+                group_fields=group_fields,
+                filtered_group_fields=filtered_group_fields,
+                line_width=style["line_width"],
+                line_alpha=style["line_alpha"],
+                channel_color=single_color,
+                use_group_colors=use_group_colors,
+                key_to_color=key_to_color,
+                key_to_linestyle=key_to_linestyle,
+            )
 
-            for key in sorted_keys:
-                _draw_event_vlines(ax, event_vlines_by_key.get(key, []), style=event_vline_style)
+            _draw_event_vlines_for_keys(
+                ax,
+                sorted_keys=sorted_keys,
+                event_vlines_by_key=event_vlines_by_key,
+                style=event_vline_style,
+            )
 
             for key in sorted_keys:
                 marker_info = markers_by_key.get(key, {}).get(ch, {})
@@ -1083,23 +1186,14 @@ def _plot_overlay_timeseries_grid(
                         if max_norm is not None:
                             ax.axvline(max_norm, **style["max_marker"], label=f"{marker_label} max")
 
-            ax.set_title(
-                ch,
-                fontsize=common_style["title_fontsize"],
-                fontweight=common_style["title_fontweight"],
-                pad=common_style["title_pad"],
-            )
-            ax.grid(True, alpha=common_style["grid_alpha"])
-            ax.tick_params(labelsize=common_style["tick_labelsize"])
-            _apply_window_group_legends(
+            _style_timeseries_axis(
                 ax,
+                title=ch,
+                common_style=common_style,
+                legend_fontsize=style["legend_fontsize"],
                 window_spans=window_spans,
-                group_handles=[],
                 event_vlines=event_vlines_all,
                 event_vline_style=event_vline_style,
-                legend_fontsize=style["legend_fontsize"],
-                framealpha=common_style["legend_framealpha"],
-                loc=common_style["legend_loc"],
             )
 
         for ax in axes_flat[len(channels) :]:
@@ -1114,78 +1208,53 @@ def _plot_overlay_timeseries_grid(
         fig.supxlabel(style["x_label"], fontsize=common_style["label_fontsize"])
         y_label = _format_label(style.get("y_label", "Amplitude"), channel="Amplitude")
         fig.supylabel(y_label, fontsize=common_style["label_fontsize"])
-        fig.tight_layout(rect=common_style["tight_layout_rect"])
-        fig.savefig(
-            output_path,
-            bbox_inches=common_style["savefig_bbox_inches"],
-            facecolor=common_style["savefig_facecolor"],
-        )
-        plt.close(fig)
+        _savefig_and_close(fig, output_path, common_style, bbox=True)
         return
 
     if signal_group == "forceplate":
-        import matplotlib as mpl
-
-        base_colors = mpl.rcParams["axes.prop_cycle"].by_key().get("color", ["C0", "C1", "C2", "C3"])
-        use_group_colors = common_style.get("use_group_colors", False)
-        key_to_color = _build_group_color_map(sorted_keys, group_fields, color_by_fields, base_colors) if use_group_colors else {}
-        key_to_linestyle = _build_group_linestyles(sorted_keys, common_style.get("group_linestyles", ("-", "--", ":", "-.")))
+        use_group_colors, key_to_color, key_to_linestyle = _prepare_overlay_group_styles(
+            sorted_keys=sorted_keys,
+            group_fields=group_fields,
+            color_by_fields=color_by_fields,
+            common_style=common_style,
+        )
         event_vlines_all = [v for key in sorted_keys for v in event_vlines_by_key.get(key, [])]
 
         for ax, ch in zip(np.ravel(axes), channels):
-            seen_labels: set[str] = set()
-            for span in window_spans:
-                ax.axvspan(
-                    span["start"],
-                    span["end"],
-                    color=span["color"],
-                    alpha=window_span_alpha,
-                    label=span["label"],
-                )
+            _draw_window_spans(ax, window_spans, alpha=window_span_alpha, with_labels=True)
 
-            for key in sorted_keys:
-                y = aggregated_by_key.get(key, {}).get(ch)
-                if y is None:
-                    continue
-                group_label = _format_group_label(key, group_fields, filtered_group_fields)
-                if group_label is None or group_label in seen_labels:
-                    plot_label = "_nolegend_"
-                else:
-                    plot_label = group_label
-                    seen_labels.add(group_label)
-                channel_color = _resolve_forceplate_line_color(ch, style.get("line_colors", {}) or {})
-                color = key_to_color.get(key, channel_color) if use_group_colors else channel_color
-                linestyle = key_to_linestyle.get(key, "-")
-                ax.plot(
-                    x,
-                    y,
-                    color=color,
-                    linestyle=linestyle,
-                    linewidth=style["line_width"],
-                    alpha=style["line_alpha"],
-                    label=plot_label,
-                )
-
-            for key in sorted_keys:
-                _draw_event_vlines(ax, event_vlines_by_key.get(key, []), style=event_vline_style)
-
-            ax.set_title(
-                ch,
-                fontsize=common_style["title_fontsize"],
-                fontweight=common_style["title_fontweight"],
-                pad=common_style["title_pad"],
-            )
-            ax.grid(True, alpha=common_style["grid_alpha"])
-            ax.tick_params(labelsize=common_style["tick_labelsize"])
-            _apply_window_group_legends(
+            channel_color = _resolve_forceplate_line_color(ch, style.get("line_colors", {}) or {})
+            _plot_overlay_channel_series(
                 ax,
+                x=x,
+                channel=ch,
+                sorted_keys=sorted_keys,
+                aggregated_by_key=aggregated_by_key,
+                group_fields=group_fields,
+                filtered_group_fields=filtered_group_fields,
+                line_width=style["line_width"],
+                line_alpha=style["line_alpha"],
+                channel_color=channel_color,
+                use_group_colors=use_group_colors,
+                key_to_color=key_to_color,
+                key_to_linestyle=key_to_linestyle,
+            )
+
+            _draw_event_vlines_for_keys(
+                ax,
+                sorted_keys=sorted_keys,
+                event_vlines_by_key=event_vlines_by_key,
+                style=event_vline_style,
+            )
+
+            _style_timeseries_axis(
+                ax,
+                title=ch,
+                common_style=common_style,
+                legend_fontsize=style["legend_fontsize"],
                 window_spans=window_spans,
-                group_handles=[],
                 event_vlines=event_vlines_all,
                 event_vline_style=event_vline_style,
-                legend_fontsize=style["legend_fontsize"],
-                framealpha=common_style["legend_framealpha"],
-                loc=common_style["legend_loc"],
             )
             ax.set_xlabel(style["x_label"], fontsize=common_style["label_fontsize"])
             axis_label = _resolve_forceplate_axis_label(ch, style.get("axis_labels", {}))
@@ -1198,13 +1267,7 @@ def _plot_overlay_timeseries_grid(
             fontsize=common_style["title_fontsize"],
             fontweight=common_style["title_fontweight"],
         )
-        fig.tight_layout(rect=common_style["tight_layout_rect"])
-        fig.savefig(
-            output_path,
-            bbox_inches=common_style["savefig_bbox_inches"],
-            facecolor=common_style["savefig_facecolor"],
-        )
-        plt.close(fig)
+        _savefig_and_close(fig, output_path, common_style, bbox=True)
         return
 
     plt.close(fig)
@@ -1251,34 +1314,18 @@ def _plot_forceplate(
             alpha=forceplate_style["line_alpha"],
         )
 
-        for span in window_spans:
-            ax.axvspan(
-                span["start"],
-                span["end"],
-                color=span["color"],
-                alpha=window_span_alpha,
-                label=span["label"],
-            )
+        _draw_window_spans(ax, window_spans, alpha=window_span_alpha, with_labels=True)
 
         _draw_event_vlines(ax, event_vlines, style=event_vline_style)
 
-        ax.set_title(
-            ch,
-            fontsize=common_style["title_fontsize"],
-            fontweight=common_style["title_fontweight"],
-            pad=common_style["title_pad"],
-        )
-        ax.grid(True, alpha=common_style["grid_alpha"])
-        ax.tick_params(labelsize=common_style["tick_labelsize"])
-        _apply_window_group_legends(
+        _style_timeseries_axis(
             ax,
+            title=ch,
+            common_style=common_style,
+            legend_fontsize=forceplate_style["legend_fontsize"],
             window_spans=window_spans,
-            group_handles=[],
             event_vlines=event_vlines,
             event_vline_style=event_vline_style,
-            legend_fontsize=forceplate_style["legend_fontsize"],
-            framealpha=common_style["legend_framealpha"],
-            loc=common_style["legend_loc"],
         )
         ax.set_xlabel(forceplate_style["x_label"], fontsize=common_style["label_fontsize"])
         axis_label = _resolve_forceplate_axis_label(ch, forceplate_style.get("axis_labels", {}))
@@ -1294,13 +1341,7 @@ def _plot_forceplate(
         fontsize=common_style["title_fontsize"],
         fontweight=common_style["title_fontweight"],
     )
-    fig.tight_layout(rect=common_style["tight_layout_rect"])
-    fig.savefig(
-        output_path,
-        bbox_inches=common_style["savefig_bbox_inches"],
-        facecolor=common_style["savefig_facecolor"],
-    )
-    plt.close(fig)
+    _savefig_and_close(fig, output_path, common_style, bbox=True)
 
 
 def _plot_cop(
@@ -1357,14 +1398,7 @@ def _plot_cop(
     window_span_alpha = float(cop_style.get("window_span_alpha", 0.15))
 
     for ax in (ax_cx, ax_cy):
-        for span in window_spans:
-            ax.axvspan(
-                span["start"],
-                span["end"],
-                color=span["color"],
-                alpha=window_span_alpha,
-                label="_nolegend_",
-            )
+        _draw_window_spans(ax, window_spans, alpha=window_span_alpha, with_labels=False)
 
     cx_color = cop_style.get("line_colors", {}).get("Cx", "blue")
     cy_color = cop_style.get("line_colors", {}).get("Cy", "red")
@@ -1431,38 +1465,24 @@ def _plot_cop(
                 label="max",
             )
 
-    ax_cx.set_title(
-        cx_name,
-        fontsize=common_style["title_fontsize"],
-        fontweight=common_style["title_fontweight"],
-        pad=common_style["title_pad"],
+    _style_timeseries_axis(
+        ax_cx,
+        title=cx_name,
+        common_style=common_style,
+        legend_fontsize=cop_style["legend_fontsize"],
+        window_spans=[],
+        event_vlines=event_vlines,
+        event_vline_style=event_vline_style,
     )
-    ax_cy.set_title(
-        cy_name,
-        fontsize=common_style["title_fontsize"],
-        fontweight=common_style["title_fontweight"],
-        pad=common_style["title_pad"],
+    _style_timeseries_axis(
+        ax_cy,
+        title=cy_name,
+        common_style=common_style,
+        legend_fontsize=cop_style["legend_fontsize"],
+        window_spans=[],
+        event_vlines=event_vlines,
+        event_vline_style=event_vline_style,
     )
-    ax_scatter.set_title(
-        "Cxy",
-        fontsize=common_style["title_fontsize"],
-        fontweight=common_style["title_fontweight"],
-        pad=common_style["title_pad"],
-    )
-
-    for ax in (ax_cx, ax_cy):
-        ax.grid(True, alpha=common_style["grid_alpha"])
-        ax.tick_params(labelsize=common_style["tick_labelsize"])
-        _apply_window_group_legends(
-            ax,
-            window_spans=[],
-            group_handles=[],
-            event_vlines=event_vlines,
-            event_vline_style=event_vline_style,
-            legend_fontsize=cop_style["legend_fontsize"],
-            framealpha=common_style["legend_framealpha"],
-            loc=common_style["legend_loc"],
-        )
 
     ax_cx.set_xlabel(cop_style.get("x_label_time", "Normalized time (0-1)"), fontsize=common_style["label_fontsize"])
     ax_cx.set_ylabel(cop_style.get("y_label_cx", "Cx"), fontsize=common_style["label_fontsize"])
@@ -1472,16 +1492,14 @@ def _plot_cop(
     ax_scatter.set_xlabel(cop_style["x_label"], fontsize=common_style["label_fontsize"])
     ax_scatter.set_ylabel(cop_style["y_label"], fontsize=common_style["label_fontsize"])
     ax_scatter.set_aspect("equal", adjustable="datalim")
-
-    ax_scatter.grid(True, alpha=common_style["grid_alpha"])
-    ax_scatter.tick_params(labelsize=common_style["tick_labelsize"])
-    _apply_window_group_legends(
+    _style_timeseries_axis(
         ax_scatter,
-        window_spans=window_spans,
-        group_handles=[],
+        title="Cxy",
+        common_style=common_style,
         legend_fontsize=cop_style["legend_fontsize"],
-        framealpha=common_style["legend_framealpha"],
-        loc=common_style["legend_loc"],
+        window_spans=window_spans,
+        event_vlines=[],
+        event_vline_style=event_vline_style,
     )
 
     fig.suptitle(
@@ -1489,12 +1507,7 @@ def _plot_cop(
         fontsize=common_style["title_fontsize"],
         fontweight=common_style["title_fontweight"],
     )
-    fig.tight_layout(rect=common_style["tight_layout_rect"])
-    fig.savefig(
-        output_path,
-        facecolor=common_style["savefig_facecolor"],
-    )
-    plt.close(fig)
+    _savefig_and_close(fig, output_path, common_style, bbox=False)
 
 
 def _plot_com(
@@ -1794,21 +1807,14 @@ def _plot_cop_overlay(
 
     window_span_alpha = float(cop_style.get("window_span_alpha", 0.15))
     for ax in (ax_cx, ax_cy):
-        for span in window_spans:
-            ax.axvspan(
-                span["start"],
-                span["end"],
-                color=span["color"],
-                alpha=window_span_alpha,
-                label="_nolegend_",
-            )
+        _draw_window_spans(ax, window_spans, alpha=window_span_alpha, with_labels=False)
 
-    import matplotlib as mpl
-
-    base_colors = mpl.rcParams["axes.prop_cycle"].by_key().get("color", ["C0", "C1", "C2", "C3"])
-    use_group_colors = common_style.get("use_group_colors", False)
-    key_to_linestyle = _build_group_linestyles(sorted_keys, common_style.get("group_linestyles", ("-", "--", ":", "-.")))
-    key_to_color = _build_group_color_map(sorted_keys, group_fields, color_by_fields, base_colors) if use_group_colors else {}
+    use_group_colors, key_to_color, key_to_linestyle = _prepare_overlay_group_styles(
+        sorted_keys=sorted_keys,
+        group_fields=group_fields,
+        color_by_fields=color_by_fields,
+        common_style=common_style,
+    )
     event_vlines_all = [v for key in sorted_keys for v in event_vlines_by_key.get(key, [])]
 
     # Time series: Cx / Cy
@@ -1840,40 +1846,23 @@ def _plot_cop_overlay(
                 label=plot_label,
             )
 
-        for key in sorted_keys:
-            vlines = event_vlines_by_key.get(key, [])
-            if not vlines:
-                continue
-            _draw_event_vlines(ax, vlines, style=event_vline_style)
-
-        ax.grid(True, alpha=common_style["grid_alpha"])
-        ax.tick_params(labelsize=common_style["tick_labelsize"])
-        _apply_window_group_legends(
+        _draw_event_vlines_for_keys(
             ax,
+            sorted_keys=sorted_keys,
+            event_vlines_by_key=event_vlines_by_key,
+            style=event_vline_style,
+        )
+        _style_timeseries_axis(
+            ax,
+            title=ch,
+            common_style=common_style,
+            legend_fontsize=cop_style["legend_fontsize"],
             window_spans=[],
-            group_handles=[],
             event_vlines=event_vlines_all,
             event_vline_style=event_vline_style,
-            legend_fontsize=cop_style["legend_fontsize"],
-            framealpha=common_style["legend_framealpha"],
-            loc=common_style["legend_loc"],
         )
         ax.set_xlabel(cop_style.get("x_label_time", "Normalized time (0-1)"), fontsize=common_style["label_fontsize"])
         ax.set_ylabel(y_label, fontsize=common_style["label_fontsize"])
-
-    # Add titles to Cx and Cy subplots
-    ax_cx.set_title(
-        cx_name,
-        fontsize=common_style["title_fontsize"],
-        fontweight=common_style["title_fontweight"],
-        pad=common_style["title_pad"],
-    )
-    ax_cy.set_title(
-        cy_name,
-        fontsize=common_style["title_fontsize"],
-        fontweight=common_style["title_fontweight"],
-        pad=common_style["title_pad"],
-    )
 
     # Overlay line segments: window color, group line style
     overlay_linewidth = float(cop_style.get("line_width", 0.8))
@@ -1932,12 +1921,7 @@ def _plot_cop_overlay(
         fontsize=common_style["title_fontsize"],
         fontweight=common_style["title_fontweight"],
     )
-    fig.tight_layout(rect=common_style["tight_layout_rect"])
-    fig.savefig(
-        output_path,
-        facecolor=common_style["savefig_facecolor"],
-    )
-    plt.close(fig)
+    _savefig_and_close(fig, output_path, common_style, bbox=False)
 
 
 def _plot_com_overlay(
