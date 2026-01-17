@@ -1553,8 +1553,9 @@ def _plot_cop_overlay(
         pad=common_style["title_pad"],
     )
 
-    # Scatter: Cx vs Cy (window color as facecolor, group as marker/edgecolor)
+    # Scatter: Cx vs Cy (window color as facecolor, group as marker only)
     scatter_edgewidth = float(cop_style.get("overlay_scatter_edgewidth", 0.6))
+    scatter_edgecolor = cop_style.get("overlay_scatter_edgecolor", "0.2")
     for span in window_spans:
         mask = (x >= span["start"]) & (x <= span["end"])
         if not mask.any():
@@ -1566,7 +1567,6 @@ def _plot_cop_overlay(
                 continue
             ml_vals = (-cy) if cop_style["y_invert"] else cy
             marker = key_to_marker.get(key, "o")
-            edgecolor = key_to_color.get(key, "C0")
             ax_scatter.scatter(
                 ml_vals[mask],
                 cx[mask],
@@ -1574,7 +1574,7 @@ def _plot_cop_overlay(
                 alpha=cop_style["scatter_alpha"],
                 marker=marker,
                 facecolors=span["color"],
-                edgecolors=edgecolor,
+                edgecolors=scatter_edgecolor,
                 linewidths=scatter_edgewidth,
                 label="_nolegend_",
             )
@@ -1607,7 +1607,6 @@ def _plot_cop_overlay(
                 continue
             seen_labels.add(label)
             marker = key_to_marker.get(key, "o")
-            edgecolor = key_to_color.get(key, "C0")
             group_handles.append(
                 mlines.Line2D(
                     [],
@@ -1616,7 +1615,7 @@ def _plot_cop_overlay(
                     marker=marker,
                     markersize=6,
                     markerfacecolor="none",
-                    markeredgecolor=edgecolor,
+                    markeredgecolor=scatter_edgecolor,
                     markeredgewidth=scatter_edgewidth,
                     label=label,
                 )
@@ -1806,6 +1805,7 @@ def _plot_com_overlay(
         )
 
     scatter_edgewidth = float(com_style.get("overlay_scatter_edgewidth", 0.6))
+    scatter_edgecolor = com_style.get("overlay_scatter_edgecolor", "0.2")
     for span in window_spans:
         mask = (x >= span["start"]) & (x <= span["end"])
         if not mask.any():
@@ -1817,7 +1817,6 @@ def _plot_com_overlay(
                 continue
             ml_vals = (-comy) if com_style.get("y_invert", False) else comy
             marker = key_to_marker.get(key, "o")
-            edgecolor = key_to_color.get(key, "C0")
             ax_scatter.scatter(
                 ml_vals[mask],
                 comx[mask],
@@ -1825,7 +1824,7 @@ def _plot_com_overlay(
                 alpha=com_style["scatter_alpha"],
                 marker=marker,
                 facecolors=span["color"],
-                edgecolors=edgecolor,
+                edgecolors=scatter_edgecolor,
                 linewidths=scatter_edgewidth,
                 label="_nolegend_",
             )
@@ -1857,7 +1856,6 @@ def _plot_com_overlay(
                 continue
             seen_labels.add(label)
             marker = key_to_marker.get(key, "o")
-            edgecolor = key_to_color.get(key, "C0")
             group_handles.append(
                 mlines.Line2D(
                     [],
@@ -1866,7 +1864,7 @@ def _plot_com_overlay(
                     marker=marker,
                     markersize=6,
                     markerfacecolor="none",
-                    markeredgecolor=edgecolor,
+                    markeredgecolor=scatter_edgecolor,
                     markeredgewidth=scatter_edgewidth,
                     label=label,
                 )
