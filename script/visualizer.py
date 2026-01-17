@@ -25,9 +25,6 @@ def ensure_output_dirs(base_path: Path, config: Dict[str, Any]) -> None:
 
 
 _INTERP_TARGET_AXIS: Optional[np.ndarray] = None
-# Visualization-only toggle; excluded from config.yaml by project rules.
-USE_GROUP_COLORS = False
-GROUP_LINESTYLES: Tuple[Any, ...] = ("-", "--", ":", "-.", (0, (1, 1)), (0, (3, 1, 1, 1)))
 
 
 def _interp_worker_init(target_axis: np.ndarray) -> None:
@@ -372,10 +369,27 @@ def _sort_overlay_keys(keys: List[Tuple], group_fields: List[str]) -> List[Tuple
     return sorted(keys, key=lambda key: tuple(str(v) for v in key))
 
 
-def _build_group_linestyles(sorted_keys: List[Tuple]) -> Dict[Tuple, Any]:
+def _parse_group_linestyles(raw_values: Any) -> Tuple[Any, ...]:
+    if raw_values is None:
+        return ("-", "--", ":", "-.", (0, (1, 1)), (0, (3, 1, 1, 1)))
+    styles: List[Any] = []
+    for item in raw_values:
+        if isinstance(item, (list, tuple)):
+            if len(item) == 2 and isinstance(item[1], (list, tuple)):
+                offset = float(item[0])
+                pattern = tuple(float(v) for v in item[1])
+                styles.append((offset, pattern))
+            else:
+                styles.append(tuple(item))
+        else:
+            styles.append(str(item))
+    return tuple(styles) if styles else ("-", "--", ":", "-.")
+
+
+def _build_group_linestyles(sorted_keys: List[Tuple], linestyles: Sequence[Any]) -> Dict[Tuple, Any]:
     if not sorted_keys:
         return {}
-    return {key: GROUP_LINESTYLES[i % len(GROUP_LINESTYLES)] for i, key in enumerate(sorted_keys)}
+    return {key: linestyles[i % len(linestyles)] for i, key in enumerate(sorted_keys)}
 
 
 def _build_group_color_map(
@@ -762,9 +776,9 @@ def _plot_overlay_timeseries_grid(
         import matplotlib as mpl
 
         base_colors = mpl.rcParams["axes.prop_cycle"].by_key().get("color", ["C0", "C1", "C2", "C3"])
-        use_group_colors = USE_GROUP_COLORS
+        use_group_colors = common_style.get("use_group_colors", False)
         key_to_color = _build_group_color_map(sorted_keys, group_fields, color_by_fields, base_colors) if use_group_colors else {}
-        key_to_linestyle = _build_group_linestyles(sorted_keys)
+        key_to_linestyle = _build_group_linestyles(sorted_keys, common_style.get("group_linestyles", ("-", "--", ":", "-.")))
 
         for ax, ch in zip(axes_flat, channels):
             seen_labels: set[str] = set()
@@ -863,9 +877,9 @@ def _plot_overlay_timeseries_grid(
         import matplotlib as mpl
 
         base_colors = mpl.rcParams["axes.prop_cycle"].by_key().get("color", ["C0", "C1", "C2", "C3"])
-        use_group_colors = USE_GROUP_COLORS
+        use_group_colors = common_style.get("use_group_colors", False)
         key_to_color = _build_group_color_map(sorted_keys, group_fields, color_by_fields, base_colors) if use_group_colors else {}
-        key_to_linestyle = _build_group_linestyles(sorted_keys)
+        key_to_linestyle = _build_group_linestyles(sorted_keys, common_style.get("group_linestyles", ("-", "--", ":", "-.")))
 
         for ax, ch in zip(np.ravel(axes), channels):
             seen_labels: set[str] = set()
@@ -1577,8 +1591,8 @@ def _plot_cop_overlay(
     import matplotlib as mpl
 
     base_colors = mpl.rcParams["axes.prop_cycle"].by_key().get("color", ["C0", "C1", "C2", "C3"])
-    use_group_colors = USE_GROUP_COLORS
-    key_to_linestyle = _build_group_linestyles(sorted_keys)
+    use_group_colors = common_style.get("use_group_colors", False)
+    key_to_linestyle = _build_group_linestyles(sorted_keys, common_style.get("group_linestyles", ("-", "--", ":", "-.")))
     key_to_color = _build_group_color_map(sorted_keys, group_fields, color_by_fields, base_colors) if use_group_colors else {}
 
     # Time series: Cx / Cy
@@ -1891,8 +1905,8 @@ def _plot_com_overlay(
     import matplotlib as mpl
 
     base_colors = mpl.rcParams["axes.prop_cycle"].by_key().get("color", ["C0", "C1", "C2", "C3"])
-    use_group_colors = USE_GROUP_COLORS
-    key_to_linestyle = _build_group_linestyles(sorted_keys)
+    use_group_colors = common_style.get("use_group_colors", False)
+    key_to_linestyle = _build_group_linestyles(sorted_keys, common_style.get("group_linestyles", ("-", "--", ":", "-.")))
     key_to_color = _build_group_color_map(sorted_keys, group_fields, color_by_fields, base_colors) if use_group_colors else {}
 
     channel_axes = [
@@ -3107,6 +3121,8 @@ class AggregatedSignalVisualizer:
             "font_family": cfg["font_family"],
             "show_onset_marker": cfg["show_onset_marker"],
             "show_max_marker": cfg["show_max_marker"],
+            "use_group_colors": bool(cfg.get("use_group_colors", False)),
+            "group_linestyles": _parse_group_linestyles(cfg.get("group_linestyles")),
         }
 
     def _build_emg_style(self, cfg: Dict[str, Any]) -> Dict[str, Any]:

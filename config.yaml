@@ -92,6 +92,11 @@ plot_style:
     font_family: "NanumGothic"         # 폰트 ("NanumGothic", "Arial" 등)
     show_onset_marker: false           # platform_onset 마커 표시 여부
     show_max_marker: false             # 최댓값 마커 표시 여부
+    use_group_colors: false            # 그룹별 색상 사용 여부 (true=색상, false=라인스타일만)
+    # group_linestyles 사용법:
+    # - 기본 값: "-", "--", ":", "-."
+    # - 커스텀 dash: [offset, [on, off, on, off, ...]] 형태
+    group_linestyles: ["-", "--", ":", "-.", [0, [1, 1]], [0, [3, 1, 1, 1]]]
 
   # EMG 신호 전용 설정
   emg:
