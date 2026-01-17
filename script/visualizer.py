@@ -328,29 +328,39 @@ def _apply_window_group_legends(
     group_handles: Sequence[Any],
     legend_fontsize: float,
     framealpha: float,
-    window_loc: str = "upper right",
-    group_loc: str = "lower left",
-    window_title: str = "window",
-    group_title: str = "group",
+    loc: str = "best",
 ) -> None:
-    window_handles = _build_window_legend_handles(window_spans)
-    if window_handles:
-        window_legend = ax.legend(
-            handles=window_handles,
-            fontsize=legend_fontsize,
-            loc=window_loc,
-            framealpha=framealpha,
-            title=window_title,
-        )
-        ax.add_artist(window_legend)
+    handles: List[Any] = []
+    seen_labels: set[str] = set()
 
-    if group_handles:
+    for handle in _build_window_legend_handles(window_spans):
+        label = str(getattr(handle, "get_label", lambda: "")()).strip()
+        if not label or label == "_nolegend_" or label in seen_labels:
+            continue
+        seen_labels.add(label)
+        handles.append(handle)
+
+    for handle in group_handles:
+        label = str(getattr(handle, "get_label", lambda: "")()).strip()
+        if not label or label == "_nolegend_" or label in seen_labels:
+            continue
+        seen_labels.add(label)
+        handles.append(handle)
+
+    existing_handles, existing_labels = ax.get_legend_handles_labels()
+    for handle, label in zip(existing_handles, existing_labels):
+        label = str(label).strip()
+        if not label or label == "_nolegend_" or label in seen_labels:
+            continue
+        seen_labels.add(label)
+        handles.append(handle)
+
+    if handles:
         ax.legend(
-            handles=list(group_handles),
+            handles=handles,
             fontsize=legend_fontsize,
-            loc=group_loc,
+            loc=loc,
             framealpha=framealpha,
-            title=group_title,
         )
 
 
@@ -1374,15 +1384,8 @@ def _plot_cop(
         group_handles=[],
         legend_fontsize=cop_style["legend_fontsize"],
         framealpha=common_style["legend_framealpha"],
+        loc=common_style["legend_loc"],
     )
-    _, scatter_labels = ax_scatter.get_legend_handles_labels()
-    scatter_labels = [lbl for lbl in scatter_labels if lbl and lbl != "_nolegend_"]
-    if scatter_labels:
-        ax_scatter.legend(
-            fontsize=cop_style["legend_fontsize"],
-            loc=common_style["legend_loc"],
-            framealpha=common_style["legend_framealpha"],
-        )
 
     fig.suptitle(
         _format_title(signal_group="cop", mode_name=mode_name, group_fields=group_fields, key=key),
@@ -1607,6 +1610,7 @@ def _plot_com(
         group_handles=[],
         legend_fontsize=com_style["legend_fontsize"],
         framealpha=common_style["legend_framealpha"],
+        loc=common_style["legend_loc"],
     )
 
     ax_scatter.grid(True, alpha=common_style["grid_alpha"])
@@ -1617,6 +1621,7 @@ def _plot_com(
         group_handles=[],
         legend_fontsize=com_style["legend_fontsize"],
         framealpha=common_style["legend_framealpha"],
+        loc=common_style["legend_loc"],
     )
 
     ax_x.set_xlabel(com_style.get("x_label_time", "Normalized time (0-1)"), fontsize=common_style["label_fontsize"])
@@ -1799,6 +1804,7 @@ def _plot_cop_overlay(
         group_handles=group_handles,
         legend_fontsize=cop_style["legend_fontsize"],
         framealpha=common_style["legend_framealpha"],
+        loc=common_style["legend_loc"],
     )
     ax_scatter.set_title(
         "Cxy",
@@ -1983,6 +1989,7 @@ def _plot_com_overlay(
         group_handles=group_handles,
         legend_fontsize=com_style["legend_fontsize"],
         framealpha=common_style["legend_framealpha"],
+        loc=common_style["legend_loc"],
     )
 
     ax_x.set_title(
@@ -2049,6 +2056,7 @@ def _plot_com_overlay(
         group_handles=group_handles,
         legend_fontsize=com_style["legend_fontsize"],
         framealpha=common_style["legend_framealpha"],
+        loc=common_style["legend_loc"],
     )
 
     ax_scatter.set_title(
