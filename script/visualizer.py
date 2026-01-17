@@ -25,6 +25,9 @@ def ensure_output_dirs(base_path: Path, config: Dict[str, Any]) -> None:
 
 
 _INTERP_TARGET_AXIS: Optional[np.ndarray] = None
+# Visualization-only toggle; excluded from config.yaml by project rules.
+USE_GROUP_COLORS = False
+GROUP_LINESTYLES: Tuple[Any, ...] = ("-", "--", ":", "-.", (0, (1, 1)), (0, (3, 1, 1, 1)))
 
 
 def _interp_worker_init(target_axis: np.ndarray) -> None:
@@ -367,6 +370,37 @@ def _sort_overlay_keys(keys: List[Tuple], group_fields: List[str]) -> List[Tuple
 
         return sorted(keys, key=sort_key)
     return sorted(keys, key=lambda key: tuple(str(v) for v in key))
+
+
+def _build_group_linestyles(sorted_keys: List[Tuple]) -> Dict[Tuple, Any]:
+    if not sorted_keys:
+        return {}
+    return {key: GROUP_LINESTYLES[i % len(GROUP_LINESTYLES)] for i, key in enumerate(sorted_keys)}
+
+
+def _build_group_color_map(
+    sorted_keys: List[Tuple],
+    group_fields: List[str],
+    color_by_fields: Optional[List[str]],
+    base_colors: Sequence[str],
+) -> Dict[Tuple, str]:
+    if not sorted_keys:
+        return {}
+    key_to_color: Dict[Tuple, str] = {}
+    if color_by_fields:
+        color_groups: Dict[Tuple, List[Tuple]] = {}
+        for key in sorted_keys:
+            field_to_value = dict(zip(group_fields, key))
+            color_key = tuple(field_to_value.get(field) for field in color_by_fields)
+            color_groups.setdefault(color_key, []).append(key)
+        for color_idx, (_, keys_list) in enumerate(color_groups.items()):
+            color = base_colors[color_idx % len(base_colors)]
+            for key in keys_list:
+                key_to_color[key] = color
+    else:
+        for i, key in enumerate(sorted_keys):
+            key_to_color[key] = base_colors[i % len(base_colors)]
+    return key_to_color
 
 
 def _nanmean_3d_over_first_axis(arr: np.ndarray) -> np.ndarray:
@@ -725,6 +759,12 @@ def _plot_overlay_timeseries_grid(
 
     if signal_group == "emg":
         axes_flat = axes.flatten() if isinstance(axes, np.ndarray) else np.asarray([axes])
+        import matplotlib as mpl
+
+        base_colors = mpl.rcParams["axes.prop_cycle"].by_key().get("color", ["C0", "C1", "C2", "C3"])
+        use_group_colors = USE_GROUP_COLORS
+        key_to_color = _build_group_color_map(sorted_keys, group_fields, color_by_fields, base_colors) if use_group_colors else {}
+        key_to_linestyle = _build_group_linestyles(sorted_keys)
 
         for ax, ch in zip(axes_flat, channels):
             seen_labels: set[str] = set()
@@ -742,75 +782,28 @@ def _plot_overlay_timeseries_grid(
                     label=span["label"],
                 )
 
-            # If color_by_fields is specified, group keys by color_by field(s) combination
-            if color_by_fields:
-                # Group keys by color_by field(s) combination
-                color_groups = {}
-                for key in sorted_keys:
-                    field_to_value = dict(zip(group_fields, key))
-                    # Create tuple of values for color_by fields
-                    color_key = tuple(field_to_value.get(field) for field in color_by_fields)
-                    if color_key not in color_groups:
-                        color_groups[color_key] = []
-                    color_groups[color_key].append(key)
-
-                # Assign colors by color groups
-                import matplotlib.pyplot as plt
-
-                colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
-                seen_color_labels: set[str] = set()
-
-                for color_idx, (color_key, keys_list) in enumerate(color_groups.items()):
-                    color = colors[color_idx % len(colors)]
-                    # Create color label for legend
-                    if len(color_by_fields) == 1:
-                        color_label = str(color_key[0])
-                    else:
-                        color_label = ", ".join(
-                            f"{field}={value}" for field, value in zip(color_by_fields, color_key)
-                        )
-
-                    for key in keys_list:
-                        y = aggregated_by_key.get(key, {}).get(ch)
-                        if y is None:
-                            continue
-
-                        # Only add to legend for first series of this color group
-                        if color_label not in seen_color_labels:
-                            plot_label = color_label
-                            seen_color_labels.add(color_label)
-                        else:
-                            plot_label = "_nolegend_"
-
-                        ax.plot(
-                            x,
-                            y,
-                            color=color,
-                            linewidth=style["line_width"],
-                            alpha=style["line_alpha"],
-                            label=plot_label,
-                        )
-            else:
-                # No color_by specified - use single color for all lines
-                single_color = style.get("line_color", "blue")
-                for key in sorted_keys:
-                    y = aggregated_by_key.get(key, {}).get(ch)
-                    if y is None:
-                        continue
-                    group_label = _format_group_label(key, group_fields, filtered_group_fields)
-                    if group_label is None or group_label in seen_labels:
-                        plot_label = "_nolegend_"
-                    else:
-                        plot_label = group_label
-                        seen_labels.add(group_label)
-                    ax.plot(
-                        x,
-                        y,
-                        color=single_color,
-                        linewidth=style["line_width"],
-                        alpha=style["line_alpha"],
-                        label=plot_label,
-                    )
+            single_color = style.get("line_color", "blue")
+            for key in sorted_keys:
+                y = aggregated_by_key.get(key, {}).get(ch)
+                if y is None:
+                    continue
+                group_label = _format_group_label(key, group_fields, filtered_group_fields)
+                if group_label is None or group_label in seen_labels:
+                    plot_label = "_nolegend_"
+                else:
+                    plot_label = group_label
+                    seen_labels.add(group_label)
+                color = key_to_color.get(key, single_color) if use_group_colors else single_color
+                linestyle = key_to_linestyle.get(key, "-")
+                ax.plot(
+                    x,
+                    y,
+                    color=color,
+                    linestyle=linestyle,
+                    linewidth=style["line_width"],
+                    alpha=style["line_alpha"],
+                    label=plot_label,
+                )
 
             for key in sorted_keys:
                 _draw_event_vlines(ax, event_vlines_by_key.get(key, []), style=event_vline_style)
@@ -867,6 +860,13 @@ def _plot_overlay_timeseries_grid(
         return
 
     if signal_group == "forceplate":
+        import matplotlib as mpl
+
+        base_colors = mpl.rcParams["axes.prop_cycle"].by_key().get("color", ["C0", "C1", "C2", "C3"])
+        use_group_colors = USE_GROUP_COLORS
+        key_to_color = _build_group_color_map(sorted_keys, group_fields, color_by_fields, base_colors) if use_group_colors else {}
+        key_to_linestyle = _build_group_linestyles(sorted_keys)
+
         for ax, ch in zip(np.ravel(axes), channels):
             seen_labels: set[str] = set()
             for span in window_spans:
@@ -888,9 +888,14 @@ def _plot_overlay_timeseries_grid(
                 else:
                     plot_label = group_label
                     seen_labels.add(group_label)
+                channel_color = style.get("line_colors", {}).get(ch, "blue")
+                color = key_to_color.get(key, channel_color) if use_group_colors else channel_color
+                linestyle = key_to_linestyle.get(key, "-")
                 ax.plot(
                     x,
                     y,
+                    color=color,
+                    linestyle=linestyle,
                     linewidth=style["line_width"],
                     alpha=style["line_alpha"],
                     label=plot_label,
@@ -1572,23 +1577,9 @@ def _plot_cop_overlay(
     import matplotlib as mpl
 
     base_colors = mpl.rcParams["axes.prop_cycle"].by_key().get("color", ["C0", "C1", "C2", "C3"])
-    linestyle_cycle = ["-", "--", ":", "-.", (0, (1, 1)), (0, (3, 1, 1, 1))]
-    key_to_linestyle = {k: linestyle_cycle[i % len(linestyle_cycle)] for i, k in enumerate(sorted_keys)}
-
-    key_to_color: Dict[Tuple, str] = {}
-    if color_by_fields:
-        color_groups: Dict[Tuple, List[Tuple]] = {}
-        for key in sorted_keys:
-            field_to_value = dict(zip(group_fields, key))
-            color_key = tuple(field_to_value.get(field) for field in color_by_fields)
-            color_groups.setdefault(color_key, []).append(key)
-        for color_idx, (color_key, keys_list) in enumerate(color_groups.items()):
-            color = base_colors[color_idx % len(base_colors)]
-            for key in keys_list:
-                key_to_color[key] = color
-    else:
-        for i, key in enumerate(sorted_keys):
-            key_to_color[key] = base_colors[i % len(base_colors)]
+    use_group_colors = USE_GROUP_COLORS
+    key_to_linestyle = _build_group_linestyles(sorted_keys)
+    key_to_color = _build_group_color_map(sorted_keys, group_fields, color_by_fields, base_colors) if use_group_colors else {}
 
     # Time series: Cx / Cy
     for ax, ch, y_label in (
@@ -1601,16 +1592,10 @@ def _plot_cop_overlay(
             if series is None:
                 continue
             y = (-series) if (ch == cy_name and cop_style["y_invert"]) else series
-            color = key_to_color.get(key, "C0")
-            if color_by_fields:
-                field_to_value = dict(zip(group_fields, key))
-                color_key = tuple(field_to_value.get(field) for field in color_by_fields)
-                if len(color_by_fields) == 1:
-                    label = str(color_key[0])
-                else:
-                    label = ", ".join(f"{field}={value}" for field, value in zip(color_by_fields, color_key))
-            else:
-                label = _format_group_label(key, group_fields, filtered_group_fields) or "_nolegend_"
+            channel_color = cop_style.get("line_colors", {}).get("Cx" if ch == cx_name else "Cy", "C0")
+            color = key_to_color.get(key, channel_color) if use_group_colors else channel_color
+            linestyle = key_to_linestyle.get(key, "-")
+            label = _format_group_label(key, group_fields, filtered_group_fields) or "_nolegend_"
 
             plot_label = label if label not in seen_labels else "_nolegend_"
             if plot_label != "_nolegend_":
@@ -1619,6 +1604,7 @@ def _plot_cop_overlay(
                 x,
                 y,
                 color=color,
+                linestyle=linestyle,
                 linewidth=cop_style.get("line_width", 0.8),
                 alpha=cop_style.get("line_alpha", 0.8),
                 label=plot_label,
@@ -1905,23 +1891,9 @@ def _plot_com_overlay(
     import matplotlib as mpl
 
     base_colors = mpl.rcParams["axes.prop_cycle"].by_key().get("color", ["C0", "C1", "C2", "C3"])
-    linestyle_cycle = ["-", "--", ":", "-.", (0, (1, 1)), (0, (3, 1, 1, 1))]
-    key_to_linestyle = {k: linestyle_cycle[i % len(linestyle_cycle)] for i, k in enumerate(sorted_keys)}
-
-    key_to_color: Dict[Tuple, str] = {}
-    if color_by_fields:
-        color_groups: Dict[Tuple, List[Tuple]] = {}
-        for key in sorted_keys:
-            field_to_value = dict(zip(group_fields, key))
-            color_key = tuple(field_to_value.get(field) for field in color_by_fields)
-            color_groups.setdefault(color_key, []).append(key)
-        for color_idx, (_, keys_list) in enumerate(color_groups.items()):
-            color = base_colors[color_idx % len(base_colors)]
-            for key in keys_list:
-                key_to_color[key] = color
-    else:
-        for i, key in enumerate(sorted_keys):
-            key_to_color[key] = base_colors[i % len(base_colors)]
+    use_group_colors = USE_GROUP_COLORS
+    key_to_linestyle = _build_group_linestyles(sorted_keys)
+    key_to_color = _build_group_color_map(sorted_keys, group_fields, color_by_fields, base_colors) if use_group_colors else {}
 
     channel_axes = [
         (ax_x, comx_name, com_style.get("y_label_comx", comx_name)),
@@ -1937,16 +1909,10 @@ def _plot_com_overlay(
             if series is None:
                 continue
             y = (-series) if (ch == comy_name and com_style.get("y_invert", False)) else series
-            color = key_to_color.get(key, "C0")
-            if color_by_fields:
-                field_to_value = dict(zip(group_fields, key))
-                color_key = tuple(field_to_value.get(field) for field in color_by_fields)
-                if len(color_by_fields) == 1:
-                    label = str(color_key[0])
-                else:
-                    label = ", ".join(f"{field}={value}" for field, value in zip(color_by_fields, color_key))
-            else:
-                label = _format_group_label(key, group_fields, filtered_group_fields) or "_nolegend_"
+            channel_color = com_style.get("line_colors", {}).get(ch, "C0")
+            color = key_to_color.get(key, channel_color) if use_group_colors else channel_color
+            linestyle = key_to_linestyle.get(key, "-")
+            label = _format_group_label(key, group_fields, filtered_group_fields) or "_nolegend_"
 
             plot_label = label if label not in seen_labels else "_nolegend_"
             if plot_label != "_nolegend_":
@@ -1955,6 +1921,7 @@ def _plot_com_overlay(
                 x,
                 y,
                 color=color,
+                linestyle=linestyle,
                 linewidth=com_style.get("line_width", 0.8),
                 alpha=com_style.get("line_alpha", 0.8),
                 label=plot_label,
