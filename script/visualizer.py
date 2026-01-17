@@ -266,6 +266,94 @@ def _draw_event_vlines(ax: Any, vlines: Sequence[Dict[str, Any]], *, style: Dict
         ax.axvline(float(x), label="_nolegend_", **kwargs)
 
 
+def _build_window_legend_handles(window_spans: Sequence[Dict[str, Any]]) -> List[Any]:
+    try:
+        import matplotlib.patches as mpatches
+    except Exception:
+        return []
+
+    handles: List[Any] = []
+    seen: set[str] = set()
+    for span in window_spans:
+        label = str(span.get("label", "")).strip()
+        if not label or label in seen:
+            continue
+        color = span.get("color")
+        if color is None or not str(color).strip():
+            continue
+        seen.add(label)
+        handles.append(mpatches.Patch(facecolor=str(color), edgecolor="none", label=label))
+    return handles
+
+
+def _build_group_legend_handles(
+    sorted_keys: Sequence[Tuple],
+    group_fields: Sequence[str],
+    filtered_group_fields: Optional[Sequence[str]],
+    key_to_linestyle: Dict[Tuple, Any],
+    *,
+    linewidth: float,
+    color: str = "0.2",
+) -> List[Any]:
+    try:
+        import matplotlib.lines as mlines
+    except Exception:
+        return []
+
+    handles: List[Any] = []
+    seen_labels: set[str] = set()
+    for key in sorted_keys:
+        label = _format_group_label(tuple(key), list(group_fields), list(filtered_group_fields) if filtered_group_fields is not None else None)
+        if label is None or label in seen_labels:
+            continue
+        seen_labels.add(label)
+        linestyle = key_to_linestyle.get(tuple(key), "-")
+        handles.append(
+            mlines.Line2D(
+                [],
+                [],
+                linestyle=linestyle,
+                color=color,
+                linewidth=linewidth,
+                label=label,
+            )
+        )
+    return handles
+
+
+def _apply_window_group_legends(
+    ax: Any,
+    *,
+    window_spans: Sequence[Dict[str, Any]],
+    group_handles: Sequence[Any],
+    legend_fontsize: float,
+    framealpha: float,
+    window_loc: str = "upper right",
+    group_loc: str = "lower left",
+    window_title: str = "window",
+    group_title: str = "group",
+) -> None:
+    window_handles = _build_window_legend_handles(window_spans)
+    if window_handles:
+        window_legend = ax.legend(
+            handles=window_handles,
+            fontsize=legend_fontsize,
+            loc=window_loc,
+            framealpha=framealpha,
+            title=window_title,
+        )
+        ax.add_artist(window_legend)
+
+    if group_handles:
+        ax.legend(
+            handles=list(group_handles),
+            fontsize=legend_fontsize,
+            loc=group_loc,
+            framealpha=framealpha,
+            title=group_title,
+        )
+
+
 def _format_label(template: Any, **kwargs: Any) -> str:
     if not isinstance(template, str):
         return str(template)
@@ -1217,7 +1305,7 @@ def _plot_cop(
                     s=cop_style["scatter_size"],
                     alpha=cop_style["scatter_alpha"],
                     color=span["color"],
-                    label=span["label"],
+                    label="_nolegend_",
                 )
 
     if common_style.get("show_max_marker", True):
@@ -1260,7 +1348,7 @@ def _plot_cop(
         pad=common_style["title_pad"],
     )
 
-    for ax in (ax_cx, ax_cy, ax_scatter):
+    for ax in (ax_cx, ax_cy):
         ax.grid(True, alpha=common_style["grid_alpha"])
         ax.tick_params(labelsize=common_style["tick_labelsize"])
         ax.legend(
@@ -1278,24 +1366,23 @@ def _plot_cop(
     ax_scatter.set_ylabel(cop_style["y_label"], fontsize=common_style["label_fontsize"])
     ax_scatter.set_aspect("equal", adjustable="datalim")
 
-    # Scatter 축에 window 색상 legend를 별도로 제공 (배경/라인 legend와 분리).
-    try:
-        import matplotlib.patches as mpatches
-
-        window_handles = [
-            mpatches.Patch(facecolor=span["color"], edgecolor="none", label=span["label"]) for span in window_spans
-        ]
-        if window_handles:
-            window_legend = ax_scatter.legend(
-                handles=window_handles,
-                fontsize=cop_style["legend_fontsize"],
-                loc="upper right",
-                framealpha=common_style["legend_framealpha"],
-                title="window",
-            )
-            ax_scatter.add_artist(window_legend)
-    except Exception:
-        pass
+    ax_scatter.grid(True, alpha=common_style["grid_alpha"])
+    ax_scatter.tick_params(labelsize=common_style["tick_labelsize"])
+    _apply_window_group_legends(
+        ax_scatter,
+        window_spans=window_spans,
+        group_handles=[],
+        legend_fontsize=cop_style["legend_fontsize"],
+        framealpha=common_style["legend_framealpha"],
+    )
+    _, scatter_labels = ax_scatter.get_legend_handles_labels()
+    scatter_labels = [lbl for lbl in scatter_labels if lbl and lbl != "_nolegend_"]
+    if scatter_labels:
+        ax_scatter.legend(
+            fontsize=cop_style["legend_fontsize"],
+            loc=common_style["legend_loc"],
+            framealpha=common_style["legend_framealpha"],
+        )
 
     fig.suptitle(
         _format_title(signal_group="cop", mode_name=mode_name, group_fields=group_fields, key=key),
@@ -1438,7 +1525,7 @@ def _plot_com(
                 color=span["color"],
                 linewidth=com_style.get("line_width", 0.8),
                 alpha=com_style.get("line_alpha", 0.8),
-                label=plot_label,
+                label="_nolegend_",
             )
 
     for ax in time_axes:
@@ -1462,7 +1549,7 @@ def _plot_com(
                     s=com_style["scatter_size"],
                     alpha=com_style["scatter_alpha"],
                     color=span["color"],
-                    label=span["label"],
+                    label="_nolegend_",
                 )
 
     if common_style.get("show_max_marker", True):
@@ -1502,7 +1589,7 @@ def _plot_com(
         pad=common_style["title_pad"],
     )
 
-    axes_to_style = [ax_x, ax_y, ax_mag, ax_scatter] + ([ax_z] if ax_z is not None else [])
+    axes_to_style = [ax_x, ax_y] + ([ax_z] if ax_z is not None else [])
     for ax in axes_to_style:
         ax.grid(True, alpha=common_style["grid_alpha"])
         ax.tick_params(labelsize=common_style["tick_labelsize"])
@@ -1511,6 +1598,26 @@ def _plot_com(
             loc=common_style["legend_loc"],
             framealpha=common_style["legend_framealpha"],
         )
+
+    ax_mag.grid(True, alpha=common_style["grid_alpha"])
+    ax_mag.tick_params(labelsize=common_style["tick_labelsize"])
+    _apply_window_group_legends(
+        ax_mag,
+        window_spans=window_spans,
+        group_handles=[],
+        legend_fontsize=com_style["legend_fontsize"],
+        framealpha=common_style["legend_framealpha"],
+    )
+
+    ax_scatter.grid(True, alpha=common_style["grid_alpha"])
+    ax_scatter.tick_params(labelsize=common_style["tick_labelsize"])
+    _apply_window_group_legends(
+        ax_scatter,
+        window_spans=window_spans,
+        group_handles=[],
+        legend_fontsize=com_style["legend_fontsize"],
+        framealpha=common_style["legend_framealpha"],
+    )
 
     ax_x.set_xlabel(com_style.get("x_label_time", "Normalized time (0-1)"), fontsize=common_style["label_fontsize"])
     ax_x.set_ylabel(com_style.get("y_label_comx", comx_name), fontsize=common_style["label_fontsize"])
@@ -1526,23 +1633,7 @@ def _plot_com(
     ax_scatter.set_ylabel(com_style.get("y_label", comy_name), fontsize=common_style["label_fontsize"])
     ax_scatter.set_aspect("equal", adjustable="datalim")
 
-    try:
-        import matplotlib.patches as mpatches
-
-        window_handles = [
-            mpatches.Patch(facecolor=span["color"], edgecolor="none", label=span["label"]) for span in window_spans
-        ]
-        if window_handles:
-            window_legend = ax_scatter.legend(
-                handles=window_handles,
-                fontsize=com_style["legend_fontsize"],
-                loc="upper right",
-                framealpha=common_style["legend_framealpha"],
-                title="window",
-            )
-            ax_scatter.add_artist(window_legend)
-    except Exception:
-        pass
+    # window legend handled via _apply_window_group_legends(ax_scatter, ...)
 
     fig.suptitle(
         _format_title(signal_group="com", mode_name=mode_name, group_fields=group_fields, key=key),
@@ -1683,7 +1774,7 @@ def _plot_cop_overlay(
                 continue
             ml_vals = (-cy) if cop_style["y_invert"] else cy
             linestyle = key_to_linestyle.get(key, "-")
-            ax_scatter.plot(
+    ax_scatter.plot(
                 ml_vals[mask],
                 cx[mask],
                 color=span["color"],
@@ -1695,56 +1786,20 @@ def _plot_cop_overlay(
 
     ax_scatter.grid(True, alpha=common_style["grid_alpha"])
     ax_scatter.tick_params(labelsize=common_style["tick_labelsize"])
-    # Scatter legend를 "window(색)" / "group(마커)"로 분리.
-    try:
-        import matplotlib.patches as mpatches
-        import matplotlib.lines as mlines
-
-        window_handles = [
-            mpatches.Patch(facecolor=span["color"], edgecolor="none", label=span["label"]) for span in window_spans
-        ]
-        if window_handles:
-            window_legend = ax_scatter.legend(
-                handles=window_handles,
-                fontsize=cop_style["legend_fontsize"],
-                loc="upper right",
-                framealpha=common_style["legend_framealpha"],
-                title="window",
-            )
-            ax_scatter.add_artist(window_legend)
-
-        group_handles: List[Any] = []
-        seen_labels: set[str] = set()
-        for key in sorted_keys:
-            label = _format_group_label(key, group_fields, filtered_group_fields)
-            if label is None or label in seen_labels:
-                continue
-            seen_labels.add(label)
-            linestyle = key_to_linestyle.get(key, "-")
-            group_handles.append(
-                mlines.Line2D(
-                    [],
-                    [],
-                    linestyle=linestyle,
-                    color="0.2",
-                    linewidth=overlay_linewidth,
-                    label=label,
-                )
-            )
-        if group_handles:
-            ax_scatter.legend(
-                handles=group_handles,
-                fontsize=cop_style["legend_fontsize"],
-                loc="lower left",
-                framealpha=common_style["legend_framealpha"],
-                title="group",
-            )
-    except Exception:
-        ax_scatter.legend(
-            fontsize=cop_style["legend_fontsize"],
-            loc=common_style["legend_loc"],
-            framealpha=common_style["legend_framealpha"],
-        )
+    group_handles = _build_group_legend_handles(
+        sorted_keys,
+        group_fields,
+        filtered_group_fields,
+        key_to_linestyle,
+        linewidth=overlay_linewidth,
+    )
+    _apply_window_group_legends(
+        ax_scatter,
+        window_spans=window_spans,
+        group_handles=group_handles,
+        legend_fontsize=cop_style["legend_fontsize"],
+        framealpha=common_style["legend_framealpha"],
+    )
     ax_scatter.set_title(
         "Cxy",
         fontsize=common_style["title_fontsize"],
@@ -1915,56 +1970,20 @@ def _plot_com_overlay(
     ax_mag.tick_params(labelsize=common_style["tick_labelsize"])
     ax_mag.set_xlabel(com_style.get("x_label_time", "Normalized time (0-1)"), fontsize=common_style["label_fontsize"])
     ax_mag.set_ylabel("COM magnitude", fontsize=common_style["label_fontsize"])
-
-    try:
-        import matplotlib.patches as mpatches
-        import matplotlib.lines as mlines
-
-        window_handles = [
-            mpatches.Patch(facecolor=span["color"], edgecolor="none", label=span["label"]) for span in window_spans
-        ]
-        if window_handles:
-            window_legend = ax_mag.legend(
-                handles=window_handles,
-                fontsize=com_style["legend_fontsize"],
-                loc="upper right",
-                framealpha=common_style["legend_framealpha"],
-                title="window",
-            )
-            ax_mag.add_artist(window_legend)
-
-        group_handles: List[Any] = []
-        seen_labels: set[str] = set()
-        for key in sorted_keys:
-            label = _format_group_label(key, group_fields, filtered_group_fields)
-            if label is None or label in seen_labels:
-                continue
-            seen_labels.add(label)
-            linestyle = key_to_linestyle.get(key, "-")
-            group_handles.append(
-                mlines.Line2D(
-                    [],
-                    [],
-                    linestyle=linestyle,
-                    color="0.2",
-                    linewidth=com_style.get("line_width", 0.8),
-                    label=label,
-                )
-            )
-        if group_handles:
-            ax_mag.legend(
-                handles=group_handles,
-                fontsize=com_style["legend_fontsize"],
-                loc="lower left",
-                framealpha=common_style["legend_framealpha"],
-                title="group",
-            )
-    except Exception:
-        ax_mag.legend(
-            fontsize=com_style["legend_fontsize"],
-            loc=common_style["legend_loc"],
-            framealpha=common_style["legend_framealpha"],
-        )
+    group_handles = _build_group_legend_handles(
+        sorted_keys,
+        group_fields,
+        filtered_group_fields,
+        key_to_linestyle,
+        linewidth=float(com_style.get("line_width", 0.8)),
+    )
+    _apply_window_group_legends(
+        ax_mag,
+        window_spans=window_spans,
+        group_handles=group_handles,
+        legend_fontsize=com_style["legend_fontsize"],
+        framealpha=common_style["legend_framealpha"],
+    )
 
     ax_x.set_title(
         comx_name,
@@ -2017,55 +2036,20 @@ def _plot_com_overlay(
 
     ax_scatter.grid(True, alpha=common_style["grid_alpha"])
     ax_scatter.tick_params(labelsize=common_style["tick_labelsize"])
-    try:
-        import matplotlib.patches as mpatches
-        import matplotlib.lines as mlines
-
-        window_handles = [
-            mpatches.Patch(facecolor=span["color"], edgecolor="none", label=span["label"]) for span in window_spans
-        ]
-        if window_handles:
-            window_legend = ax_scatter.legend(
-                handles=window_handles,
-                fontsize=com_style["legend_fontsize"],
-                loc="upper right",
-                framealpha=common_style["legend_framealpha"],
-                title="window",
-            )
-            ax_scatter.add_artist(window_legend)
-
-        group_handles: List[Any] = []
-        seen_labels: set[str] = set()
-        for key in sorted_keys:
-            label = _format_group_label(key, group_fields, filtered_group_fields)
-            if label is None or label in seen_labels:
-                continue
-            seen_labels.add(label)
-            linestyle = key_to_linestyle.get(key, "-")
-            group_handles.append(
-                mlines.Line2D(
-                    [],
-                    [],
-                    linestyle=linestyle,
-                    color="0.2",
-                    linewidth=overlay_linewidth,
-                    label=label,
-                )
-            )
-        if group_handles:
-            ax_scatter.legend(
-                handles=group_handles,
-                fontsize=com_style["legend_fontsize"],
-                loc="lower left",
-                framealpha=common_style["legend_framealpha"],
-                title="group",
-            )
-    except Exception:
-        ax_scatter.legend(
-            fontsize=com_style["legend_fontsize"],
-            loc=common_style["legend_loc"],
-            framealpha=common_style["legend_framealpha"],
-        )
+    group_handles = _build_group_legend_handles(
+        sorted_keys,
+        group_fields,
+        filtered_group_fields,
+        key_to_linestyle,
+        linewidth=overlay_linewidth,
+    )
+    _apply_window_group_legends(
+        ax_scatter,
+        window_spans=window_spans,
+        group_handles=group_handles,
+        legend_fontsize=com_style["legend_fontsize"],
+        framealpha=common_style["legend_framealpha"],
+    )
 
     ax_scatter.set_title(
         "COMxy",
