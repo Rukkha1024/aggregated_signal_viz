@@ -1582,7 +1582,6 @@ def _plot_com(
 
     ap_vals = comx
     ml_vals = -comy if com_style.get("y_invert", False) else comy
-    mag_vals = np.sqrt((ap_vals**2) + (ml_vals**2))
 
     rows, cols = 1, 4
     if grid_layout and len(grid_layout) == 2:
@@ -1593,14 +1592,14 @@ def _plot_com(
             rows, cols = 1, 4
 
     slots = rows * cols
-    if comz_name is not None and slots < 4:
+    if comz_name is not None and slots < 3:
         comz_name = None
         comz = None
 
-    time_panels = 4 if comz_name is not None else 3
+    time_panels = 3 if comz_name is not None else 2
     total_panels = time_panels + 1  # + scatter
     if slots < time_panels:
-        raise ValueError("COM grid_layout must have enough panels for COMx/COMy/(COMz)/Magnitude.")
+        raise ValueError("COM grid_layout must have enough panels for COMx/COMy/(COMz).")
 
     fig_size = com_style["subplot_size"]
     try:
@@ -1629,17 +1628,15 @@ def _plot_com(
     ax_y = axes[1]
     if comz_name is not None:
         ax_z = axes[2]
-        ax_mag = axes[3]
     else:
         ax_z = None
-        ax_mag = axes[2]
     ax_scatter = axes[time_panels]
 
     for ax in axes[total_panels:]:
         ax.axis("off")
 
     window_span_alpha = float(com_style.get("window_span_alpha", 0.15))
-    time_axes = [ax_x, ax_y] + ([ax_z] if ax_z is not None else []) + [ax_mag]
+    time_axes = [ax_x, ax_y] + ([ax_z] if ax_z is not None else [])
     for ax in time_axes:
         for span in window_spans:
             ax.axvspan(
@@ -1679,32 +1676,6 @@ def _plot_com(
             alpha=com_style.get("line_alpha", 0.8),
             label=comz_name,
         )
-    ax_mag.plot(
-        x,
-        mag_vals,
-        color="0.7",
-        linewidth=com_style.get("line_width", 0.8),
-        alpha=0.6,
-        label="_nolegend_",
-    )
-    if x_axis is not None:
-        seen_window_labels: set[str] = set()
-        for span in window_spans:
-            mask = (x_axis >= span["start"]) & (x_axis <= span["end"])
-            if not mask.any():
-                continue
-            label = span["label"]
-            plot_label = label if label not in seen_window_labels else "_nolegend_"
-            if plot_label != "_nolegend_":
-                seen_window_labels.add(label)
-            ax_mag.plot(
-                x_axis[mask],
-                mag_vals[mask],
-                color=span["color"],
-                linewidth=com_style.get("line_width", 0.8),
-                alpha=com_style.get("line_alpha", 0.8),
-                label="_nolegend_",
-            )
 
     for ax in time_axes:
         _draw_event_vlines(ax, event_vlines, style=event_vline_style)
@@ -1754,12 +1725,6 @@ def _plot_com(
             fontweight=common_style["title_fontweight"],
             pad=common_style["title_pad"],
         )
-    ax_mag.set_title(
-        "Magnitude",
-        fontsize=common_style["title_fontsize"],
-        fontweight=common_style["title_fontweight"],
-        pad=common_style["title_pad"],
-    )
     ax_scatter.set_title(
         "COMxy",
         fontsize=common_style["title_fontsize"],
@@ -1782,19 +1747,6 @@ def _plot_com(
             loc=common_style["legend_loc"],
         )
 
-    ax_mag.grid(True, alpha=common_style["grid_alpha"])
-    ax_mag.tick_params(labelsize=common_style["tick_labelsize"])
-    _apply_window_group_legends(
-        ax_mag,
-        window_spans=window_spans,
-        group_handles=[],
-        event_vlines=event_vlines,
-        event_vline_style=event_vline_style,
-        legend_fontsize=com_style["legend_fontsize"],
-        framealpha=common_style["legend_framealpha"],
-        loc=common_style["legend_loc"],
-    )
-
     ax_scatter.grid(True, alpha=common_style["grid_alpha"])
     ax_scatter.tick_params(labelsize=common_style["tick_labelsize"])
     _apply_window_group_legends(
@@ -1813,8 +1765,6 @@ def _plot_com(
     if ax_z is not None:
         ax_z.set_xlabel(com_style.get("x_label_time", "Normalized time (0-1)"), fontsize=common_style["label_fontsize"])
         ax_z.set_ylabel(com_style.get("y_label_comz", comz_name), fontsize=common_style["label_fontsize"])
-    ax_mag.set_xlabel(com_style.get("x_label_time", "Normalized time (0-1)"), fontsize=common_style["label_fontsize"])
-    ax_mag.set_ylabel("COM magnitude", fontsize=common_style["label_fontsize"])
 
     ax_scatter.set_xlabel(com_style.get("x_label", comx_name), fontsize=common_style["label_fontsize"])
     ax_scatter.set_ylabel(com_style.get("y_label", comy_name), fontsize=common_style["label_fontsize"])
@@ -2036,13 +1986,13 @@ def _plot_com_overlay(
             rows, cols = 1, 4
 
     slots = rows * cols
-    if comz_name is not None and slots < 4:
+    if comz_name is not None and slots < 3:
         comz_name = None
 
-    time_panels = 4 if comz_name is not None else 3
+    time_panels = 3 if comz_name is not None else 2
     total_panels = time_panels + 1  # + scatter
     if slots < time_panels:
-        raise ValueError("COM grid_layout must have enough panels for COMx/COMy/(COMz)/Magnitude.")
+        raise ValueError("COM grid_layout must have enough panels for COMx/COMy/(COMz).")
 
     fig_size = com_style["subplot_size"]
     try:
@@ -2071,17 +2021,15 @@ def _plot_com_overlay(
     ax_y = axes[1]
     if comz_name is not None:
         ax_z = axes[2]
-        ax_mag = axes[3]
     else:
         ax_z = None
-        ax_mag = axes[2]
     ax_scatter = axes[time_panels]
 
     for ax in axes[total_panels:]:
         ax.axis("off")
 
     window_span_alpha = float(com_style.get("window_span_alpha", 0.15))
-    time_axes = [ax_x, ax_y] + ([ax_z] if ax_z is not None else []) + [ax_mag]
+    time_axes = [ax_x, ax_y] + ([ax_z] if ax_z is not None else [])
     for ax in time_axes:
         for span in window_spans:
             ax.axvspan(
@@ -2153,57 +2101,6 @@ def _plot_com_overlay(
         ax.set_xlabel(com_style.get("x_label_time", "Normalized time (0-1)"), fontsize=common_style["label_fontsize"])
         ax.set_ylabel(y_label, fontsize=common_style["label_fontsize"])
 
-    # Magnitude time series (window color, group line style)
-    for key in sorted_keys:
-        comx = aggregated_by_key.get(key, {}).get(comx_name)
-        comy = aggregated_by_key.get(key, {}).get(comy_name)
-        if comx is None or comy is None:
-            continue
-        ml_vals = (-comy) if com_style.get("y_invert", False) else comy
-        mag_vals = np.sqrt((comx**2) + (ml_vals**2))
-        linestyle = key_to_linestyle.get(key, "-")
-        for span in window_spans:
-            mask = (x >= span["start"]) & (x <= span["end"])
-            if not mask.any():
-                continue
-            ax_mag.plot(
-                x[mask],
-                mag_vals[mask],
-                color=span["color"],
-                linestyle=linestyle,
-                linewidth=com_style.get("line_width", 0.8),
-                alpha=com_style.get("line_alpha", 0.8),
-                label="_nolegend_",
-            )
-
-    for key in sorted_keys:
-        vlines = event_vlines_by_key.get(key, [])
-        if not vlines:
-            continue
-        _draw_event_vlines(ax_mag, vlines, style=event_vline_style)
-
-    ax_mag.grid(True, alpha=common_style["grid_alpha"])
-    ax_mag.tick_params(labelsize=common_style["tick_labelsize"])
-    ax_mag.set_xlabel(com_style.get("x_label_time", "Normalized time (0-1)"), fontsize=common_style["label_fontsize"])
-    ax_mag.set_ylabel("COM magnitude", fontsize=common_style["label_fontsize"])
-    group_handles = _build_group_legend_handles(
-        sorted_keys,
-        group_fields,
-        filtered_group_fields,
-        key_to_linestyle,
-        linewidth=float(com_style.get("line_width", 0.8)),
-    )
-    _apply_window_group_legends(
-        ax_mag,
-        window_spans=window_spans,
-        group_handles=group_handles,
-        event_vlines=event_vlines_all,
-        event_vline_style=event_vline_style,
-        legend_fontsize=com_style["legend_fontsize"],
-        framealpha=common_style["legend_framealpha"],
-        loc=common_style["legend_loc"],
-    )
-
     ax_x.set_title(
         comx_name,
         fontsize=common_style["title_fontsize"],
@@ -2223,12 +2120,6 @@ def _plot_com_overlay(
             fontweight=common_style["title_fontweight"],
             pad=common_style["title_pad"],
         )
-    ax_mag.set_title(
-        "Magnitude",
-        fontsize=common_style["title_fontsize"],
-        fontweight=common_style["title_fontweight"],
-        pad=common_style["title_pad"],
-    )
 
     overlay_linewidth = float(com_style.get("line_width", 0.8))
     overlay_alpha = float(com_style.get("scatter_alpha", 0.7))
