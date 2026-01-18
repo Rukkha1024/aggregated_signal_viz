@@ -454,7 +454,7 @@ def _resolve_forceplate_axis_label(channel: str, axis_labels: Dict[str, str]) ->
 
 def _resolve_forceplate_line_color(channel: str, line_colors: Dict[str, Any]) -> str:
     if not line_colors:
-        return "blue"
+        return "gray"
 
     direct = line_colors.get(channel)
     if direct is not None and str(direct).strip():
@@ -465,7 +465,7 @@ def _resolve_forceplate_line_color(channel: str, line_colors: Dict[str, Any]) ->
     if base_color is not None and str(base_color).strip():
         return str(base_color).strip()
 
-    return "blue"
+    return "gray"
 
 
 def _format_title(signal_group: str, mode_name: str, group_fields: List[str], key: Tuple) -> str:
@@ -1431,8 +1431,8 @@ def _plot_cop(
     for ax in (ax_cx, ax_cy):
         _draw_window_spans(ax, window_spans, alpha=window_span_alpha, with_labels=False)
 
-    cx_color = cop_style.get("line_colors", {}).get("Cx", "blue")
-    cy_color = cop_style.get("line_colors", {}).get("Cy", "red")
+    cx_color = cop_style.get("line_colors", {}).get("Cx", "gray")
+    cy_color = cop_style.get("line_colors", {}).get("Cy", "gray")
 
     ax_cx.plot(
         x,
@@ -1647,9 +1647,9 @@ def _plot_com(
                 label="_nolegend_",
             )
 
-    x_color = com_style.get("line_colors", {}).get(comx_name, "blue")
-    y_color = com_style.get("line_colors", {}).get(comy_name, "red")
-    z_color = com_style.get("line_colors", {}).get(comz_name, "green") if comz_name is not None else None
+    x_color = com_style.get("line_colors", {}).get(comx_name, "gray")
+    y_color = com_style.get("line_colors", {}).get(comy_name, "gray")
+    z_color = com_style.get("line_colors", {}).get(comz_name, "gray") if comz_name is not None else None
 
     ax_x.plot(
         x,
@@ -1855,7 +1855,7 @@ def _plot_cop_overlay(
             if series is None:
                 continue
             y = (-series) if (ch == cy_name and cop_style["y_invert"]) else series
-            channel_color = cop_style.get("line_colors", {}).get("Cx" if ch == cx_name else "Cy", "C0")
+            channel_color = cop_style.get("line_colors", {}).get("Cx" if ch == cx_name else "Cy", "gray")
             color = key_to_color.get(key, channel_color) if use_group_colors else channel_color
             linestyle = key_to_linestyle.get(key, "-")
             label = _format_group_label(key, group_fields, filtered_group_fields) or "_nolegend_"
@@ -2062,7 +2062,7 @@ def _plot_com_overlay(
             if series is None:
                 continue
             y = (-series) if (ch == comy_name and com_style.get("y_invert", False)) else series
-            channel_color = com_style.get("line_colors", {}).get(ch, "C0")
+            channel_color = com_style.get("line_colors", {}).get(ch, "gray")
             color = key_to_color.get(key, channel_color) if use_group_colors else channel_color
             linestyle = key_to_linestyle.get(key, "-")
             label = _format_group_label(key, group_fields, filtered_group_fields) or "_nolegend_"
@@ -3251,7 +3251,7 @@ class AggregatedSignalVisualizer:
             "background_alpha": cfg["background_alpha"],
             "background_size": cfg["background_size"],
             "window_span_alpha": cfg.get("window_span_alpha", 0.15),
-            "line_colors": cfg.get("line_colors", {"Cx": "blue", "Cy": "red"}),
+            "line_colors": cfg.get("line_colors", {"Cx": "gray", "Cy": "gray"}),
             "line_width": cfg.get("line_width", 0.8),
             "line_alpha": cfg.get("line_alpha", 0.8),
             "max_marker_color": cfg["max_marker_color"],
@@ -3282,9 +3282,9 @@ class AggregatedSignalVisualizer:
     @staticmethod
     def _build_com_style(com_cfg: Any, cop_style: Dict[str, Any]) -> Dict[str, Any]:
         base_line_colors = dict(cop_style.get("line_colors", {}) or {})
-        comx_color = base_line_colors.get("Cx", "blue")
-        comy_color = base_line_colors.get("Cy", "red")
-        comz_color = base_line_colors.get("Cz", "green")
+        comx_color = base_line_colors.get("Cx", "gray")
+        comy_color = base_line_colors.get("Cy", "gray")
+        comz_color = base_line_colors.get("Cz", "gray")
 
         if not isinstance(com_cfg, dict):
             com_cfg = {}

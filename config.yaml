@@ -115,12 +115,14 @@ plot_style:
     y_label: "{channel}"               # Y축 라벨 ({channel}은 동적 치환: TA, RF 등)
 
   # Forceplate 신호 전용 설정
+  # Note: Default colors are gray for all signals. Line differentiation uses linestyles.
+  # To restore original colors, set specific colors in line_colors for each channel.
   forceplate:
     subplot_size: [15, 10]             # 그리드 크기 (가로, 세로) 인치
     line_colors:                       # 각 채널별 라인 색상 매핑
-      Fx: "purple"                     # 전후방향 힘 (보라)
-      Fy: "brown"                      # 좌우방향 힘 (갈색)
-      Fz: "green"                      # 수직 힘 (초록)
+      Fx: "gray"                       # 전후방향 힘 (회색)
+      Fy: "gray"                       # 좌우방향 힘 (회색)
+      Fz: "gray"                       # 수직 힘 (회색)
     axis_labels:
       Fx: "AP Force (Ant: + / Post: -)"
       Fy: "ML Force (Left: + / Right: -)"
@@ -145,8 +147,8 @@ plot_style:
     background_size: 6                 # 배경 점 크기
     window_span_alpha: 0.15            # 시계열 플롯의 윈도우 배경 투명도
     line_colors:
-      Cx: "blue"
-      Cy: "red"
+      Cx: "gray"
+      Cy: "gray"
     line_width: 1.2
     line_alpha: 0.8
     max_marker_color: "#ED1C24"        # 최댓값 마커 색상 (빨강)
