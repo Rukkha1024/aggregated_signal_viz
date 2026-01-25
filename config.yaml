@@ -192,12 +192,15 @@ windows:
 
 # === Event Vertical Lines (data-driven annotations) ===
 # Notes:
-# - Values are interpreted in the same domain as `data.id_columns.onset` (platform_onset; mocap frame).
+# - If a column exists in the input parquet, values are interpreted in the same domain as
+#   `data.id_columns.onset` (platform_onset; mocap frame) and converted to ms.
+# - If a column does NOT exist in the input parquet but exists in `data.features_file`,
+#   values are interpreted as ms relative to platform_onset.
 # - The visual style is controlled via `event_vlines.style` (matplotlib axvline kwargs).
 # - Each column gets a different color from a palette by default.
 # - If you want a specific column color, set it in `event_vlines.colors`.
 event_vlines:
-  columns: ["platform_onset", "step_onset"]
+  columns: ["platform_onset", "step_onset", "TKEO_AGLR_emg_onset_timing"]
   # Optional:
   # colors:
   #   platform_onset: "black"

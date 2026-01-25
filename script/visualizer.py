@@ -2202,6 +2202,7 @@ class AggregatedSignalVisualizer:
         self.id_cfg = self.config["data"]["id_columns"]
         self.device_rate = float(self.config["data"].get("device_sample_rate", 1000))
         self.frame_ratio = get_frame_ratio(self.config["data"])
+        self._input_columns: Optional[set[str]] = None
 
         event_vlines_cfg = self.config.get("event_vlines")
         self.event_vline_columns = _parse_event_vlines_config(event_vlines_cfg)
@@ -2233,6 +2234,9 @@ class AggregatedSignalVisualizer:
         self.legend_label_threshold = self.common_style.get("legend_label_threshold", 6)
 
         self.features_df: Optional[pl.DataFrame] = self._load_features()
+        self._feature_event_cache: Optional[pl.DataFrame] = None
+        self._feature_event_cache_cols: Tuple[str, ...] = ()
+        self._feature_event_logged: bool = False
 
     def run(
         self,
@@ -2374,6 +2378,8 @@ class AggregatedSignalVisualizer:
         if rename_map:
             lf = lf.rename(rename_map)
 
+        self._input_columns = set(self._lazy_columns(lf))
+
         task_col = self.id_cfg.get("task")
         task_filter = self.config["data"].get("task_filter")
         if task_filter and task_col and task_col in self._lazy_columns(lf):
@@ -2401,10 +2407,13 @@ class AggregatedSignalVisualizer:
         extra_event_exprs: List[pl.Expr] = []
         if self.event_vline_columns:
             available_cols = set(self._lazy_columns(lf))
+            self._input_columns = available_cols
             ms_per_frame = 1000.0 / float(self.device_rate)
             for event_col in self.event_vline_columns:
                 if event_col not in available_cols:
-                    print(f"[event_vlines] Warning: column '{event_col}' not found in input; skipping")
+                    if self.features_df is not None and event_col in self.features_df.columns:
+                        continue
+                    print(f"[event_vlines] Warning: column '{event_col}' not found in input/features; skipping")
                     continue
                 # Interpret event in the same domain as `platform_onset` (mocap frame) and convert to ms.
                 event_mocap = pl.col(event_col).max().over(group_cols)  # ignores nulls
@@ -2590,6 +2599,8 @@ class AggregatedSignalVisualizer:
             if col in meta_df.columns:
                 continue
             meta_df = meta_df.with_columns(pl.lit(None).alias(col))
+
+        meta_df = self._enrich_meta_with_feature_event_vlines(meta_df)
         return _ResampledGroup(meta_df=meta_df, tensor=tensor, channels=channels)
 
     def _build_plot_tasks(
@@ -3419,6 +3430,83 @@ class AggregatedSignalVisualizer:
             return None
         df = pl.read_csv(path)
         return strip_bom_columns(df)
+
+    def _enrich_meta_with_feature_event_vlines(self, meta_df: pl.DataFrame) -> pl.DataFrame:
+        """
+        Fill event vline ms columns from `data.features_file` when an event column is not present
+        in the primary input dataset.
+
+        Convention:
+        - If `event_vlines.columns` exists in the input parquet: interpret as mocap frame and convert to ms.
+        - Otherwise, if the column exists in `features_file`: interpret values as ms relative to platform_onset.
+        """
+        if not self.event_vline_columns or self.features_df is None:
+            return meta_df
+
+        input_cols = self._input_columns or set()
+        feature_event_cols = [c for c in self.event_vline_columns if c not in input_cols and c in self.features_df.columns]
+        if not feature_event_cols:
+            return meta_df
+
+        subject_col = self.id_cfg["subject"]
+        velocity_col = self.id_cfg["velocity"]
+        trial_col = self.id_cfg["trial"]
+        key_cols = [subject_col, velocity_col, trial_col]
+
+        missing_keys = [k for k in key_cols if k not in meta_df.columns or k not in self.features_df.columns]
+        if missing_keys:
+            if not self._feature_event_logged:
+                print(f"[event_vlines] Warning: cannot join features for vlines; missing keys: {missing_keys}")
+                self._feature_event_logged = True
+            return meta_df
+
+        requested = tuple(sorted(feature_event_cols))
+        if self._feature_event_cache is None or requested != self._feature_event_cache_cols:
+            base = self.features_df.select([*key_cols, *requested])
+            # Normalize join key types to match meta_df.
+            casts: List[pl.Expr] = []
+            meta_schema = meta_df.schema
+            for k in key_cols:
+                dtype = meta_schema.get(k)
+                if dtype is not None:
+                    casts.append(pl.col(k).cast(dtype, strict=False).alias(k))
+            if casts:
+                base = base.with_columns(casts)
+
+            agg_exprs: List[pl.Expr] = []
+            for col in requested:
+                agg_exprs.append(
+                    pl.col(col)
+                    .cast(pl.Float64, strict=False)
+                    .fill_nan(None)
+                    .mean()
+                    .alias(_event_ms_col(col))
+                )
+
+            self._feature_event_cache = base.group_by(key_cols, maintain_order=False).agg(agg_exprs)
+            self._feature_event_cache_cols = requested
+            if not self._feature_event_logged:
+                print(f"[event_vlines] using features_file columns (ms): {list(requested)}")
+                self._feature_event_logged = True
+
+        feature_table = self._feature_event_cache
+        if feature_table is None or feature_table.is_empty():
+            return meta_df
+
+        joined = meta_df.join(feature_table, on=key_cols, how="left", suffix="__feat")
+
+        exclude_cols: List[str] = []
+        for event_col in requested:
+            base_col = _event_ms_col(event_col)
+            feat_col = f"{base_col}__feat"
+            if base_col not in joined.columns or feat_col not in joined.columns:
+                continue
+            joined = joined.with_columns(pl.coalesce([pl.col(base_col), pl.col(feat_col)]).alias(base_col))
+            exclude_cols.append(feat_col)
+
+        if exclude_cols:
+            joined = joined.drop(exclude_cols)
+        return joined
 
 
 def parse_args() -> argparse.Namespace:
