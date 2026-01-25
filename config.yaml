@@ -173,11 +173,17 @@ plot_style:
     x_label: "COM ML (Left: + / Right: -)"
     y_label: "COM AP (Ant: + / Post: -)"
 
-# === Window Definitions (relative to platform_onset in ms) ===
+# === Window Definitions (ms) ===
 # Notes:
-# - `windows.reference_event` can point to:
-#   1) a column in `data.input_file` (interpreted in the same domain as `data.id_columns.onset`; mocap frame), or
-#   2) a column that exists only in `data.features_file` (interpreted as ms relative to platform_onset).
+# - `windows.reference_event` defines the zero point for *numeric* window boundaries:
+#   - if it equals `data.id_columns.onset` (platform_onset), numeric values are ms from platform_onset.
+#   - otherwise, numeric values are treated as ms offset from `reference_event` (shifted by its mean timing).
+# - `windows.definitions.*.start_ms/end_ms` can be:
+#   - a number (offset ms; see above), or
+#   - an event column name (its mean timing in ms relative to platform_onset).
+# - Event columns can come from:
+#   1) `data.input_file` (interpreted in the same domain as `data.id_columns.onset`; mocap frame), or
+#   2) `data.features_file` only (interpreted as ms relative to platform_onset).
 windows:
   reference_event: "platform_onset"
   definitions:

@@ -254,6 +254,43 @@ def _event_ms_col(event_col: str) -> str:
     return f"__event_{event_col}_ms"
 
 
+def _coerce_float(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            return float(text)
+        except ValueError:
+            return None
+    return None
+
+
+def _parse_window_boundary_spec(value: Any) -> Optional[Tuple[str, Any]]:
+    """
+    Parse a window boundary definition.
+
+    Supported forms:
+    - numeric (int/float or numeric string) -> ("offset", <float>)
+    - event column name (string) -> ("event", <str>)
+    """
+    num = _coerce_float(value)
+    if num is not None:
+        return ("offset", float(num))
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    return ("event", text)
+
+
 def _nanmean_ignore_nan(values: np.ndarray) -> Optional[float]:
     arr = np.asarray(values, dtype=float)
     if arr.size == 0:
@@ -2210,6 +2247,41 @@ class AggregatedSignalVisualizer:
         self.event_vline_style = _parse_event_vlines_style(event_vlines_cfg)
         self.event_vline_colors = _build_event_vline_color_map(self.event_vline_columns, event_vlines_cfg)
 
+        windows_cfg = self.config.get("windows", {})
+        self.window_reference_event: Optional[str] = None
+        self.window_definition_specs: Dict[str, Dict[str, Tuple[str, Any]]] = {}
+        window_event_cols: List[str] = []
+        if isinstance(windows_cfg, dict):
+            ref_event = windows_cfg.get("reference_event")
+            if ref_event is not None:
+                ref_name = str(ref_event).strip()
+                if ref_name:
+                    self.window_reference_event = ref_name
+                    window_event_cols.append(ref_name)
+            definitions = windows_cfg.get("definitions", {})
+            if isinstance(definitions, dict):
+                for key, cfg in definitions.items():
+                    if not isinstance(cfg, dict):
+                        continue
+                    name = str(key).strip()
+                    if not name:
+                        continue
+                    start_spec = _parse_window_boundary_spec(cfg.get("start_ms"))
+                    end_spec = _parse_window_boundary_spec(cfg.get("end_ms"))
+                    if start_spec is None or end_spec is None:
+                        continue
+                    self.window_definition_specs[name] = {"start": start_spec, "end": end_spec}
+                    if start_spec[0] == "event":
+                        window_event_cols.append(str(start_spec[1]))
+                    if end_spec[0] == "event":
+                        window_event_cols.append(str(end_spec[1]))
+
+        self.window_event_columns = [c for c in dict.fromkeys(window_event_cols) if c]
+        self.required_event_columns = [
+            c for c in dict.fromkeys([*self.event_vline_columns, *self.window_event_columns]) if c
+        ]
+        self.required_event_ms_meta_cols = [_event_ms_col(col) for col in self.required_event_columns]
+
         self.target_length = int(self.config["interpolation"]["target_length"])
         self.target_axis: Optional[np.ndarray] = None
         self.x_norm: Optional[np.ndarray] = None
@@ -2217,9 +2289,6 @@ class AggregatedSignalVisualizer:
         self.time_end_ms: Optional[float] = None
         self.time_start_frame: Optional[float] = None
         self.time_end_frame: Optional[float] = None
-        self.window_norm_ranges: Dict[str, Tuple[float, float]] = {}
-        self.window_ms_ranges: Dict[str, Tuple[float, float]] = {}
-        self.window_reference_shift_ms: float = 0.0
 
         style_cfg = self.config["plot_style"]
         common_style_cfg = style_cfg["common"]
@@ -2239,6 +2308,7 @@ class AggregatedSignalVisualizer:
         self._feature_event_cache_key_sig: Tuple[Tuple[str, str], ...] = ()
         self._feature_event_logged: bool = False
         self._windows_reference_event_logged: bool = False
+        self._window_event_warning_logged: set[str] = set()
 
     def run(
         self,
@@ -2265,7 +2335,7 @@ class AggregatedSignalVisualizer:
         ensure_output_dirs(self.base_dir, self.config)
 
         meta_cols_needed = self._collect_needed_meta_columns(enabled_modes)
-        for col in self.event_vline_meta_cols:
+        for col in self.required_event_ms_meta_cols:
             if col not in meta_cols_needed:
                 meta_cols_needed.append(col)
 
@@ -2407,20 +2477,27 @@ class AggregatedSignalVisualizer:
         )
 
         extra_event_exprs: List[pl.Expr] = []
-        if self.event_vline_columns:
+        if self.required_event_columns:
             available_cols = set(self._lazy_columns(lf))
             self._input_columns = available_cols
             ms_per_frame = 1000.0 / float(self.device_rate)
-            for event_col in self.event_vline_columns:
+            for event_col in self.required_event_columns:
                 if event_col not in available_cols:
-                    if self.features_df is not None and event_col in self.features_df.columns:
-                        continue
-                    print(f"[event_vlines] Warning: column '{event_col}' not found in input/features; skipping")
                     continue
                 # Interpret event in the same domain as `platform_onset` (mocap frame) and convert to ms.
                 event_mocap = pl.col(event_col).max().over(group_cols)  # ignores nulls
                 event_rel_frame = (event_mocap - onset_mocap) * self.frame_ratio
                 extra_event_exprs.append((event_rel_frame * ms_per_frame).alias(_event_ms_col(event_col)))
+
+        # Preserve explicit warnings for event_vlines configuration (only).
+        if self.event_vline_columns:
+            available_cols = self._input_columns or set(self._lazy_columns(lf))
+            for event_col in self.event_vline_columns:
+                if event_col in available_cols:
+                    continue
+                if self.features_df is not None and event_col in self.features_df.columns:
+                    continue
+                print(f"[event_vlines] Warning: column '{event_col}' not found in input/features; skipping")
 
         return lf.with_columns(
             [
@@ -2501,8 +2578,6 @@ class AggregatedSignalVisualizer:
         self.time_end_frame = time_end_frame
         self.target_axis = np.linspace(time_start_frame, time_end_frame, self.target_length)
         self.x_norm = np.linspace(0.0, 1.0, self.target_length)
-        self.window_reference_shift_ms = self._compute_window_reference_shift_ms(lf)
-        self.window_norm_ranges, self.window_ms_ranges = self._compute_window_norm_ranges()
         return cropped
 
     def _resample_signal_group(self, lf: pl.LazyFrame, signal_group: str, meta_cols: List[str]) -> _ResampledGroup:
@@ -2602,7 +2677,7 @@ class AggregatedSignalVisualizer:
                 continue
             meta_df = meta_df.with_columns(pl.lit(None).alias(col))
 
-        meta_df = self._enrich_meta_with_feature_event_vlines(meta_df)
+        meta_df = self._enrich_meta_with_feature_event_ms(meta_df)
         return _ResampledGroup(meta_df=meta_df, tensor=tensor, channels=channels)
 
     def _build_plot_tasks(
@@ -2629,8 +2704,6 @@ class AggregatedSignalVisualizer:
         if not grouped:
             return []
 
-        window_spans = self._window_spans()
-
         tasks: List[Dict[str, Any]] = []
 
         if overlay:
@@ -2650,6 +2723,7 @@ class AggregatedSignalVisualizer:
 
             # OLD BEHAVIOR: overlay_within not specified -> all keys in one file
             if not overlay_within:
+                window_spans = self._compute_window_spans(meta_df, filtered_idx)
                 sorted_keys = _sort_overlay_keys(list(aggregated_by_key.keys()), group_fields)
                 filtered_group_fields = _calculate_filtered_group_fields(
                     sorted_keys,
@@ -2702,6 +2776,8 @@ class AggregatedSignalVisualizer:
                 file_aggregated = {k: aggregated_by_key[k] for k in keys_in_file}
                 file_markers = {k: markers_by_key[k] for k in keys_in_file}
                 file_event_vlines = {k: event_vlines_by_key.get(k, []) for k in keys_in_file}
+                file_indices = np.concatenate([grouped[k] for k in keys_in_file if k in grouped]) if keys_in_file else filtered_idx
+                window_spans = self._compute_window_spans(meta_df, file_indices)
 
                 sorted_keys = _sort_overlay_keys(keys_in_file, group_fields)
                 filtered_group_fields = _calculate_filtered_group_fields(
@@ -2739,6 +2815,7 @@ class AggregatedSignalVisualizer:
             output_path = output_dir / filename
             markers = self._collect_markers(signal_group, key, group_fields, mode_cfg.get("filter"))
             event_vlines = self._collect_event_vlines(meta_df, idx)
+            window_spans = self._compute_window_spans(meta_df, idx)
 
             if signal_group == "emg":
                 tasks.append(
@@ -2857,20 +2934,99 @@ class AggregatedSignalVisualizer:
         mapping["signal_group"] = signal_group
         return pattern.format(**mapping)
 
-    def _window_spans(self) -> List[Dict[str, Any]]:
+    def _compute_window_spans(self, meta_df: pl.DataFrame, indices: np.ndarray) -> List[Dict[str, Any]]:
+        if self.time_start_ms is None or self.time_end_ms is None:
+            return []
+        if indices.size == 0:
+            return []
+        if not self.window_definition_specs:
+            return []
+
+        shift_ms = self._compute_window_reference_shift_ms_from_meta(meta_df, indices)
+
         spans: List[Dict[str, Any]] = []
-        for name, (start, end) in self.window_norm_ranges.items():
-            label = self._format_window_label(name)
+        for name, spec in self.window_definition_specs.items():
+            start_ms = self._resolve_window_boundary_ms(spec["start"], meta_df, indices, shift_ms)
+            end_ms = self._resolve_window_boundary_ms(spec["end"], meta_df, indices, shift_ms)
+            if start_ms is None or end_ms is None:
+                continue
+            clamped_start = max(float(start_ms), float(self.time_start_ms))
+            clamped_end = min(float(end_ms), float(self.time_end_ms))
+            if clamped_start >= clamped_end:
+                continue
+            start_norm = _ms_to_norm(clamped_start, float(self.time_start_ms), float(self.time_end_ms))
+            end_norm = _ms_to_norm(clamped_end, float(self.time_start_ms), float(self.time_end_ms))
+            if start_norm is None or end_norm is None:
+                continue
             spans.append(
                 {
                     "name": name,
-                    "start": float(start),
-                    "end": float(end),
-                    "label": label,
+                    "start": float(start_norm),
+                    "end": float(end_norm),
+                    "label": f"{name} ({int(clamped_start)}-{int(clamped_end)} ms)",
                     "color": self.window_colors.get(name, "#cccccc"),
                 }
             )
         return spans
+
+    def _compute_window_reference_shift_ms_from_meta(self, meta_df: pl.DataFrame, indices: np.ndarray) -> float:
+        ref_col = str(self.window_reference_event or "").strip()
+        if not ref_col:
+            return 0.0
+
+        onset_col = str(self.id_cfg.get("onset") or "").strip()
+        if not onset_col or ref_col == onset_col:
+            return 0.0
+
+        ms_col = _event_ms_col(ref_col)
+        if ms_col not in meta_df.columns:
+            if not self._windows_reference_event_logged:
+                print(
+                    f"[windows] Warning: reference_event '{ref_col}' not available; numeric windows are not shifted"
+                )
+                self._windows_reference_event_logged = True
+            return 0.0
+
+        vals = meta_df[ms_col].to_numpy()
+        mean_ms = _nanmean_ignore_nan(vals[indices])
+        if mean_ms is None:
+            if not self._windows_reference_event_logged:
+                print(f"[windows] Warning: reference_event '{ref_col}' has no values; numeric windows are not shifted")
+                self._windows_reference_event_logged = True
+            return 0.0
+        return float(mean_ms)
+
+    def _resolve_window_boundary_ms(
+        self,
+        spec: Tuple[str, Any],
+        meta_df: pl.DataFrame,
+        indices: np.ndarray,
+        shift_ms: float,
+    ) -> Optional[float]:
+        kind, value = spec
+        if kind == "offset":
+            return float(value) + float(shift_ms)
+        if kind != "event":
+            return None
+
+        event_col = str(value).strip()
+        if not event_col:
+            return None
+        ms_col = _event_ms_col(event_col)
+        if ms_col not in meta_df.columns:
+            if event_col not in self._window_event_warning_logged:
+                print(f"[windows] Warning: event '{event_col}' not available for window boundaries; skipping")
+                self._window_event_warning_logged.add(event_col)
+            return None
+
+        vals = meta_df[ms_col].to_numpy()
+        mean_ms = _nanmean_ignore_nan(vals[indices])
+        if mean_ms is None:
+            if event_col not in self._window_event_warning_logged:
+                print(f"[windows] Warning: event '{event_col}' has no values for window boundaries; skipping")
+                self._window_event_warning_logged.add(event_col)
+            return None
+        return float(mean_ms)
 
     def _collect_event_vlines(self, meta_df: pl.DataFrame, indices: np.ndarray) -> List[Dict[str, Any]]:
         if not self.event_vline_columns:
@@ -3110,116 +3266,6 @@ class AggregatedSignalVisualizer:
             "common_style": self.common_style,
             "window_spans": window_spans,
         }
-
-    def _compute_window_reference_shift_ms(self, lf: pl.LazyFrame) -> float:
-        windows_cfg = self.config.get("windows", {})
-        if not isinstance(windows_cfg, dict):
-            return 0.0
-
-        ref_event = windows_cfg.get("reference_event")
-        if ref_event is None:
-            return 0.0
-        ref_col = str(ref_event).strip()
-        if not ref_col:
-            return 0.0
-
-        onset_col = str(self.id_cfg.get("onset") or "").strip()
-        if not onset_col or ref_col == onset_col:
-            return 0.0
-
-        available_cols = set(self._lazy_columns(lf))
-        if onset_col not in available_cols:
-            print(f"[windows] Warning: onset column '{onset_col}' not found; windows are not shifted")
-            return 0.0
-
-        subject_col = self.id_cfg["subject"]
-        velocity_col = self.id_cfg["velocity"]
-        trial_col = self.id_cfg["trial"]
-        group_cols = [subject_col, velocity_col, trial_col]
-
-        ms_per_frame = 1000.0 / float(self.device_rate)
-
-        if ref_col not in available_cols:
-            # Fallback: allow reference_event to come from features_file as ms relative to platform_onset.
-            if self.features_df is None or ref_col not in self.features_df.columns:
-                print(f"[windows] Warning: reference_event column '{ref_col}' not found; windows are not shifted")
-                return 0.0
-
-            schema = lf.collect_schema()
-            key_schema = {k: schema.get(k) for k in group_cols}
-            feature_table = self._get_feature_event_ms_table(
-                requested=(ref_col,),
-                key_cols=group_cols,
-                key_schema=key_schema,
-            )
-            if feature_table is None or feature_table.is_empty():
-                print(f"[windows] Warning: reference_event '{ref_col}' has no values; windows are not shifted")
-                return 0.0
-
-            ms_col = _event_ms_col(ref_col)
-            stats = feature_table.select(pl.col(ms_col).drop_nulls().mean().alias("mean"))
-            mean_shift = stats["mean"].item()
-            if mean_shift is None:
-                print(f"[windows] Warning: reference_event '{ref_col}' has no values; windows are not shifted")
-                return 0.0
-
-            if not self._windows_reference_event_logged:
-                print(f"[windows] using features_file reference_event (ms): {ref_col}")
-                self._windows_reference_event_logged = True
-            return float(mean_shift)
-
-        shift_lf = (
-            lf.group_by(group_cols)
-            .agg(
-                [
-                    pl.col(onset_col).first().alias("__onset_mocap"),
-                    pl.col(ref_col).max().alias("__ref_mocap"),
-                ]
-            )
-            .with_columns(
-                (
-                    (pl.col("__ref_mocap") - pl.col("__onset_mocap"))
-                    * float(self.frame_ratio)
-                    * ms_per_frame
-                ).alias("__shift_ms")
-            )
-        )
-
-        stats = shift_lf.select(pl.col("__shift_ms").drop_nulls().mean().alias("mean")).collect()
-        mean_shift = stats["mean"].item()
-        if mean_shift is None:
-            print(f"[windows] Warning: reference_event '{ref_col}' has no values; windows are not shifted")
-            return 0.0
-        return float(mean_shift)
-
-    def _compute_window_norm_ranges(self) -> Tuple[Dict[str, Tuple[float, float]], Dict[str, Tuple[float, float]]]:
-        if self.time_start_ms is None or self.time_end_ms is None:
-            return {}, {}
-        norm_ranges: Dict[str, Tuple[float, float]] = {}
-        ms_ranges: Dict[str, Tuple[float, float]] = {}
-        shift_ms = float(self.window_reference_shift_ms or 0.0)
-        definitions = self.config.get("windows", {}).get("definitions", {})
-        for name, cfg in definitions.items():
-            raw_start = float(cfg["start_ms"]) + shift_ms
-            raw_end = float(cfg["end_ms"]) + shift_ms
-            clamped_start = max(raw_start, self.time_start_ms)
-            clamped_end = min(raw_end, self.time_end_ms)
-            if clamped_start >= clamped_end:
-                continue
-            start_norm = _ms_to_norm(clamped_start, self.time_start_ms, self.time_end_ms)
-            end_norm = _ms_to_norm(clamped_end, self.time_start_ms, self.time_end_ms)
-            if start_norm is None or end_norm is None:
-                continue
-            norm_ranges[name] = (start_norm, end_norm)
-            ms_ranges[name] = (clamped_start, clamped_end)
-        return norm_ranges, ms_ranges
-
-    def _format_window_label(self, name: str) -> str:
-        ms_range = self.window_ms_ranges.get(name)
-        if not ms_range:
-            return name
-        start_ms, end_ms = ms_range
-        return f"{name} ({int(start_ms)}-{int(end_ms)} ms)"
 
     def _ms_to_frame(self, ms: float) -> float:
         return ms * self.device_rate / 1000.0
@@ -3517,20 +3563,22 @@ class AggregatedSignalVisualizer:
             self._feature_event_cache_key_sig = key_sig
         return self._feature_event_cache
 
-    def _enrich_meta_with_feature_event_vlines(self, meta_df: pl.DataFrame) -> pl.DataFrame:
+    def _enrich_meta_with_feature_event_ms(self, meta_df: pl.DataFrame) -> pl.DataFrame:
         """
-        Fill event vline ms columns from `data.features_file` when an event column is not present
-        in the primary input dataset.
+        Fill `__event_<col>_ms` columns from `data.features_file` for events that are not present
+        in the primary input parquet.
 
-        Convention:
-        - If `event_vlines.columns` exists in the input parquet: interpret as mocap frame and convert to ms.
-        - Otherwise, if the column exists in `features_file`: interpret values as ms relative to platform_onset.
+        Conventions:
+        - If an event exists in the input parquet, values are interpreted in the same domain as
+          `data.id_columns.onset` (mocap frame) and converted to ms in `_load_and_align_lazy()`.
+        - If an event does NOT exist in the input parquet but exists in `data.features_file`,
+          values are interpreted as ms relative to platform_onset.
         """
-        if not self.event_vline_columns or self.features_df is None:
+        if self.features_df is None or not self.required_event_columns:
             return meta_df
 
         input_cols = self._input_columns or set()
-        feature_event_cols = [c for c in self.event_vline_columns if c not in input_cols and c in self.features_df.columns]
+        feature_event_cols = [c for c in self.required_event_columns if c not in input_cols and c in self.features_df.columns]
         if not feature_event_cols:
             return meta_df
 
@@ -3542,7 +3590,7 @@ class AggregatedSignalVisualizer:
         missing_keys = [k for k in key_cols if k not in meta_df.columns or k not in self.features_df.columns]
         if missing_keys:
             if not self._feature_event_logged:
-                print(f"[event_vlines] Warning: cannot join features for vlines; missing keys: {missing_keys}")
+                print(f"[features_event_ms] Warning: cannot join features_file events; missing keys: {missing_keys}")
                 self._feature_event_logged = True
             return meta_df
 
@@ -3555,7 +3603,7 @@ class AggregatedSignalVisualizer:
         if feature_table is None or feature_table.is_empty():
             return meta_df
         if not self._feature_event_logged:
-            print(f"[event_vlines] using features_file columns (ms): {list(requested)}")
+            print(f"[features_event_ms] using features_file columns (ms): {list(requested)}")
             self._feature_event_logged = True
 
         joined = meta_df.join(feature_table, on=key_cols, how="left", suffix="__feat")
