@@ -776,31 +776,6 @@ def _draw_window_spans(
         )
 
 
-def _draw_window_boundaries(
-    ax: Any,
-    window_spans: Sequence[Dict[str, Any]],
-    *,
-    alpha: float = 0.85,
-    linewidth: float = 0.8,
-) -> None:
-    if not window_spans:
-        return
-    for span in window_spans:
-        color = span.get("color")
-        color = str(color).strip() if color is not None and str(color).strip() else "#777777"
-        for key in ("start", "end"):
-            x = span.get(key)
-            if x is None:
-                continue
-            ax.axvline(
-                float(x),
-                color=color,
-                linewidth=linewidth,
-                alpha=alpha,
-                label="_nolegend_",
-            )
-
-
 def _apply_frame_tick_labels(
     ax: Any,
     *,
@@ -828,6 +803,42 @@ def _apply_frame_tick_labels(
         return f"{frame:.0f}"
 
     ax.xaxis.set_major_formatter(FuncFormatter(_fmt))
+
+
+def _apply_window_definition_xticks(
+    ax: Any,
+    window_spans: Sequence[Dict[str, Any]],
+    *,
+    include_edges: bool = True,
+) -> None:
+    if not window_spans:
+        return
+
+    ticks: List[float] = []
+    if include_edges:
+        ticks.extend([0.0, 1.0])
+
+    for span in window_spans:
+        for key in ("start", "end"):
+            value = span.get(key)
+            if value is None:
+                continue
+            try:
+                ticks.append(float(value))
+            except (TypeError, ValueError):
+                continue
+
+    ticks = [t for t in ticks if np.isfinite(t)]
+    if not ticks:
+        return
+
+    ticks_sorted = sorted(ticks)
+    uniq: List[float] = []
+    tol = 1e-6
+    for t in ticks_sorted:
+        if not uniq or abs(t - uniq[-1]) > tol:
+            uniq.append(t)
+    ax.set_xticks(uniq)
 
 
 def _prepare_overlay_group_styles(
@@ -1213,7 +1224,6 @@ def _plot_emg(
         )
 
         _draw_window_spans(ax, window_spans, alpha=window_span_alpha, with_labels=True)
-        _draw_window_boundaries(ax, window_spans)
 
         _draw_event_vlines(ax, event_vlines, style=event_vline_style)
 
@@ -1235,6 +1245,7 @@ def _plot_emg(
             event_vline_style=event_vline_style,
         )
         if time_start_frame is not None and time_end_frame is not None:
+            _apply_window_definition_xticks(ax, window_spans)
             _apply_frame_tick_labels(ax, time_start_frame=time_start_frame, time_end_frame=time_end_frame)
 
     for ax in axes_flat[len(channels) :]:
@@ -1307,7 +1318,6 @@ def _plot_overlay_timeseries_grid(
 
             single_color = style.get("line_color", "blue")
             _draw_window_spans(ax, window_spans, alpha=window_span_alpha, with_labels=True)
-            _draw_window_boundaries(ax, window_spans)
             _plot_overlay_channel_series(
                 ax,
                 x=x,
@@ -1352,6 +1362,7 @@ def _plot_overlay_timeseries_grid(
                 event_vline_style=event_vline_style,
             )
             if time_start_frame is not None and time_end_frame is not None:
+                _apply_window_definition_xticks(ax, window_spans)
                 _apply_frame_tick_labels(ax, time_start_frame=time_start_frame, time_end_frame=time_end_frame)
 
         for ax in axes_flat[len(channels) :]:
