@@ -56,17 +56,17 @@ aggregation_modes:
     overlay_within: ["step_TF"]
     output_dir: "step_TF"
     filename_pattern: "step_TF_mean_{signal_group}.png"
-  # diff_step_TF_subject_mean:
-  #   enabled: true
-  #   filter:
-  #     mixed: 1
-  #     age_group: "young"
-  #   groupby: ["step_TF","subject"]
-  #   color_by: ["step_TF"]
-  #   overlay: true
-  #   overlay_within: ["step_TF"]
-  #   output_dir: "step_TF_subject"
-  #   filename_pattern: "step_TF_{subject}_mean_{signal_group}.png"
+  diff_step_TF_subject_mean:
+    enabled: true
+    filter:
+      mixed: 1
+      age_group: "young"
+    groupby: ["step_TF","subject"]
+    color_by: ["step_TF"]
+    overlay: true
+    overlay_within: ["step_TF"]
+    output_dir: "step_TF_subject"
+    filename_pattern: "step_TF_{subject}_mean_{signal_group}.png"
 
 
 
@@ -174,6 +174,10 @@ plot_style:
     y_label: "COM AP (Ant: + / Post: -)"
 
 # === Window Definitions (relative to platform_onset in ms) ===
+# Notes:
+# - `windows.reference_event` can point to:
+#   1) a column in `data.input_file` (interpreted in the same domain as `data.id_columns.onset`; mocap frame), or
+#   2) a column that exists only in `data.features_file` (interpreted as ms relative to platform_onset).
 windows:
   reference_event: "platform_onset"
   definitions:

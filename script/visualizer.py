@@ -2236,7 +2236,9 @@ class AggregatedSignalVisualizer:
         self.features_df: Optional[pl.DataFrame] = self._load_features()
         self._feature_event_cache: Optional[pl.DataFrame] = None
         self._feature_event_cache_cols: Tuple[str, ...] = ()
+        self._feature_event_cache_key_sig: Tuple[Tuple[str, str], ...] = ()
         self._feature_event_logged: bool = False
+        self._windows_reference_event_logged: bool = False
 
     def run(
         self,
@@ -3126,9 +3128,6 @@ class AggregatedSignalVisualizer:
             return 0.0
 
         available_cols = set(self._lazy_columns(lf))
-        if ref_col not in available_cols:
-            print(f"[windows] Warning: reference_event column '{ref_col}' not found; windows are not shifted")
-            return 0.0
         if onset_col not in available_cols:
             print(f"[windows] Warning: onset column '{onset_col}' not found; windows are not shifted")
             return 0.0
@@ -3139,6 +3138,36 @@ class AggregatedSignalVisualizer:
         group_cols = [subject_col, velocity_col, trial_col]
 
         ms_per_frame = 1000.0 / float(self.device_rate)
+
+        if ref_col not in available_cols:
+            # Fallback: allow reference_event to come from features_file as ms relative to platform_onset.
+            if self.features_df is None or ref_col not in self.features_df.columns:
+                print(f"[windows] Warning: reference_event column '{ref_col}' not found; windows are not shifted")
+                return 0.0
+
+            schema = lf.collect_schema()
+            key_schema = {k: schema.get(k) for k in group_cols}
+            feature_table = self._get_feature_event_ms_table(
+                requested=(ref_col,),
+                key_cols=group_cols,
+                key_schema=key_schema,
+            )
+            if feature_table is None or feature_table.is_empty():
+                print(f"[windows] Warning: reference_event '{ref_col}' has no values; windows are not shifted")
+                return 0.0
+
+            ms_col = _event_ms_col(ref_col)
+            stats = feature_table.select(pl.col(ms_col).drop_nulls().mean().alias("mean"))
+            mean_shift = stats["mean"].item()
+            if mean_shift is None:
+                print(f"[windows] Warning: reference_event '{ref_col}' has no values; windows are not shifted")
+                return 0.0
+
+            if not self._windows_reference_event_logged:
+                print(f"[windows] using features_file reference_event (ms): {ref_col}")
+                self._windows_reference_event_logged = True
+            return float(mean_shift)
+
         shift_lf = (
             lf.group_by(group_cols)
             .agg(
@@ -3431,6 +3460,63 @@ class AggregatedSignalVisualizer:
         df = pl.read_csv(path)
         return strip_bom_columns(df)
 
+    def _get_feature_event_ms_table(
+        self,
+        *,
+        requested: Sequence[str],
+        key_cols: Sequence[str],
+        key_schema: Dict[str, Any],
+    ) -> Optional[pl.DataFrame]:
+        """
+        Build (and cache) a per subject-velocity-trial table of feature events interpreted as
+        milliseconds relative to platform_onset.
+
+        Output columns are named via `_event_ms_col(<event_col>)`.
+        """
+        if self.features_df is None:
+            return None
+
+        requested_cols = [str(c) for c in requested if str(c).strip()]
+        if not requested_cols:
+            return None
+        requested_key = tuple(sorted(dict.fromkeys(requested_cols)))
+
+        key_cols_list = [str(c) for c in key_cols]
+        missing_keys = [k for k in key_cols_list if k not in self.features_df.columns or k not in key_schema]
+        if missing_keys:
+            return None
+
+        key_sig = tuple((k, str(key_schema.get(k))) for k in key_cols_list)
+        if (
+            self._feature_event_cache is None
+            or requested_key != self._feature_event_cache_cols
+            or key_sig != self._feature_event_cache_key_sig
+        ):
+            base = self.features_df.select([*key_cols_list, *requested_key])
+
+            casts: List[pl.Expr] = []
+            for k in key_cols_list:
+                dtype = key_schema.get(k)
+                if dtype is not None:
+                    casts.append(pl.col(k).cast(dtype, strict=False).alias(k))
+            if casts:
+                base = base.with_columns(casts)
+
+            agg_exprs: List[pl.Expr] = []
+            for col in requested_key:
+                agg_exprs.append(
+                    pl.col(col)
+                    .cast(pl.Float64, strict=False)
+                    .fill_nan(None)
+                    .mean()
+                    .alias(_event_ms_col(col))
+                )
+
+            self._feature_event_cache = base.group_by(key_cols_list, maintain_order=False).agg(agg_exprs)
+            self._feature_event_cache_cols = requested_key
+            self._feature_event_cache_key_sig = key_sig
+        return self._feature_event_cache
+
     def _enrich_meta_with_feature_event_vlines(self, meta_df: pl.DataFrame) -> pl.DataFrame:
         """
         Fill event vline ms columns from `data.features_file` when an event column is not present
@@ -3461,37 +3547,16 @@ class AggregatedSignalVisualizer:
             return meta_df
 
         requested = tuple(sorted(feature_event_cols))
-        if self._feature_event_cache is None or requested != self._feature_event_cache_cols:
-            base = self.features_df.select([*key_cols, *requested])
-            # Normalize join key types to match meta_df.
-            casts: List[pl.Expr] = []
-            meta_schema = meta_df.schema
-            for k in key_cols:
-                dtype = meta_schema.get(k)
-                if dtype is not None:
-                    casts.append(pl.col(k).cast(dtype, strict=False).alias(k))
-            if casts:
-                base = base.with_columns(casts)
-
-            agg_exprs: List[pl.Expr] = []
-            for col in requested:
-                agg_exprs.append(
-                    pl.col(col)
-                    .cast(pl.Float64, strict=False)
-                    .fill_nan(None)
-                    .mean()
-                    .alias(_event_ms_col(col))
-                )
-
-            self._feature_event_cache = base.group_by(key_cols, maintain_order=False).agg(agg_exprs)
-            self._feature_event_cache_cols = requested
-            if not self._feature_event_logged:
-                print(f"[event_vlines] using features_file columns (ms): {list(requested)}")
-                self._feature_event_logged = True
-
-        feature_table = self._feature_event_cache
+        feature_table = self._get_feature_event_ms_table(
+            requested=requested,
+            key_cols=key_cols,
+            key_schema=meta_df.schema,
+        )
         if feature_table is None or feature_table.is_empty():
             return meta_df
+        if not self._feature_event_logged:
+            print(f"[event_vlines] using features_file columns (ms): {list(requested)}")
+            self._feature_event_logged = True
 
         joined = meta_df.join(feature_table, on=key_cols, how="left", suffix="__feat")
 
