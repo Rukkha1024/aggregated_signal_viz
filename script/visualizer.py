@@ -855,6 +855,7 @@ def _style_timeseries_axis(
     common_style: Dict[str, Any],
     legend_fontsize: float,
     window_spans: Sequence[Dict[str, Any]],
+    group_handles: Sequence[Any] = (),
     event_vlines: Sequence[Dict[str, Any]],
     event_vline_style: Dict[str, Any],
 ) -> None:
@@ -869,7 +870,7 @@ def _style_timeseries_axis(
     _apply_window_group_legends(
         ax,
         window_spans=window_spans,
-        group_handles=[],
+        group_handles=group_handles,
         event_vlines=event_vlines,
         event_vline_style=event_vline_style,
         legend_fontsize=legend_fontsize,
@@ -1900,6 +1901,14 @@ def _plot_cop_overlay(
         common_style=common_style,
     )
     event_vlines_all = [v for key in sorted_keys for v in event_vlines_by_key.get(key, [])]
+    legend_group_linewidth = min(float(cop_style.get("line_width", 0.8)), 1.0)
+    legend_group_handles = _build_group_legend_handles(
+        sorted_keys,
+        group_fields,
+        filtered_group_fields,
+        key_to_linestyle,
+        linewidth=legend_group_linewidth,
+    )
 
     # Time series: Cx / Cy
     for ax, ch, y_label in (
@@ -1942,6 +1951,7 @@ def _plot_cop_overlay(
             common_style=common_style,
             legend_fontsize=cop_style["legend_fontsize"],
             window_spans=[],
+            group_handles=legend_group_handles,
             event_vlines=event_vlines_all,
             event_vline_style=event_vline_style,
         )
@@ -1974,17 +1984,10 @@ def _plot_cop_overlay(
 
     ax_scatter.grid(True, alpha=common_style["grid_alpha"])
     ax_scatter.tick_params(labelsize=common_style["tick_labelsize"])
-    group_handles = _build_group_legend_handles(
-        sorted_keys,
-        group_fields,
-        filtered_group_fields,
-        key_to_linestyle,
-        linewidth=overlay_linewidth,
-    )
     _apply_window_group_legends(
         ax_scatter,
         window_spans=window_spans,
-        group_handles=group_handles,
+        group_handles=legend_group_handles,
         legend_fontsize=cop_style["legend_fontsize"],
         framealpha=common_style["legend_framealpha"],
         loc=common_style["legend_loc"],
@@ -2104,6 +2107,14 @@ def _plot_com_overlay(
     key_to_linestyle = _build_group_linestyles(sorted_keys, common_style.get("group_linestyles", ("-", "--", ":", "-.")))
     key_to_color = _build_group_color_map(sorted_keys, group_fields, color_by_fields, base_colors) if use_group_colors else {}
     event_vlines_all = [v for key in sorted_keys for v in event_vlines_by_key.get(key, [])]
+    legend_group_linewidth = min(float(com_style.get("line_width", 0.8)), 1.0)
+    legend_group_handles = _build_group_legend_handles(
+        sorted_keys,
+        group_fields,
+        filtered_group_fields,
+        key_to_linestyle,
+        linewidth=legend_group_linewidth,
+    )
 
     channel_axes = [
         (ax_x, comx_name, com_style.get("y_label_comx", comx_name)),
@@ -2148,7 +2159,7 @@ def _plot_com_overlay(
         _apply_window_group_legends(
             ax,
             window_spans=[],
-            group_handles=[],
+            group_handles=legend_group_handles,
             event_vlines=event_vlines_all,
             event_vline_style=event_vline_style,
             legend_fontsize=com_style["legend_fontsize"],
@@ -2208,7 +2219,7 @@ def _plot_com_overlay(
         group_fields,
         filtered_group_fields,
         key_to_linestyle,
-        linewidth=overlay_linewidth,
+        linewidth=legend_group_linewidth,
     )
     _apply_window_group_legends(
         ax_scatter,
