@@ -274,11 +274,11 @@ def _coerce_float(value: Any) -> Optional[float]:
 
 def _parse_window_boundary_spec(value: Any) -> Optional[Tuple[str, Any]]:
     """
-    Parse a window boundary definition.
+    윈도우 경계(start_ms/end_ms) 정의를 파싱합니다.
 
-    Supported forms:
-    - numeric (int/float or numeric string) -> ("offset", <float>)
-    - event column name (string) -> ("event", <str>)
+    지원 형식:
+    - 숫자(int/float 또는 숫자 문자열) -> ("offset", <float>)
+    - 이벤트 컬럼명(문자열) -> ("event", <str>)
     """
     num = _coerce_float(value)
     if num is not None:
@@ -3514,10 +3514,10 @@ class AggregatedSignalVisualizer:
         key_schema: Dict[str, Any],
     ) -> Optional[pl.DataFrame]:
         """
-        Build (and cache) a per subject-velocity-trial table of feature events interpreted as
-        milliseconds relative to platform_onset.
+        subject-velocity-trial 단위로 feature 이벤트를 platform_onset 기준 ms로 해석한 테이블을 생성하고(캐시),
+        재사용합니다.
 
-        Output columns are named via `_event_ms_col(<event_col>)`.
+        출력 컬럼명은 `_event_ms_col(<event_col>)` 규칙을 따릅니다.
         """
         if self.features_df is None:
             return None
@@ -3565,14 +3565,12 @@ class AggregatedSignalVisualizer:
 
     def _enrich_meta_with_feature_event_ms(self, meta_df: pl.DataFrame) -> pl.DataFrame:
         """
-        Fill `__event_<col>_ms` columns from `data.features_file` for events that are not present
-        in the primary input parquet.
+        기본 입력 parquet에 없는 이벤트 컬럼에 대해, `data.features_file`에서 `__event_<col>_ms` 값을 채웁니다.
 
-        Conventions:
-        - If an event exists in the input parquet, values are interpreted in the same domain as
-          `data.id_columns.onset` (mocap frame) and converted to ms in `_load_and_align_lazy()`.
-        - If an event does NOT exist in the input parquet but exists in `data.features_file`,
-          values are interpreted as ms relative to platform_onset.
+        규칙:
+        - 입력 parquet에 이벤트가 존재하면, 값은 `data.id_columns.onset`(mocap frame)과 동일 도메인으로 해석되며
+          `_load_and_align_lazy()`에서 ms로 변환됩니다.
+        - 입력 parquet에 없고 `data.features_file`에만 존재하면, 값은 platform_onset 기준 ms로 해석됩니다.
         """
         if self.features_df is None or not self.required_event_columns:
             return meta_df

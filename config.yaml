@@ -174,16 +174,16 @@ plot_style:
     y_label: "COM AP (Ant: + / Post: -)"
 
 # === Window Definitions (ms) ===
-# Notes:
-# - `windows.reference_event` defines the zero point for *numeric* window boundaries:
-#   - if it equals `data.id_columns.onset` (platform_onset), numeric values are ms from platform_onset.
-#   - otherwise, numeric values are treated as ms offset from `reference_event` (shifted by its mean timing).
-# - `windows.definitions.*.start_ms/end_ms` can be:
-#   - a number (offset ms; see above), or
-#   - an event column name (its mean timing in ms relative to platform_onset).
-# - Event columns can come from:
-#   1) `data.input_file` (interpreted in the same domain as `data.id_columns.onset`; mocap frame), or
-#   2) `data.features_file` only (interpreted as ms relative to platform_onset).
+# 참고:
+# - `windows.reference_event`는 *숫자형* 윈도우 경계(start_ms/end_ms)의 기준(0점)을 정의합니다.
+#   - `data.id_columns.onset`(platform_onset)과 같으면, 숫자값은 platform_onset 기준 ms입니다.
+#   - 그 외의 이벤트이면, 숫자값은 `reference_event` 기준 ms 오프셋으로 해석됩니다(해당 이벤트의 평균 timing만큼 shift 적용).
+# - `windows.definitions.*.start_ms/end_ms`는 아래 형식을 모두 지원합니다.
+#   - 숫자: 오프셋 ms(위 규칙 적용)
+#   - 문자열: 이벤트 컬럼명(platform_onset 기준 ms timing)
+# - 이벤트 컬럼은 아래 두 곳에서 올 수 있습니다.
+#   1) `data.input_file`: `data.id_columns.onset`과 동일한 도메인(mocap frame)으로 해석 후 ms로 변환
+#   2) `data.features_file`만 존재: platform_onset 기준 ms로 해석
 windows:
   reference_event: "platform_onset"
   definitions:
@@ -201,14 +201,12 @@ windows:
       end_ms: 800
 
 # === Event Vertical Lines (data-driven annotations) ===
-# Notes:
-# - If a column exists in the input parquet, values are interpreted in the same domain as
-#   `data.id_columns.onset` (platform_onset; mocap frame) and converted to ms.
-# - If a column does NOT exist in the input parquet but exists in `data.features_file`,
-#   values are interpreted as ms relative to platform_onset.
-# - The visual style is controlled via `event_vlines.style` (matplotlib axvline kwargs).
-# - Each column gets a different color from a palette by default.
-# - If you want a specific column color, set it in `event_vlines.colors`.
+# 참고:
+# - 입력 parquet에 해당 컬럼이 있으면, 값은 `data.id_columns.onset`(platform_onset; mocap frame)과 동일 도메인으로 해석 후 ms로 변환됩니다.
+# - 입력 parquet에 없고 `data.features_file`에만 있으면, 값은 platform_onset 기준 ms로 해석됩니다.
+# - 시각 스타일은 `event_vlines.style`(matplotlib `axvline` kwargs)로 제어합니다.
+# - 기본적으로 각 컬럼은 팔레트에서 서로 다른 색을 할당받습니다.
+# - 특정 컬럼 색을 고정하려면 `event_vlines.colors`에 지정하세요.
 event_vlines:
   columns: ["platform_onset", "step_onset", "TKEO_AGLR_emg_onset_timing"]
   # Optional:
