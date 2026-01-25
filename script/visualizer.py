@@ -776,6 +776,60 @@ def _draw_window_spans(
         )
 
 
+def _draw_window_boundaries(
+    ax: Any,
+    window_spans: Sequence[Dict[str, Any]],
+    *,
+    alpha: float = 0.85,
+    linewidth: float = 0.8,
+) -> None:
+    if not window_spans:
+        return
+    for span in window_spans:
+        color = span.get("color")
+        color = str(color).strip() if color is not None and str(color).strip() else "#777777"
+        for key in ("start", "end"):
+            x = span.get(key)
+            if x is None:
+                continue
+            ax.axvline(
+                float(x),
+                color=color,
+                linewidth=linewidth,
+                alpha=alpha,
+                label="_nolegend_",
+            )
+
+
+def _apply_frame_tick_labels(
+    ax: Any,
+    *,
+    time_start_frame: float,
+    time_end_frame: float,
+) -> None:
+    try:
+        from matplotlib.ticker import FuncFormatter
+    except Exception:
+        return
+
+    start = float(time_start_frame)
+    end = float(time_end_frame)
+    span = end - start
+    if span == 0:
+        return
+
+    def _fmt(x: float, _pos: int) -> str:
+        try:
+            frame = start + float(x) * span
+        except Exception:
+            return ""
+        if not np.isfinite(frame):
+            return ""
+        return f"{frame:.0f}"
+
+    ax.xaxis.set_major_formatter(FuncFormatter(_fmt))
+
+
 def _prepare_overlay_group_styles(
     *,
     sorted_keys: List[Tuple],
@@ -919,6 +973,8 @@ def _plot_task(task: Dict[str, Any]) -> None:
             common_style=common_style,
             time_start_ms=task.get("time_start_ms"),
             time_end_ms=task.get("time_end_ms"),
+            time_start_frame=task.get("time_start_frame"),
+            time_end_frame=task.get("time_end_frame"),
             filtered_group_fields=task["filtered_group_fields"],
             color_by_fields=task.get("color_by_fields"),
         )
@@ -943,6 +999,8 @@ def _plot_task(task: Dict[str, Any]) -> None:
             common_style=common_style,
             time_start_ms=task["time_start_ms"],
             time_end_ms=task["time_end_ms"],
+            time_start_frame=task.get("time_start_frame"),
+            time_end_frame=task.get("time_end_frame"),
         )
         return
 
@@ -1038,6 +1096,8 @@ def _plot_overlay_generic(
     common_style: Dict[str, Any],
     time_start_ms: Optional[float],
     time_end_ms: Optional[float],
+    time_start_frame: Optional[float],
+    time_end_frame: Optional[float],
     filtered_group_fields: List[str],
     color_by_fields: Optional[List[str]] = None,
 ) -> None:
@@ -1103,6 +1163,8 @@ def _plot_overlay_generic(
         common_style=common_style,
         time_start_ms=time_start_ms,
         time_end_ms=time_end_ms,
+        time_start_frame=time_start_frame,
+        time_end_frame=time_end_frame,
         filtered_group_fields=filtered_group_fields,
         color_by_fields=color_by_fields,
     )
@@ -1127,6 +1189,8 @@ def _plot_emg(
     common_style: Dict[str, Any],
     time_start_ms: float,
     time_end_ms: float,
+    time_start_frame: Optional[float],
+    time_end_frame: Optional[float],
 ) -> None:
     import matplotlib.pyplot as plt
 
@@ -1149,6 +1213,7 @@ def _plot_emg(
         )
 
         _draw_window_spans(ax, window_spans, alpha=window_span_alpha, with_labels=True)
+        _draw_window_boundaries(ax, window_spans)
 
         _draw_event_vlines(ax, event_vlines, style=event_vline_style)
 
@@ -1169,6 +1234,8 @@ def _plot_emg(
             event_vlines=event_vlines,
             event_vline_style=event_vline_style,
         )
+        if time_start_frame is not None and time_end_frame is not None:
+            _apply_frame_tick_labels(ax, time_start_frame=time_start_frame, time_end_frame=time_end_frame)
 
     for ax in axes_flat[len(channels) :]:
         ax.axis("off")
@@ -1178,7 +1245,7 @@ def _plot_emg(
         fontsize=common_style["title_fontsize"],
         fontweight=common_style["title_fontweight"],
     )
-    fig.supxlabel(emg_style["x_label"], fontsize=common_style["label_fontsize"])
+    fig.supxlabel("Aligned frame (onset=0)", fontsize=common_style["label_fontsize"])
     y_label = _format_label(emg_style.get("y_label", "Amplitude"), channel="Amplitude")
     fig.supylabel(y_label, fontsize=common_style["label_fontsize"])
     _savefig_and_close(fig, output_path, common_style, bbox=True)
@@ -1204,6 +1271,8 @@ def _plot_overlay_timeseries_grid(
     common_style: Dict[str, Any],
     time_start_ms: float,
     time_end_ms: float,
+    time_start_frame: Optional[float] = None,
+    time_end_frame: Optional[float] = None,
     filtered_group_fields: List[str],
     color_by_fields: Optional[List[str]] = None,
 ) -> None:
@@ -1230,6 +1299,7 @@ def _plot_overlay_timeseries_grid(
 
             single_color = style.get("line_color", "blue")
             _draw_window_spans(ax, window_spans, alpha=window_span_alpha, with_labels=True)
+            _draw_window_boundaries(ax, window_spans)
             _plot_overlay_channel_series(
                 ax,
                 x=x,
@@ -1272,6 +1342,8 @@ def _plot_overlay_timeseries_grid(
                 event_vlines=event_vlines_all,
                 event_vline_style=event_vline_style,
             )
+            if time_start_frame is not None and time_end_frame is not None:
+                _apply_frame_tick_labels(ax, time_start_frame=time_start_frame, time_end_frame=time_end_frame)
 
         for ax in axes_flat[len(channels) :]:
             ax.axis("off")
@@ -1282,7 +1354,7 @@ def _plot_overlay_timeseries_grid(
             fontsize=common_style["title_fontsize"],
             fontweight=common_style["title_fontweight"],
         )
-        fig.supxlabel(style["x_label"], fontsize=common_style["label_fontsize"])
+        fig.supxlabel("Aligned frame (onset=0)", fontsize=common_style["label_fontsize"])
         y_label = _format_label(style.get("y_label", "Amplitude"), channel="Amplitude")
         fig.supylabel(y_label, fontsize=common_style["label_fontsize"])
         _savefig_and_close(fig, output_path, common_style, bbox=True)
@@ -3126,6 +3198,8 @@ class AggregatedSignalVisualizer:
             "common_style": self.common_style,
             "filtered_group_fields": filtered_group_fields,
             "color_by_fields": color_by_fields,
+            "time_start_frame": self.time_start_frame,
+            "time_end_frame": self.time_end_frame,
         }
 
         if signal_group == "emg":
@@ -3207,6 +3281,8 @@ class AggregatedSignalVisualizer:
             "common_style": self.common_style,
             "time_start_ms": self.time_start_ms,
             "time_end_ms": self.time_end_ms,
+            "time_start_frame": self.time_start_frame,
+            "time_end_frame": self.time_end_frame,
         }
 
     def _task_forceplate(
