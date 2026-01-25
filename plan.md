@@ -1,5 +1,8 @@
-scatter plot, magnitude plot 생성 시, time window와 group 간 차이가 잘 드러나지가 않는다. 좋은 방법 없을까? 지금은 색상이랑 도형의 차이로 구분하는데, 각각은 차이가 있는데, 색상과 도형이 한번에 나오니깐 뭐가 뭔지 모르겠어. 
+plot의 x axis ticks에 정규화된 값이 아니라 frame 값을 보여주면 좋겟어. 
+이게 0-1로 정규화되는건 아는데, 그래도 대충 frame 값을 구할 수는 있잖아. 지금은 좀 알아보기 어렵네. 
+config.yaml - windows.definitions의 time point를 표시했으면 한다. 
 
-그러니깐 window만 차이를 보이게 색상으로 나타내면 차이를 알겠다. group 간에 도형으로 차이를 나타내면 차이를 알겠다. 그런데, group, window 한번에 나타나면 전혀 모르겠다. 
+x축 tick을 aligned frame(onset=0)로 표시 + windows.definitions에 대한 tick value 표시. 
+-> 이게 유저가 원한 것이다. 
 
-너가 직접 plot을 하나 확인해봐: 'output\step_TF\step_TF_mean_cop.png' 
+근데 tick number 간에 서로 겹치는데? 그리고 platform_onset의 tick value는 왜 안보여?
