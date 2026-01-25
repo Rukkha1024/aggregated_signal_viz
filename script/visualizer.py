@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import concurrent.futures
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
@@ -279,6 +280,7 @@ def _parse_window_boundary_spec(value: Any) -> Optional[Tuple[str, Any]]:
     지원 형식:
     - 숫자(int/float 또는 숫자 문자열) -> ("offset", <float>)
     - 이벤트 컬럼명(문자열) -> ("event", <str>)
+    - 이벤트 +/- 오프셋(문자열) -> ("event_offset", (<str>, <float>))
     """
     num = _coerce_float(value)
     if num is not None:
@@ -288,6 +290,24 @@ def _parse_window_boundary_spec(value: Any) -> Optional[Tuple[str, Any]]:
     text = str(value).strip()
     if not text:
         return None
+
+    m = re.match(r"^\s*(?P<event>[^+-]+?)\s*(?P<op>[+-])\s*(?P<offset>\d+(?:\.\d+)?)\s*$", text)
+    if m:
+        event_name = (m.group("event") or "").strip()
+        if event_name.startswith("(") and event_name.endswith(")"):
+            event_name = event_name[1:-1].strip()
+        op = (m.group("op") or "").strip()
+        offset_text = (m.group("offset") or "").strip()
+        try:
+            offset_val = float(offset_text)
+        except ValueError:
+            offset_val = 0.0
+        signed = offset_val if op == "+" else -offset_val
+        if event_name:
+            return ("event_offset", (event_name, float(signed)))
+
+    if text.startswith("(") and text.endswith(")"):
+        text = text[1:-1].strip()
     return ("event", text)
 
 
@@ -2273,8 +2293,12 @@ class AggregatedSignalVisualizer:
                     self.window_definition_specs[name] = {"start": start_spec, "end": end_spec}
                     if start_spec[0] == "event":
                         window_event_cols.append(str(start_spec[1]))
+                    if start_spec[0] == "event_offset":
+                        window_event_cols.append(str(start_spec[1][0]))
                     if end_spec[0] == "event":
                         window_event_cols.append(str(end_spec[1]))
+                    if end_spec[0] == "event_offset":
+                        window_event_cols.append(str(end_spec[1][0]))
 
         self.window_event_columns = [c for c in dict.fromkeys(window_event_cols) if c]
         self.required_event_columns = [
@@ -3006,10 +3030,17 @@ class AggregatedSignalVisualizer:
         kind, value = spec
         if kind == "offset":
             return float(value) + float(shift_ms)
-        if kind != "event":
+        offset_extra = 0.0
+        if kind == "event":
+            event_col = str(value).strip()
+        elif kind == "event_offset":
+            try:
+                event_col = str(value[0]).strip()
+                offset_extra = float(value[1])
+            except (TypeError, ValueError, IndexError):
+                return None
+        else:
             return None
-
-        event_col = str(value).strip()
         if not event_col:
             return None
         ms_col = _event_ms_col(event_col)
@@ -3026,7 +3057,7 @@ class AggregatedSignalVisualizer:
                 print(f"[windows] Warning: event '{event_col}' has no values for window boundaries; skipping")
                 self._window_event_warning_logged.add(event_col)
             return None
-        return float(mean_ms)
+        return float(mean_ms) + float(offset_extra)
 
     def _collect_event_vlines(self, meta_df: pl.DataFrame, indices: np.ndarray) -> List[Dict[str, Any]]:
         if not self.event_vline_columns:

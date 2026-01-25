@@ -181,6 +181,7 @@ plot_style:
 # - `windows.definitions.*.start_ms/end_ms`는 아래 형식을 모두 지원합니다.
 #   - 숫자: 오프셋 ms(위 규칙 적용)
 #   - 문자열: 이벤트 컬럼명(platform_onset 기준 ms timing)
+#   - 문자열(표현식): "<event> +/- <ms>" (예: "TKEO_AGLR_emg_onset_timing + 30")
 # - 이벤트 컬럼은 아래 두 곳에서 올 수 있습니다.
 #   1) `data.input_file`: `data.id_columns.onset`과 동일한 도메인(mocap frame)으로 해석 후 ms로 변환
 #   2) `data.features_file`만 존재: platform_onset 기준 ms로 해석
@@ -188,14 +189,14 @@ windows:
   reference_event: "platform_onset"
   definitions:
     p1:
-      start_ms: 0
-      end_ms: 200
+      start_ms: "TKEO_AGLR_emg_onset_timing"
+      end_ms: "TKEO_AGLR_emg_onset_timing + 30"
     p2:
-      start_ms: 200
-      end_ms: 400
+      start_ms: "TKEO_AGLR_emg_onset_timing + 30"
+      end_ms: "TKEO_AGLR_emg_onset_timing + 60"
     p3:
-      start_ms: 400
-      end_ms: 600
+      start_ms: "TKEO_AGLR_emg_onset_timing + 60"
+      end_ms: "step_onset"
     p4:
       start_ms: 600
       end_ms: 800
