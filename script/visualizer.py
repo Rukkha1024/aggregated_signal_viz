@@ -810,9 +810,9 @@ def _apply_window_definition_xticks(
     window_spans: Sequence[Dict[str, Any]],
     *,
     include_edges: bool = True,
-) -> None:
+) -> List[float]:
     if not window_spans:
-        return
+        return []
 
     ticks: List[float] = []
     if include_edges:
@@ -830,7 +830,7 @@ def _apply_window_definition_xticks(
 
     ticks = [t for t in ticks if np.isfinite(t)]
     if not ticks:
-        return
+        return []
 
     ticks_sorted = sorted(ticks)
     uniq: List[float] = []
@@ -839,6 +839,42 @@ def _apply_window_definition_xticks(
         if not uniq or abs(t - uniq[-1]) > tol:
             uniq.append(t)
     ax.set_xticks(uniq)
+    return uniq
+
+
+def _auto_rotate_dense_xticklabels(
+    ax: Any,
+    *,
+    tick_positions: Sequence[float],
+    time_start_frame: float,
+    time_end_frame: float,
+    min_delta_frame: float = 40.0,
+) -> None:
+    if not tick_positions:
+        return
+    start = float(time_start_frame)
+    end = float(time_end_frame)
+    span = end - start
+    if span == 0:
+        return
+
+    frames = [start + float(x) * span for x in tick_positions]
+    frames = [f for f in frames if np.isfinite(f)]
+    if len(frames) < 3:
+        return
+
+    frames_sorted = sorted(frames)
+    deltas = [b - a for a, b in zip(frames_sorted, frames_sorted[1:])]
+    if not deltas:
+        return
+
+    if min(deltas) < float(min_delta_frame):
+        ax.tick_params(axis="x", labelrotation=90)
+        for label in ax.get_xticklabels():
+            label.set_ha("center")
+            label.set_va("top")
+    else:
+        ax.tick_params(axis="x", labelrotation=0)
 
 
 def _prepare_overlay_group_styles(
@@ -1245,8 +1281,14 @@ def _plot_emg(
             event_vline_style=event_vline_style,
         )
         if time_start_frame is not None and time_end_frame is not None:
-            _apply_window_definition_xticks(ax, window_spans)
+            ticks = _apply_window_definition_xticks(ax, window_spans)
             _apply_frame_tick_labels(ax, time_start_frame=time_start_frame, time_end_frame=time_end_frame)
+            _auto_rotate_dense_xticklabels(
+                ax,
+                tick_positions=ticks,
+                time_start_frame=time_start_frame,
+                time_end_frame=time_end_frame,
+            )
 
     for ax in axes_flat[len(channels) :]:
         ax.axis("off")
@@ -1362,8 +1404,14 @@ def _plot_overlay_timeseries_grid(
                 event_vline_style=event_vline_style,
             )
             if time_start_frame is not None and time_end_frame is not None:
-                _apply_window_definition_xticks(ax, window_spans)
+                ticks = _apply_window_definition_xticks(ax, window_spans)
                 _apply_frame_tick_labels(ax, time_start_frame=time_start_frame, time_end_frame=time_end_frame)
+                _auto_rotate_dense_xticklabels(
+                    ax,
+                    tick_positions=ticks,
+                    time_start_frame=time_start_frame,
+                    time_end_frame=time_end_frame,
+                )
 
         for ax in axes_flat[len(channels) :]:
             ax.axis("off")
