@@ -1290,6 +1290,14 @@ def _plot_overlay_timeseries_grid(
             common_style=common_style,
         )
         event_vlines_all = [v for key in sorted_keys for v in event_vlines_by_key.get(key, [])]
+        legend_group_linewidth = min(float(style.get("line_width", 0.8)), 1.0)
+        legend_group_handles = _build_group_legend_handles(
+            sorted_keys,
+            group_fields,
+            filtered_group_fields,
+            key_to_linestyle,
+            linewidth=legend_group_linewidth,
+        )
 
         for ax, ch in zip(axes_flat, channels):
             has_any_series = any(aggregated_by_key.get(key, {}).get(ch) is not None for key in sorted_keys)
@@ -1339,6 +1347,7 @@ def _plot_overlay_timeseries_grid(
                 common_style=common_style,
                 legend_fontsize=style["legend_fontsize"],
                 window_spans=window_spans,
+                group_handles=legend_group_handles,
                 event_vlines=event_vlines_all,
                 event_vline_style=event_vline_style,
             )
