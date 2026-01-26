@@ -214,12 +214,12 @@ event_vlines:
     linestyle: "--"
     linewidth: 1.5
     alpha: 0.9
-  # Overlay plots draw one vline per overlay group (e.g., step vs nonstep).
-  # Use `overlay_group` to visually distinguish those lines.
+  # Overlay plots can draw one vline per overlay group (e.g., step vs nonstep) for selected events.
   overlay_group:
-    mode: "both"                 # "linestyle" | "color" | "both"
-    linestyles: ["-", "--", ":", "-."]  # applied per overlay group (cycling)
-    color_tints: [0.0, 0.55, 0.8]       # 0=original, 1=near-white (cycling)
+    enabled: true
+    mode: "linestyle"                 # currently supported: "linestyle" (keep colors identical)
+    columns: ["TKEO_AGLR_emg_onset_timing"]  # only these events are drawn per overlay group
+    linestyles: ["-", "--", ":", "-."]       # applied per overlay group (cycling)
 
 # === Figure Layout ===
 figure_layout:

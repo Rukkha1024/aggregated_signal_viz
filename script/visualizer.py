@@ -465,6 +465,45 @@ def _apply_window_group_legends(
     framealpha: float,
     loc: str = "best",
 ) -> None:
+    def _clone_handle(handle: Any) -> Any:
+        try:
+            import matplotlib.lines as mlines
+            import matplotlib.patches as mpatches
+        except Exception:
+            return handle
+
+        try:
+            label = str(getattr(handle, "get_label", lambda: "")()).strip()
+        except Exception:
+            label = ""
+
+        if isinstance(handle, mlines.Line2D):
+            try:
+                return mlines.Line2D(
+                    [],
+                    [],
+                    color=handle.get_color(),
+                    linestyle=handle.get_linestyle(),
+                    linewidth=handle.get_linewidth(),
+                    alpha=handle.get_alpha(),
+                    label=label,
+                )
+            except Exception:
+                return handle
+
+        if isinstance(handle, mpatches.Patch):
+            try:
+                return mpatches.Patch(
+                    facecolor=handle.get_facecolor(),
+                    edgecolor=handle.get_edgecolor(),
+                    alpha=handle.get_alpha(),
+                    label=label,
+                )
+            except Exception:
+                return handle
+
+        return handle
+
     handles: List[Any] = []
     seen_labels: set[str] = set()
 
@@ -476,6 +515,7 @@ def _apply_window_group_legends(
         handles.append(handle)
 
     for handle in group_handles:
+        handle = _clone_handle(handle)
         label = str(getattr(handle, "get_label", lambda: "")()).strip()
         if not label or label == "_nolegend_" or label in seen_labels:
             continue
@@ -708,6 +748,17 @@ def _parse_group_linestyles(raw_values: Any) -> Tuple[Any, ...]:
         else:
             styles.append(str(item))
     return tuple(styles) if styles else ("-", "--", ":", "-.")
+
+
+def _overlay_vline_event_names(overlay_cfg: Optional[Dict[str, Any]]) -> set[str]:
+    if not isinstance(overlay_cfg, dict):
+        return set()
+    if not bool(overlay_cfg.get("enabled", False)):
+        return set()
+    raw_cols = overlay_cfg.get("columns")
+    if not isinstance(raw_cols, (list, tuple)):
+        return set()
+    return {str(c).strip() for c in raw_cols if c is not None and str(c).strip()}
 
 
 def _parse_window_colors(cfg: Any) -> Dict[str, str]:
@@ -999,71 +1050,43 @@ def _draw_event_vlines_for_keys(
     key_to_linestyle: Optional[Dict[Tuple, Any]] = None,
 ) -> None:
     mode = ""
+    enabled = False
     linestyles: Tuple[Any, ...] = ()
-    color_tints: Tuple[float, ...] = ()
+    overlay_events: set[str] = set()
     if isinstance(overlay_cfg, dict):
+        enabled = bool(overlay_cfg.get("enabled", False))
         mode = str(overlay_cfg.get("mode") or "").strip().lower()
-        if mode and mode not in ("linestyle", "color", "both"):
+        if mode != "linestyle":
             mode = ""
+        overlay_events = _overlay_vline_event_names(overlay_cfg)
         raw_ls = overlay_cfg.get("linestyles")
         if isinstance(raw_ls, (list, tuple)) and raw_ls:
             linestyles = _parse_group_linestyles(raw_ls)
-        raw_tints = overlay_cfg.get("color_tints")
-        if isinstance(raw_tints, (list, tuple)) and raw_tints:
-            parsed: List[float] = []
-            for t in raw_tints:
-                try:
-                    parsed.append(float(t))
-                except (TypeError, ValueError):
-                    continue
-            color_tints = tuple(parsed)
-
-    def _tint_color(color: Any, amount: float) -> Optional[str]:
-        try:
-            import matplotlib.colors as mcolors
-        except Exception:
-            return None
-        if color is None:
-            return None
-        try:
-            rgb = mcolors.to_rgb(color)
-        except Exception:
-            return None
-        a = max(0.0, min(1.0, float(amount)))
-        tinted = (rgb[0] * (1.0 - a) + 1.0 * a, rgb[1] * (1.0 - a) + 1.0 * a, rgb[2] * (1.0 - a) + 1.0 * a)
-        try:
-            return mcolors.to_hex(tinted)
-        except Exception:
-            return None
 
     for key_idx, key in enumerate(sorted_keys):
-        vlines = event_vlines_by_key.get(key, [])
-        if not vlines:
+        vlines_all = event_vlines_by_key.get(key, [])
+        if not vlines_all:
             continue
-        if not mode:
-            _draw_event_vlines(ax, vlines, style=style)
+        if not (enabled and mode and overlay_events):
+            continue
+        vlines = [v for v in vlines_all if str(v.get("name") or "").strip() in overlay_events]
+        if not vlines:
             continue
 
         override_ls: Optional[Any] = None
-        if mode in ("linestyle", "both"):
-            if key_to_linestyle is not None and key in key_to_linestyle:
-                override_ls = key_to_linestyle.get(key)
-            elif linestyles:
-                override_ls = linestyles[key_idx % len(linestyles)]
+        if key_to_linestyle is not None and key in key_to_linestyle:
+            override_ls = key_to_linestyle.get(key)
+        elif linestyles:
+            override_ls = linestyles[key_idx % len(linestyles)]
 
-        tint_amount: Optional[float] = None
-        if mode in ("color", "both") and color_tints:
-            tint_amount = color_tints[key_idx % len(color_tints)]
+        if override_ls is None:
+            _draw_event_vlines(ax, vlines, style=style)
+            continue
 
         styled: List[Dict[str, Any]] = []
         for v in vlines:
             vv = dict(v)
-            if override_ls is not None:
-                vv["linestyle"] = override_ls
-            if tint_amount is not None:
-                tinted = _tint_color(vv.get("color"), tint_amount)
-                if tinted is not None:
-                    vv["color"] = tinted
+            vv["linestyle"] = override_ls
             styled.append(vv)
         _draw_event_vlines(ax, styled, style=style)
 
@@ -1125,6 +1148,8 @@ def _plot_task(task: Dict[str, Any]) -> None:
             markers_by_key=task.get("markers_by_key", {}),
             event_vlines_by_key=task.get("event_vlines_by_key", {}),
             event_vlines_by_key_by_channel=task.get("event_vlines_by_key_by_channel"),
+            pooled_event_vlines=task.get("pooled_event_vlines", []),
+            pooled_event_vlines_by_channel=task.get("pooled_event_vlines_by_channel"),
             event_vline_style=event_vline_style,
             event_vline_overlay_cfg=task.get("event_vline_overlay_cfg"),
             output_path=output_path,
@@ -1259,6 +1284,8 @@ def _plot_overlay_generic(
     markers_by_key: Dict[Tuple, Dict[str, Any]],
     event_vlines_by_key: Dict[Tuple, List[Dict[str, Any]]],
     event_vlines_by_key_by_channel: Optional[Dict[Tuple, Dict[str, List[Dict[str, Any]]]]],
+    pooled_event_vlines: Sequence[Dict[str, Any]],
+    pooled_event_vlines_by_channel: Optional[Dict[str, List[Dict[str, Any]]]],
     event_vline_style: Dict[str, Any],
     event_vline_overlay_cfg: Optional[Dict[str, Any]],
     output_path: Path,
@@ -1285,6 +1312,7 @@ def _plot_overlay_generic(
         _plot_cop_overlay(
             aggregated_by_key=aggregated_by_key,
             event_vlines_by_key=event_vlines_by_key,
+            pooled_event_vlines=pooled_event_vlines,
             event_vline_style=event_vline_style,
             event_vline_overlay_cfg=event_vline_overlay_cfg,
             output_path=output_path,
@@ -1308,6 +1336,7 @@ def _plot_overlay_generic(
         _plot_com_overlay(
             aggregated_by_key=aggregated_by_key,
             event_vlines_by_key=event_vlines_by_key,
+            pooled_event_vlines=pooled_event_vlines,
             event_vline_style=event_vline_style,
             event_vline_overlay_cfg=event_vline_overlay_cfg,
             output_path=output_path,
@@ -1335,6 +1364,8 @@ def _plot_overlay_generic(
         markers_by_key=markers_by_key,
         event_vlines_by_key=event_vlines_by_key,
         event_vlines_by_key_by_channel=event_vlines_by_key_by_channel,
+        pooled_event_vlines=pooled_event_vlines,
+        pooled_event_vlines_by_channel=pooled_event_vlines_by_channel,
         event_vline_style=event_vline_style,
         event_vline_overlay_cfg=event_vline_overlay_cfg,
         output_path=output_path,
@@ -1463,6 +1494,8 @@ def _plot_overlay_timeseries_grid(
     markers_by_key: Dict[Tuple, Dict[str, Any]],
     event_vlines_by_key: Dict[Tuple, List[Dict[str, Any]]],
     event_vlines_by_key_by_channel: Optional[Dict[Tuple, Dict[str, List[Dict[str, Any]]]]],
+    pooled_event_vlines: Sequence[Dict[str, Any]],
+    pooled_event_vlines_by_channel: Optional[Dict[str, List[Dict[str, Any]]]],
     event_vline_style: Dict[str, Any],
     event_vline_overlay_cfg: Optional[Dict[str, Any]],
     output_path: Path,
@@ -1498,7 +1531,7 @@ def _plot_overlay_timeseries_grid(
             color_by_fields=color_by_fields,
             common_style=common_style,
         )
-        event_vlines_all = [v for key in sorted_keys for v in event_vlines_by_key.get(key, [])]
+        event_vlines_all = list(pooled_event_vlines) + [v for key in sorted_keys for v in event_vlines_by_key.get(key, [])]
         legend_group_linewidth = min(float(style.get("line_width", 0.6)), 0.8)
         legend_group_handles = _build_group_legend_handles(
             sorted_keys,
@@ -1533,27 +1566,29 @@ def _plot_overlay_timeseries_grid(
                 key_to_linestyle=key_to_linestyle,
             )
 
+            pooled_vlines = pooled_event_vlines_by_channel.get(ch, []) if pooled_event_vlines_by_channel else pooled_event_vlines
+            if pooled_vlines:
+                _draw_event_vlines(ax, pooled_vlines, style=event_vline_style)
+
             if event_vlines_by_key_by_channel:
-                ch_event_vlines_by_key = {
-                    key: event_vlines_by_key_by_channel.get(key, {}).get(ch, []) for key in sorted_keys
-                }
-            _draw_event_vlines_for_keys(
-                ax,
-                sorted_keys=sorted_keys,
-                event_vlines_by_key=ch_event_vlines_by_key,
-                style=event_vline_style,
-                overlay_cfg=event_vline_overlay_cfg,
-                key_to_linestyle=key_to_linestyle,
-            )
-        else:
-            _draw_event_vlines_for_keys(
-                ax,
-                sorted_keys=sorted_keys,
-                event_vlines_by_key=event_vlines_by_key,
-                style=event_vline_style,
-                overlay_cfg=event_vline_overlay_cfg,
-                key_to_linestyle=key_to_linestyle,
-            )
+                ch_event_vlines_by_key = {key: event_vlines_by_key_by_channel.get(key, {}).get(ch, []) for key in sorted_keys}
+                _draw_event_vlines_for_keys(
+                    ax,
+                    sorted_keys=sorted_keys,
+                    event_vlines_by_key=ch_event_vlines_by_key,
+                    style=event_vline_style,
+                    overlay_cfg=event_vline_overlay_cfg,
+                    key_to_linestyle=key_to_linestyle,
+                )
+            else:
+                _draw_event_vlines_for_keys(
+                    ax,
+                    sorted_keys=sorted_keys,
+                    event_vlines_by_key=event_vlines_by_key,
+                    style=event_vline_style,
+                    overlay_cfg=event_vline_overlay_cfg,
+                    key_to_linestyle=key_to_linestyle,
+                )
 
             for key in sorted_keys:
                 marker_info = markers_by_key.get(key, {}).get(ch, {})
@@ -1613,7 +1648,7 @@ def _plot_overlay_timeseries_grid(
             color_by_fields=color_by_fields,
             common_style=common_style,
         )
-        event_vlines_all = [v for key in sorted_keys for v in event_vlines_by_key.get(key, [])]
+        event_vlines_all = list(pooled_event_vlines) + [v for key in sorted_keys for v in event_vlines_by_key.get(key, [])]
 
         for ax, ch in zip(np.ravel(axes), channels):
             _draw_window_spans(ax, window_spans, alpha=window_span_alpha, with_labels=True)
@@ -1634,6 +1669,9 @@ def _plot_overlay_timeseries_grid(
                 key_to_color=key_to_color,
                 key_to_linestyle=key_to_linestyle,
             )
+
+            if pooled_event_vlines:
+                _draw_event_vlines(ax, pooled_event_vlines, style=event_vline_style)
 
             _draw_event_vlines_for_keys(
                 ax,
@@ -2235,6 +2273,7 @@ def _plot_cop_overlay(
     *,
     aggregated_by_key: Dict[Tuple, Dict[str, np.ndarray]],
     event_vlines_by_key: Dict[Tuple, List[Dict[str, Any]]],
+    pooled_event_vlines: Sequence[Dict[str, Any]],
     event_vline_style: Dict[str, Any],
     event_vline_overlay_cfg: Optional[Dict[str, Any]],
     output_path: Path,
@@ -2291,7 +2330,7 @@ def _plot_cop_overlay(
         color_by_fields=color_by_fields,
         common_style=common_style,
     )
-    event_vlines_all = [v for key in sorted_keys for v in event_vlines_by_key.get(key, [])]
+    event_vlines_all = list(pooled_event_vlines) + [v for key in sorted_keys for v in event_vlines_by_key.get(key, [])]
     legend_group_linewidth = min(float(cop_style.get("line_width", 0.8)), 0.8)
     legend_group_handles = _build_group_legend_handles(
         sorted_keys,
@@ -2329,6 +2368,9 @@ def _plot_cop_overlay(
                 alpha=cop_style.get("line_alpha", 0.8),
                 label=plot_label,
             )
+
+        if pooled_event_vlines:
+            _draw_event_vlines(ax, pooled_event_vlines, style=event_vline_style)
 
         _draw_event_vlines_for_keys(
             ax,
@@ -2423,6 +2465,7 @@ def _plot_com_overlay(
     *,
     aggregated_by_key: Dict[Tuple, Dict[str, np.ndarray]],
     event_vlines_by_key: Dict[Tuple, List[Dict[str, Any]]],
+    pooled_event_vlines: Sequence[Dict[str, Any]],
     event_vline_style: Dict[str, Any],
     event_vline_overlay_cfg: Optional[Dict[str, Any]],
     output_path: Path,
@@ -2517,7 +2560,7 @@ def _plot_com_overlay(
     use_group_colors = common_style.get("use_group_colors", False)
     key_to_linestyle = _build_group_linestyles(sorted_keys, common_style.get("group_linestyles", ("-", "--", ":", "-.")))
     key_to_color = _build_group_color_map(sorted_keys, group_fields, color_by_fields, base_colors) if use_group_colors else {}
-    event_vlines_all = [v for key in sorted_keys for v in event_vlines_by_key.get(key, [])]
+    event_vlines_all = list(pooled_event_vlines) + [v for key in sorted_keys for v in event_vlines_by_key.get(key, [])]
     legend_group_linewidth = min(float(com_style.get("line_width", 0.8)), 0.8)
     legend_group_handles = _build_group_legend_handles(
         sorted_keys,
@@ -2559,11 +2602,16 @@ def _plot_com_overlay(
                 label=plot_label,
             )
 
-        for key in sorted_keys:
-            vlines = event_vlines_by_key.get(key, [])
-            if not vlines:
-                continue
-            _draw_event_vlines(ax, vlines, style=event_vline_style)
+        if pooled_event_vlines:
+            _draw_event_vlines(ax, pooled_event_vlines, style=event_vline_style)
+        _draw_event_vlines_for_keys(
+            ax,
+            sorted_keys=sorted_keys,
+            event_vlines_by_key=event_vlines_by_key,
+            style=event_vline_style,
+            overlay_cfg=event_vline_overlay_cfg,
+            key_to_linestyle=key_to_linestyle,
+        )
 
         ax.grid(True, alpha=common_style["grid_alpha"])
         ax.tick_params(labelsize=common_style["tick_labelsize"])
@@ -3176,6 +3224,24 @@ class AggregatedSignalVisualizer:
 
         if overlay:
             overlay_within = mode_cfg.get("overlay_within")
+            overlay_event_names = _overlay_vline_event_names(self.event_vline_overlay_cfg)
+
+            def _filter_pooled_vlines(vlines: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+                if not overlay_event_names:
+                    return vlines
+                return [v for v in vlines if str(v.get("name") or "").strip() not in overlay_event_names]
+
+            def _filter_pooled_vlines_by_channel(
+                mapping: Dict[str, List[Dict[str, Any]]],
+            ) -> Dict[str, List[Dict[str, Any]]]:
+                if not overlay_event_names:
+                    return mapping
+                out: Dict[str, List[Dict[str, Any]]] = {}
+                for ch, vlines in mapping.items():
+                    kept = [v for v in vlines if str(v.get("name") or "").strip() not in overlay_event_names]
+                    if kept:
+                        out[ch] = kept
+                return out
 
             # Aggregate all keys first (common for both old and new logic)
             aggregated_by_key: Dict[Tuple, Dict[str, np.ndarray]] = {}
@@ -3199,6 +3265,12 @@ class AggregatedSignalVisualizer:
                 window_spans = self._compute_window_spans(meta_df, filtered_idx)
                 window_spans_by_channel = (
                     self._compute_window_spans_by_channel(meta_df, filtered_idx) if signal_group == "emg" else None
+                )
+                pooled_event_vlines = _filter_pooled_vlines(self._collect_event_vlines(meta_df, filtered_idx))
+                pooled_event_vlines_by_channel = (
+                    _filter_pooled_vlines_by_channel(self._collect_emg_event_vlines_by_channel(meta_df, filtered_idx))
+                    if signal_group == "emg"
+                    else None
                 )
                 sorted_keys = _sort_overlay_keys(list(aggregated_by_key.keys()), group_fields)
                 filtered_group_fields = _calculate_filtered_group_fields(
@@ -3225,6 +3297,8 @@ class AggregatedSignalVisualizer:
                         markers_by_key=markers_by_key,
                         event_vlines_by_key=event_vlines_by_key,
                         event_vlines_by_key_by_channel=event_vlines_by_key_by_channel,
+                        pooled_event_vlines=pooled_event_vlines,
+                        pooled_event_vlines_by_channel=pooled_event_vlines_by_channel,
                         output_path=output_path,
                         mode_name=mode_name,
                         group_fields=group_fields,
@@ -3264,6 +3338,12 @@ class AggregatedSignalVisualizer:
                 window_spans_by_channel = (
                     self._compute_window_spans_by_channel(meta_df, file_indices) if signal_group == "emg" else None
                 )
+                pooled_event_vlines = _filter_pooled_vlines(self._collect_event_vlines(meta_df, file_indices))
+                pooled_event_vlines_by_channel = (
+                    _filter_pooled_vlines_by_channel(self._collect_emg_event_vlines_by_channel(meta_df, file_indices))
+                    if signal_group == "emg"
+                    else None
+                )
 
                 sorted_keys = _sort_overlay_keys(keys_in_file, group_fields)
                 filtered_group_fields = _calculate_filtered_group_fields(
@@ -3282,6 +3362,8 @@ class AggregatedSignalVisualizer:
                         markers_by_key=file_markers,
                         event_vlines_by_key=file_event_vlines,
                         event_vlines_by_key_by_channel=file_event_vlines_by_key_by_channel,
+                        pooled_event_vlines=pooled_event_vlines,
+                        pooled_event_vlines_by_channel=pooled_event_vlines_by_channel,
                         output_path=output_path,
                         mode_name=mode_name,
                         group_fields=group_fields,
@@ -3744,6 +3826,8 @@ class AggregatedSignalVisualizer:
         markers_by_key: Dict[Tuple, Dict[str, Any]],
         event_vlines_by_key: Dict[Tuple, List[Dict[str, Any]]],
         event_vlines_by_key_by_channel: Optional[Dict[Tuple, Dict[str, List[Dict[str, Any]]]]] = None,
+        pooled_event_vlines: Sequence[Dict[str, Any]] = (),
+        pooled_event_vlines_by_channel: Optional[Dict[str, List[Dict[str, Any]]]] = None,
         output_path: Path,
         mode_name: str,
         group_fields: List[str],
@@ -3764,6 +3848,8 @@ class AggregatedSignalVisualizer:
             "markers_by_key": markers_by_key,
             "event_vlines_by_key": event_vlines_by_key,
             "event_vlines_by_key_by_channel": event_vlines_by_key_by_channel,
+            "pooled_event_vlines": list(pooled_event_vlines) if pooled_event_vlines else [],
+            "pooled_event_vlines_by_channel": pooled_event_vlines_by_channel,
             "event_vline_style": self.event_vline_style,
             "event_vline_overlay_cfg": self.event_vline_overlay_cfg,
             "x": self.x_norm,
