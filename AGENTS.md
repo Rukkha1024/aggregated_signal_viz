@@ -14,23 +14,8 @@ Always follow this procedure when performing tasks:
 - **Do not** create or activate any `venv` or `.venv` or run `uv venv`.
 
 ---
-## **Codebase Rule: Configuration Management**
-
-### **Core Principle: Centralized Control**
-The primary goal is to centralize shared values across multiple scripts. This ensures consistency and minimizes code modifications when parameters change.
-
-### **Items to Include in Config Files:**
-1.  **Paths and Directories:** Define paths to data, logs, and outputs (e.g., `RAW_DATA_DIR`, `OUTPUT_DIR`).
-2.  **File Identification Patterns:** Store regex or fixed strings for parsing filenames (e.g., `VELOCITY_PATTERN`, `TRIAL_PATTERNS`).
-3.  **Data Structure Definitions:** List column names for data extraction or processing (e.g., `FORCEPLATE_COLUMNS`, `METADATA_COLS`).
-4.  **Fixed Processing Constants:** Define constants derived from the experimental setup (e.g., `FRAME_RATIO`, `FORCEPLATE_DATA_START`).
-5.  **Tunable Analysis Parameters:** Specify parameters that researchers might adjust (e.g., filter cutoffs, normalization methods).
-6.  **Shared Texts:** Centralize common log messages or report headers (e.g., `STAGE03_SUMMARY_HEADER`).
-
----
 ### **Codebase Rule: Configuration Management**
 
-#### **Core Principle: Centralized Control**
 The primary goal is to centralize shared values across multiple scripts. This ensures consistency and minimizes code modifications when parameters change.
 
 #### **Items to Include in Config Files:**
