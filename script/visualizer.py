@@ -1053,6 +1053,7 @@ def _plot_task(task: Dict[str, Any]) -> None:
             aggregated_by_key=task["aggregated_by_key"],
             markers_by_key=task.get("markers_by_key", {}),
             event_vlines_by_key=task.get("event_vlines_by_key", {}),
+            event_vlines_by_key_by_channel=task.get("event_vlines_by_key_by_channel"),
             event_vline_style=event_vline_style,
             output_path=output_path,
             mode_name=task["mode_name"],
@@ -1063,6 +1064,7 @@ def _plot_task(task: Dict[str, Any]) -> None:
             grid_layout=task.get("grid_layout"),
             cop_channels=task.get("cop_channels"),
             window_spans=task["window_spans"],
+            window_spans_by_channel=task.get("window_spans_by_channel"),
             window_span_alpha=task.get("window_span_alpha"),
             style=task["style"],
             common_style=common_style,
@@ -1084,11 +1086,13 @@ def _plot_task(task: Dict[str, Any]) -> None:
             group_fields=task["group_fields"],
             markers=task["markers"],
             event_vlines=task.get("event_vlines", []),
+            event_vlines_by_channel=task.get("event_vlines_by_channel"),
             event_vline_style=event_vline_style,
             x=np.asarray(task["x"], dtype=float),
             channels=task["channels"],
             grid_layout=task["grid_layout"],
             window_spans=task["window_spans"],
+            window_spans_by_channel=task.get("window_spans_by_channel"),
             window_span_alpha=task["window_span_alpha"],
             emg_style=task["emg_style"],
             common_style=common_style,
@@ -1182,6 +1186,7 @@ def _plot_overlay_generic(
     aggregated_by_key: Dict[Tuple, Dict[str, np.ndarray]],
     markers_by_key: Dict[Tuple, Dict[str, Any]],
     event_vlines_by_key: Dict[Tuple, List[Dict[str, Any]]],
+    event_vlines_by_key_by_channel: Optional[Dict[Tuple, Dict[str, List[Dict[str, Any]]]]],
     event_vline_style: Dict[str, Any],
     output_path: Path,
     mode_name: str,
@@ -1192,6 +1197,7 @@ def _plot_overlay_generic(
     grid_layout: Optional[List[int]],
     cop_channels: Optional[Sequence[str]],
     window_spans: List[Dict[str, Any]],
+    window_spans_by_channel: Optional[Dict[str, List[Dict[str, Any]]]],
     window_span_alpha: Optional[float],
     style: Dict[str, Any],
     common_style: Dict[str, Any],
@@ -1253,6 +1259,7 @@ def _plot_overlay_generic(
         aggregated_by_key=aggregated_by_key,
         markers_by_key=markers_by_key,
         event_vlines_by_key=event_vlines_by_key,
+        event_vlines_by_key_by_channel=event_vlines_by_key_by_channel,
         event_vline_style=event_vline_style,
         output_path=output_path,
         mode_name=mode_name,
@@ -1263,6 +1270,7 @@ def _plot_overlay_generic(
         channels=channels,
         grid_layout=grid_layout,
         window_spans=window_spans,
+        window_spans_by_channel=window_spans_by_channel,
         window_span_alpha=window_span_alpha,
         style=style,
         common_style=common_style,
@@ -1284,11 +1292,13 @@ def _plot_emg(
     group_fields: List[str],
     markers: Dict[str, Any],
     event_vlines: List[Dict[str, Any]],
+    event_vlines_by_channel: Optional[Dict[str, List[Dict[str, Any]]]],
     event_vline_style: Dict[str, Any],
     x: np.ndarray,
     channels: List[str],
     grid_layout: List[int],
     window_spans: List[Dict[str, Any]],
+    window_spans_by_channel: Optional[Dict[str, List[Dict[str, Any]]]],
     window_span_alpha: float,
     emg_style: Dict[str, Any],
     common_style: Dict[str, Any],
@@ -1309,6 +1319,9 @@ def _plot_emg(
             ax.axis("off")
             continue
 
+        ch_event_vlines = event_vlines_by_channel.get(ch) if event_vlines_by_channel else None
+        ch_window_spans = window_spans_by_channel.get(ch) if window_spans_by_channel else None
+
         ax.plot(
             x,
             y,
@@ -1317,9 +1330,9 @@ def _plot_emg(
             alpha=emg_style["line_alpha"],
         )
 
-        _draw_window_spans(ax, window_spans, alpha=window_span_alpha, with_labels=True)
+        _draw_window_spans(ax, ch_window_spans or window_spans, alpha=window_span_alpha, with_labels=True)
 
-        _draw_event_vlines(ax, event_vlines, style=event_vline_style)
+        _draw_event_vlines(ax, ch_event_vlines or event_vlines, style=event_vline_style)
 
         marker_info = markers.get(ch, {})
         if common_style.get("show_max_marker", True):
@@ -1334,12 +1347,12 @@ def _plot_emg(
             title=ch,
             common_style=common_style,
             legend_fontsize=emg_style["legend_fontsize"],
-            window_spans=window_spans,
-            event_vlines=event_vlines,
+            window_spans=ch_window_spans or window_spans,
+            event_vlines=ch_event_vlines or event_vlines,
             event_vline_style=event_vline_style,
         )
         if time_start_frame is not None and time_end_frame is not None:
-            ticks = _apply_window_definition_xticks(ax, window_spans)
+            ticks = _apply_window_definition_xticks(ax, ch_window_spans or window_spans)
             ticks = _ensure_time_zero_xtick(
                 ax,
                 tick_positions=ticks,
@@ -1373,6 +1386,7 @@ def _plot_overlay_timeseries_grid(
     aggregated_by_key: Dict[Tuple, Dict[str, np.ndarray]],
     markers_by_key: Dict[Tuple, Dict[str, Any]],
     event_vlines_by_key: Dict[Tuple, List[Dict[str, Any]]],
+    event_vlines_by_key_by_channel: Optional[Dict[Tuple, Dict[str, List[Dict[str, Any]]]]],
     event_vline_style: Dict[str, Any],
     output_path: Path,
     mode_name: str,
@@ -1383,6 +1397,7 @@ def _plot_overlay_timeseries_grid(
     channels: List[str],
     grid_layout: List[int],
     window_spans: List[Dict[str, Any]],
+    window_spans_by_channel: Optional[Dict[str, List[Dict[str, Any]]]],
     window_span_alpha: float,
     style: Dict[str, Any],
     common_style: Dict[str, Any],
@@ -1423,7 +1438,8 @@ def _plot_overlay_timeseries_grid(
                 continue
 
             single_color = style.get("line_color", "blue")
-            _draw_window_spans(ax, window_spans, alpha=window_span_alpha, with_labels=True)
+            ch_window_spans = window_spans_by_channel.get(ch) if window_spans_by_channel else None
+            _draw_window_spans(ax, ch_window_spans or window_spans, alpha=window_span_alpha, with_labels=True)
             _plot_overlay_channel_series(
                 ax,
                 x=x,
@@ -1440,12 +1456,23 @@ def _plot_overlay_timeseries_grid(
                 key_to_linestyle=key_to_linestyle,
             )
 
-            _draw_event_vlines_for_keys(
-                ax,
-                sorted_keys=sorted_keys,
-                event_vlines_by_key=event_vlines_by_key,
-                style=event_vline_style,
-            )
+            if event_vlines_by_key_by_channel:
+                ch_event_vlines_by_key = {
+                    key: event_vlines_by_key_by_channel.get(key, {}).get(ch, []) for key in sorted_keys
+                }
+                _draw_event_vlines_for_keys(
+                    ax,
+                    sorted_keys=sorted_keys,
+                    event_vlines_by_key=ch_event_vlines_by_key,
+                    style=event_vline_style,
+                )
+            else:
+                _draw_event_vlines_for_keys(
+                    ax,
+                    sorted_keys=sorted_keys,
+                    event_vlines_by_key=event_vlines_by_key,
+                    style=event_vline_style,
+                )
 
             for key in sorted_keys:
                 marker_info = markers_by_key.get(key, {}).get(ch, {})
@@ -1462,13 +1489,13 @@ def _plot_overlay_timeseries_grid(
                 title=ch,
                 common_style=common_style,
                 legend_fontsize=style["legend_fontsize"],
-                window_spans=window_spans,
+                window_spans=ch_window_spans or window_spans,
                 group_handles=legend_group_handles,
                 event_vlines=event_vlines_all,
                 event_vline_style=event_vline_style,
             )
             if time_start_frame is not None and time_end_frame is not None:
-                ticks = _apply_window_definition_xticks(ax, window_spans)
+                ticks = _apply_window_definition_xticks(ax, ch_window_spans or window_spans)
                 ticks = _ensure_time_zero_xtick(
                     ax,
                     tick_positions=ticks,
@@ -2654,6 +2681,7 @@ class AggregatedSignalVisualizer:
         self.legend_label_threshold = self.common_style.get("legend_label_threshold", 6)
 
         self.features_df: Optional[pl.DataFrame] = self._load_features()
+        self._emg_channel_specific_event_columns: set[str] = self._detect_emg_channel_specific_event_columns()
         self._feature_event_cache: Optional[pl.DataFrame] = None
         self._feature_event_cache_cols: Tuple[str, ...] = ()
         self._feature_event_cache_key_sig: Tuple[Tuple[str, str], ...] = ()
@@ -3067,6 +3095,11 @@ class AggregatedSignalVisualizer:
                 aggregated_by_key[key] = self._aggregate_tensor(tensor, meta_df, idx, channels)
                 markers_by_key[key] = self._collect_markers(signal_group, key, group_fields, mode_cfg.get("filter"))
             event_vlines_by_key = {key: self._collect_event_vlines(meta_df, idx) for key, idx in grouped.items()}
+            event_vlines_by_key_by_channel: Optional[Dict[Tuple, Dict[str, List[Dict[str, Any]]]]] = None
+            if signal_group == "emg":
+                event_vlines_by_key_by_channel = {
+                    key: self._collect_emg_event_vlines_by_channel(meta_df, idx) for key, idx in grouped.items()
+                }
 
             output_dir = resolve_output_dir(self.base_dir, self.config, mode_cfg["output_dir"])
             output_dir.mkdir(parents=True, exist_ok=True)
@@ -3075,6 +3108,9 @@ class AggregatedSignalVisualizer:
             # OLD BEHAVIOR: overlay_within not specified -> all keys in one file
             if not overlay_within:
                 window_spans = self._compute_window_spans(meta_df, filtered_idx)
+                window_spans_by_channel = (
+                    self._compute_window_spans_by_channel(meta_df, filtered_idx) if signal_group == "emg" else None
+                )
                 sorted_keys = _sort_overlay_keys(list(aggregated_by_key.keys()), group_fields)
                 filtered_group_fields = _calculate_filtered_group_fields(
                     sorted_keys,
@@ -3099,11 +3135,13 @@ class AggregatedSignalVisualizer:
                         aggregated_by_key=aggregated_by_key,
                         markers_by_key=markers_by_key,
                         event_vlines_by_key=event_vlines_by_key,
+                        event_vlines_by_key_by_channel=event_vlines_by_key_by_channel,
                         output_path=output_path,
                         mode_name=mode_name,
                         group_fields=group_fields,
                         sorted_keys=sorted_keys,
                         window_spans=window_spans,
+                        window_spans_by_channel=window_spans_by_channel,
                         filtered_group_fields=filtered_group_fields,
                         color_by_fields=mode_cfg.get("color_by") if signal_group in ("emg", "cop", "com") else None,
                     )
@@ -3127,8 +3165,16 @@ class AggregatedSignalVisualizer:
                 file_aggregated = {k: aggregated_by_key[k] for k in keys_in_file}
                 file_markers = {k: markers_by_key[k] for k in keys_in_file}
                 file_event_vlines = {k: event_vlines_by_key.get(k, []) for k in keys_in_file}
+                file_event_vlines_by_key_by_channel = (
+                    {k: event_vlines_by_key_by_channel.get(k, {}) for k in keys_in_file}
+                    if event_vlines_by_key_by_channel
+                    else None
+                )
                 file_indices = np.concatenate([grouped[k] for k in keys_in_file if k in grouped]) if keys_in_file else filtered_idx
                 window_spans = self._compute_window_spans(meta_df, file_indices)
+                window_spans_by_channel = (
+                    self._compute_window_spans_by_channel(meta_df, file_indices) if signal_group == "emg" else None
+                )
 
                 sorted_keys = _sort_overlay_keys(keys_in_file, group_fields)
                 filtered_group_fields = _calculate_filtered_group_fields(
@@ -3146,11 +3192,13 @@ class AggregatedSignalVisualizer:
                         aggregated_by_key=file_aggregated,
                         markers_by_key=file_markers,
                         event_vlines_by_key=file_event_vlines,
+                        event_vlines_by_key_by_channel=file_event_vlines_by_key_by_channel,
                         output_path=output_path,
                         mode_name=mode_name,
                         group_fields=group_fields,
                         sorted_keys=sorted_keys,
                         window_spans=window_spans,
+                        window_spans_by_channel=window_spans_by_channel,
                         filtered_group_fields=filtered_group_fields,
                         color_by_fields=mode_cfg.get("color_by") if signal_group in ("emg", "cop", "com") else None,
                     )
@@ -3169,6 +3217,8 @@ class AggregatedSignalVisualizer:
             window_spans = self._compute_window_spans(meta_df, idx)
 
             if signal_group == "emg":
+                event_vlines_by_channel = self._collect_emg_event_vlines_by_channel(meta_df, idx)
+                window_spans_by_channel = self._compute_window_spans_by_channel(meta_df, idx)
                 tasks.append(
                     self._task_emg(
                         aggregated=aggregated,
@@ -3178,7 +3228,9 @@ class AggregatedSignalVisualizer:
                         group_fields=group_fields,
                         markers=markers,
                         event_vlines=event_vlines,
+                        event_vlines_by_channel=event_vlines_by_channel,
                         window_spans=window_spans,
+                        window_spans_by_channel=window_spans_by_channel,
                     )
                 )
             elif signal_group == "forceplate":
@@ -3320,6 +3372,140 @@ class AggregatedSignalVisualizer:
             )
         return spans
 
+    def _resolve_window_boundary_ms_from_means(
+        self,
+        spec: Tuple[str, Any],
+        *,
+        channel: str,
+        event_means_by_channel: Dict[str, Dict[str, float]],
+        global_event_means: Dict[str, float],
+        shift_ms: float,
+    ) -> Optional[float]:
+        kind, value = spec
+        if kind == "offset":
+            return float(value) + float(shift_ms)
+
+        offset_extra = 0.0
+        if kind == "event":
+            event_col = str(value).strip()
+        elif kind == "event_offset":
+            try:
+                event_col = str(value[0]).strip()
+                offset_extra = float(value[1])
+            except (TypeError, ValueError, IndexError):
+                return None
+        else:
+            return None
+
+        if not event_col:
+            return None
+
+        mean_ms = event_means_by_channel.get(channel, {}).get(event_col)
+        if mean_ms is None:
+            mean_ms = global_event_means.get(event_col)
+        if mean_ms is None:
+            return None
+        return float(mean_ms) + float(offset_extra)
+
+    def _compute_window_spans_by_channel(
+        self,
+        meta_df: pl.DataFrame,
+        indices: np.ndarray,
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        if self.time_start_ms is None or self.time_end_ms is None:
+            return {}
+        if indices.size == 0:
+            return {}
+        if not self.window_definition_specs:
+            return {}
+
+        channels = self.config["signal_groups"]["emg"]["columns"]
+        ref_col = str(self.window_reference_event or "").strip()
+        onset_col = str(self.id_cfg.get("onset") or "").strip()
+
+        needed_events: set[str] = set()
+        if ref_col and ref_col != onset_col:
+            needed_events.add(ref_col)
+        for spec in self.window_definition_specs.values():
+            for key in ("start", "end"):
+                kind, value = spec[key]
+                if kind == "event":
+                    needed_events.add(str(value).strip())
+                elif kind == "event_offset":
+                    try:
+                        needed_events.add(str(value[0]).strip())
+                    except Exception:
+                        continue
+
+        needed_events = {c for c in needed_events if c}
+        channel_events = [c for c in needed_events if c in self._emg_channel_specific_event_columns]
+
+        event_means_by_channel = self._collect_feature_event_means_by_emg_channel(
+            meta_df=meta_df,
+            indices=indices,
+            event_cols=channel_events,
+        )
+
+        global_event_means: Dict[str, float] = {}
+        for event_col in needed_events:
+            ms_col = _event_ms_col(event_col)
+            if ms_col not in meta_df.columns:
+                continue
+            vals = meta_df[ms_col].to_numpy()
+            mean_ms = _nanmean_ignore_nan(vals[indices])
+            if mean_ms is None:
+                continue
+            global_event_means[event_col] = float(mean_ms)
+
+        global_shift_ms = self._compute_window_reference_shift_ms_from_meta(meta_df, indices)
+
+        out: Dict[str, List[Dict[str, Any]]] = {}
+        for ch in channels:
+            shift_ms = global_shift_ms
+            if ref_col and ref_col != onset_col and ref_col in self._emg_channel_specific_event_columns:
+                shift_ms = float(
+                    event_means_by_channel.get(ch, {}).get(ref_col, global_event_means.get(ref_col, 0.0))
+                )
+
+            spans: List[Dict[str, Any]] = []
+            for name, spec in self.window_definition_specs.items():
+                start_ms = self._resolve_window_boundary_ms_from_means(
+                    spec["start"],
+                    channel=ch,
+                    event_means_by_channel=event_means_by_channel,
+                    global_event_means=global_event_means,
+                    shift_ms=shift_ms,
+                )
+                end_ms = self._resolve_window_boundary_ms_from_means(
+                    spec["end"],
+                    channel=ch,
+                    event_means_by_channel=event_means_by_channel,
+                    global_event_means=global_event_means,
+                    shift_ms=shift_ms,
+                )
+                if start_ms is None or end_ms is None:
+                    continue
+                clamped_start = max(float(start_ms), float(self.time_start_ms))
+                clamped_end = min(float(end_ms), float(self.time_end_ms))
+                if clamped_start >= clamped_end:
+                    continue
+                start_norm = _ms_to_norm(clamped_start, float(self.time_start_ms), float(self.time_end_ms))
+                end_norm = _ms_to_norm(clamped_end, float(self.time_start_ms), float(self.time_end_ms))
+                if start_norm is None or end_norm is None:
+                    continue
+                spans.append(
+                    {
+                        "name": name,
+                        "start": float(start_norm),
+                        "end": float(end_norm),
+                        "label": f"{name} ({int(round(clamped_end - clamped_start))} ms)",
+                        "color": self.window_colors.get(name, "#cccccc"),
+                    }
+                )
+            if spans:
+                out[ch] = spans
+        return out
+
     def _compute_window_reference_shift_ms_from_meta(self, meta_df: pl.DataFrame, indices: np.ndarray) -> float:
         ref_col = str(self.window_reference_event or "").strip()
         if not ref_col:
@@ -3411,6 +3597,56 @@ class AggregatedSignalVisualizer:
             out.append({"name": event_col, "x": float(x), "color": self.event_vline_colors.get(event_col)})
         return out
 
+    def _collect_emg_event_vlines_by_channel(
+        self,
+        meta_df: pl.DataFrame,
+        indices: np.ndarray,
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        if not self.event_vline_columns:
+            return {}
+        if self.time_start_ms is None or self.time_end_ms is None:
+            return {}
+        if indices.size == 0:
+            return {}
+
+        channels = self.config["signal_groups"]["emg"]["columns"]
+        channel_event_cols = [c for c in self.event_vline_columns if c in self._emg_channel_specific_event_columns]
+        event_means_by_channel = self._collect_feature_event_means_by_emg_channel(
+            meta_df=meta_df,
+            indices=indices,
+            event_cols=channel_event_cols,
+        )
+
+        global_event_means: Dict[str, float] = {}
+        for event_col in self.event_vline_columns:
+            ms_col = _event_ms_col(event_col)
+            if ms_col not in meta_df.columns:
+                continue
+            vals = meta_df[ms_col].to_numpy()
+            mean_ms = _nanmean_ignore_nan(vals[indices])
+            if mean_ms is None:
+                continue
+            global_event_means[event_col] = float(mean_ms)
+
+        out: Dict[str, List[Dict[str, Any]]] = {}
+        for ch in channels:
+            vlines: List[Dict[str, Any]] = []
+            for event_col in self.event_vline_columns:
+                mean_ms = event_means_by_channel.get(ch, {}).get(event_col)
+                if mean_ms is None:
+                    mean_ms = global_event_means.get(event_col)
+                if mean_ms is None:
+                    continue
+                if not _is_within_time_axis(mean_ms, self.time_start_ms, self.time_end_ms):
+                    continue
+                x = _ms_to_norm(mean_ms, self.time_start_ms, self.time_end_ms)
+                if x is None:
+                    continue
+                vlines.append({"name": event_col, "x": float(x), "color": self.event_vline_colors.get(event_col)})
+            if vlines:
+                out[ch] = vlines
+        return out
+
     def _task_overlay(
         self,
         *,
@@ -3418,11 +3654,13 @@ class AggregatedSignalVisualizer:
         aggregated_by_key: Dict[Tuple, Dict[str, np.ndarray]],
         markers_by_key: Dict[Tuple, Dict[str, Any]],
         event_vlines_by_key: Dict[Tuple, List[Dict[str, Any]]],
+        event_vlines_by_key_by_channel: Optional[Dict[Tuple, Dict[str, List[Dict[str, Any]]]]] = None,
         output_path: Path,
         mode_name: str,
         group_fields: List[str],
         sorted_keys: List[Tuple],
         window_spans: List[Dict[str, Any]],
+        window_spans_by_channel: Optional[Dict[str, List[Dict[str, Any]]]] = None,
         filtered_group_fields: List[str],
         color_by_fields: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
@@ -3436,9 +3674,11 @@ class AggregatedSignalVisualizer:
             "aggregated_by_key": aggregated_by_key,
             "markers_by_key": markers_by_key,
             "event_vlines_by_key": event_vlines_by_key,
+            "event_vlines_by_key_by_channel": event_vlines_by_key_by_channel,
             "event_vline_style": self.event_vline_style,
             "x": self.x_norm,
             "window_spans": window_spans,
+            "window_spans_by_channel": window_spans_by_channel,
             "common_style": self.common_style,
             "filtered_group_fields": filtered_group_fields,
             "color_by_fields": color_by_fields,
@@ -3504,9 +3744,11 @@ class AggregatedSignalVisualizer:
         group_fields: List[str],
         markers: Dict[str, Any],
         event_vlines: List[Dict[str, Any]],
+        event_vlines_by_channel: Optional[Dict[str, List[Dict[str, Any]]]] = None,
         window_spans: List[Dict[str, Any]],
+        window_spans_by_channel: Optional[Dict[str, List[Dict[str, Any]]]] = None,
     ) -> Dict[str, Any]:
-        return {
+        task: Dict[str, Any] = {
             "kind": "emg",
             "output_path": str(output_path),
             "key": key,
@@ -3515,11 +3757,13 @@ class AggregatedSignalVisualizer:
             "aggregated": aggregated,
             "markers": markers,
             "event_vlines": event_vlines,
+            "event_vlines_by_channel": event_vlines_by_channel,
             "event_vline_style": self.event_vline_style,
             "x": self.x_norm,
             "channels": self.config["signal_groups"]["emg"]["columns"],
             "grid_layout": self.config["signal_groups"]["emg"]["grid_layout"],
             "window_spans": window_spans,
+            "window_spans_by_channel": window_spans_by_channel,
             "window_span_alpha": self.emg_style["window_span_alpha"],
             "emg_style": self.emg_style,
             "common_style": self.common_style,
@@ -3528,6 +3772,7 @@ class AggregatedSignalVisualizer:
             "time_start_frame": self.time_start_frame,
             "time_end_frame": self.time_end_frame,
         }
+        return task
 
     def _task_forceplate(
         self,
@@ -3873,6 +4118,126 @@ class AggregatedSignalVisualizer:
             return None
         df = pl.read_csv(path)
         return strip_bom_columns(df)
+
+    def _detect_emg_channel_specific_event_columns(self) -> set[str]:
+        """
+        Detect event columns that vary across `emg_channel` within the same subject-velocity-trial.
+
+        These columns should be treated as channel-specific when rendering EMG event_vlines/windows.
+        """
+        if self.features_df is None:
+            return set()
+        df = self.features_df
+        emg_channel_col = "emg_channel"
+        if emg_channel_col not in df.columns:
+            return set()
+
+        subject_col = str(self.id_cfg.get("subject") or "").strip()
+        velocity_col = str(self.id_cfg.get("velocity") or "").strip()
+        trial_col = str(self.id_cfg.get("trial") or "").strip()
+        key_cols = [subject_col, velocity_col, trial_col]
+        if any(not c or c not in df.columns for c in key_cols):
+            return set()
+
+        candidates = [c for c in self.required_event_columns if c in df.columns]
+        if not candidates:
+            return set()
+
+        base = df.select([*key_cols, emg_channel_col, *candidates])
+        base = base.with_columns(
+            [pl.col(c).cast(pl.Float64, strict=False).fill_nan(None).alias(c) for c in candidates]
+        )
+        agg_exprs = [pl.col(c).n_unique().alias(f"__nuniq_{c}") for c in candidates]
+        grouped = base.group_by(key_cols, maintain_order=False).agg(agg_exprs)
+        if grouped.is_empty():
+            return set()
+
+        max_cols = [pl.col(f"__nuniq_{c}").max().alias(f"__nuniq_{c}") for c in candidates]
+        max_df = grouped.select(max_cols)
+        if max_df.is_empty():
+            return set()
+        max_row = max_df.row(0)
+        out: set[str] = set()
+        for event_col, nuniq in zip(candidates, max_row):
+            try:
+                if nuniq is not None and int(nuniq) > 1:
+                    out.add(event_col)
+            except Exception:
+                continue
+        return out
+
+    def _collect_feature_event_means_by_emg_channel(
+        self,
+        *,
+        meta_df: pl.DataFrame,
+        indices: np.ndarray,
+        event_cols: Sequence[str],
+    ) -> Dict[str, Dict[str, float]]:
+        if self.features_df is None:
+            return {}
+        if indices.size == 0:
+            return {}
+
+        df = self.features_df
+        emg_channel_col = "emg_channel"
+        if emg_channel_col not in df.columns:
+            return {}
+
+        subject_col = str(self.id_cfg.get("subject") or "").strip()
+        velocity_col = str(self.id_cfg.get("velocity") or "").strip()
+        trial_col = str(self.id_cfg.get("trial") or "").strip()
+        key_cols = [subject_col, velocity_col, trial_col]
+        if any(not c or c not in df.columns or c not in meta_df.columns for c in key_cols):
+            return {}
+
+        requested = [str(c) for c in event_cols if str(c).strip() and str(c) in df.columns]
+        if not requested:
+            return {}
+
+        keys_df = meta_df.select(key_cols)[indices].unique()
+
+        base = df.select([*key_cols, emg_channel_col, *requested])
+        casts: List[pl.Expr] = []
+        for k in key_cols:
+            dtype = meta_df.schema.get(k)
+            if dtype is not None:
+                casts.append(pl.col(k).cast(dtype, strict=False).alias(k))
+        if casts:
+            base = base.with_columns(casts)
+
+        filtered = base.join(keys_df, on=key_cols, how="inner")
+        if filtered.is_empty():
+            return {}
+
+        agg_exprs: List[pl.Expr] = []
+        for col in requested:
+            agg_exprs.append(pl.col(col).cast(pl.Float64, strict=False).fill_nan(None).mean().alias(col))
+
+        grouped = filtered.group_by(emg_channel_col, maintain_order=False).agg(agg_exprs)
+        if grouped.is_empty():
+            return {}
+
+        out: Dict[str, Dict[str, float]] = {}
+        for row in grouped.iter_rows(named=True):
+            ch = row.get(emg_channel_col)
+            if ch is None:
+                continue
+            ch_name = str(ch)
+            values: Dict[str, float] = {}
+            for col in requested:
+                val = row.get(col)
+                if val is None:
+                    continue
+                try:
+                    fval = float(val)
+                except (TypeError, ValueError):
+                    continue
+                if not np.isfinite(fval):
+                    continue
+                values[col] = fval
+            if values:
+                out[ch_name] = values
+        return out
 
     def _get_feature_event_ms_table(
         self,
