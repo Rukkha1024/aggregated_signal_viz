@@ -190,16 +190,16 @@ windows:
   definitions:
     p1:
       start_ms: "TKEO_AGLR_emg_onset_timing"
-      end_ms: "TKEO_AGLR_emg_onset_timing + 30"
+      end_ms: "TKEO_AGLR_emg_onset_timing + 125"
     p2:
-      start_ms: "TKEO_AGLR_emg_onset_timing + 30"
-      end_ms: "TKEO_AGLR_emg_onset_timing + 60"
-    p3:
-      start_ms: "TKEO_AGLR_emg_onset_timing + 60"
+      start_ms: "TKEO_AGLR_emg_onset_timing + 125"
       end_ms: "step_onset"
+    p3:
+      start_ms: "step_onset"
+      end_ms: "600"
     p4:
-      start_ms: 600
-      end_ms: 800
+      start_ms: 0
+      end_ms: 600
 
 # === Event Vertical Lines (data-driven annotations) ===
 # 참고:

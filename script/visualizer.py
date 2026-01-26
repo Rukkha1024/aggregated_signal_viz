@@ -1353,7 +1353,7 @@ def _plot_overlay_timeseries_grid(
             common_style=common_style,
         )
         event_vlines_all = [v for key in sorted_keys for v in event_vlines_by_key.get(key, [])]
-        legend_group_linewidth = min(float(style.get("line_width", 0.8)), 1.0)
+        legend_group_linewidth = min(float(style.get("line_width", 0.8)), 0.8)
         legend_group_handles = _build_group_legend_handles(
             sorted_keys,
             group_fields,
@@ -2097,7 +2097,7 @@ def _plot_cop_overlay(
         common_style=common_style,
     )
     event_vlines_all = [v for key in sorted_keys for v in event_vlines_by_key.get(key, [])]
-    legend_group_linewidth = min(float(cop_style.get("line_width", 0.8)), 1.0)
+    legend_group_linewidth = min(float(cop_style.get("line_width", 0.8)), 0.8)
     legend_group_handles = _build_group_legend_handles(
         sorted_keys,
         group_fields,
@@ -2314,7 +2314,7 @@ def _plot_com_overlay(
     key_to_linestyle = _build_group_linestyles(sorted_keys, common_style.get("group_linestyles", ("-", "--", ":", "-.")))
     key_to_color = _build_group_color_map(sorted_keys, group_fields, color_by_fields, base_colors) if use_group_colors else {}
     event_vlines_all = [v for key in sorted_keys for v in event_vlines_by_key.get(key, [])]
-    legend_group_linewidth = min(float(com_style.get("line_width", 0.8)), 1.0)
+    legend_group_linewidth = min(float(com_style.get("line_width", 0.8)), 0.8)
     legend_group_handles = _build_group_legend_handles(
         sorted_keys,
         group_fields,
