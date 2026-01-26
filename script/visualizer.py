@@ -1070,6 +1070,8 @@ def _plot_task(task: Dict[str, Any]) -> None:
             common_style=common_style,
             time_start_ms=task["time_start_ms"],
             time_end_ms=task["time_end_ms"],
+            time_start_frame=task.get("time_start_frame"),
+            time_end_frame=task.get("time_end_frame"),
         )
         return
 
@@ -1087,6 +1089,8 @@ def _plot_task(task: Dict[str, Any]) -> None:
             target_axis=np.asarray(task["target_axis"], dtype=float) if task["target_axis"] is not None else None,
             time_start_ms=task["time_start_ms"],
             time_end_ms=task["time_end_ms"],
+            time_start_frame=task.get("time_start_frame"),
+            time_end_frame=task.get("time_end_frame"),
             device_rate=float(task["device_rate"]),
             cop_channels=task["cop_channels"],
             grid_layout=task.get("grid_layout"),
@@ -1109,6 +1113,8 @@ def _plot_task(task: Dict[str, Any]) -> None:
             x_axis=np.asarray(task["x_axis"], dtype=float) if task["x_axis"] is not None else None,
             time_start_ms=task["time_start_ms"],
             time_end_ms=task["time_end_ms"],
+            time_start_frame=task.get("time_start_frame"),
+            time_end_frame=task.get("time_end_frame"),
             device_rate=float(task["device_rate"]),
             com_channels=task["com_channels"],
             grid_layout=task.get("grid_layout"),
@@ -1165,6 +1171,8 @@ def _plot_overlay_generic(
             common_style=common_style,
             filtered_group_fields=filtered_group_fields,
             color_by_fields=color_by_fields,
+            time_start_frame=time_start_frame,
+            time_end_frame=time_end_frame,
         )
         return
 
@@ -1185,6 +1193,8 @@ def _plot_overlay_generic(
             common_style=common_style,
             filtered_group_fields=filtered_group_fields,
             color_by_fields=color_by_fields,
+            time_start_frame=time_start_frame,
+            time_end_frame=time_end_frame,
         )
         return
 
@@ -1298,7 +1308,7 @@ def _plot_emg(
         fontsize=common_style["title_fontsize"],
         fontweight=common_style["title_fontweight"],
     )
-    fig.supxlabel("Aligned frame (onset=0)", fontsize=common_style["label_fontsize"])
+    fig.supxlabel(emg_style["x_label"], fontsize=common_style["label_fontsize"])
     y_label = _format_label(emg_style.get("y_label", "Amplitude"), channel="Amplitude")
     fig.supylabel(y_label, fontsize=common_style["label_fontsize"])
     _savefig_and_close(fig, output_path, common_style, bbox=True)
@@ -1422,7 +1432,7 @@ def _plot_overlay_timeseries_grid(
             fontsize=common_style["title_fontsize"],
             fontweight=common_style["title_fontweight"],
         )
-        fig.supxlabel("Aligned frame (onset=0)", fontsize=common_style["label_fontsize"])
+        fig.supxlabel(style["x_label"], fontsize=common_style["label_fontsize"])
         y_label = _format_label(style.get("y_label", "Amplitude"), channel="Amplitude")
         fig.supylabel(y_label, fontsize=common_style["label_fontsize"])
         _savefig_and_close(fig, output_path, common_style, bbox=True)
@@ -1473,6 +1483,15 @@ def _plot_overlay_timeseries_grid(
                 event_vlines=event_vlines_all,
                 event_vline_style=event_vline_style,
             )
+            if time_start_frame is not None and time_end_frame is not None:
+                ticks = _apply_window_definition_xticks(ax, window_spans)
+                _apply_frame_tick_labels(ax, time_start_frame=time_start_frame, time_end_frame=time_end_frame)
+                _auto_rotate_dense_xticklabels(
+                    ax,
+                    tick_positions=ticks,
+                    time_start_frame=time_start_frame,
+                    time_end_frame=time_end_frame,
+                )
             ax.set_xlabel(style["x_label"], fontsize=common_style["label_fontsize"])
             axis_label = _resolve_forceplate_axis_label(ch, style.get("axis_labels", {}))
             y_label = _format_label(style.get("y_label", "{channel} Value"), channel=ch, axis_label=axis_label)
@@ -1510,6 +1529,8 @@ def _plot_forceplate(
     common_style: Dict[str, Any],
     time_start_ms: float,
     time_end_ms: float,
+    time_start_frame: Optional[float],
+    time_end_frame: Optional[float],
 ) -> None:
     import matplotlib.pyplot as plt
 
@@ -1544,6 +1565,15 @@ def _plot_forceplate(
             event_vlines=event_vlines,
             event_vline_style=event_vline_style,
         )
+        if time_start_frame is not None and time_end_frame is not None:
+            ticks = _apply_window_definition_xticks(ax, window_spans)
+            _apply_frame_tick_labels(ax, time_start_frame=time_start_frame, time_end_frame=time_end_frame)
+            _auto_rotate_dense_xticklabels(
+                ax,
+                tick_positions=ticks,
+                time_start_frame=time_start_frame,
+                time_end_frame=time_end_frame,
+            )
         ax.set_xlabel(forceplate_style["x_label"], fontsize=common_style["label_fontsize"])
         axis_label = _resolve_forceplate_axis_label(ch, forceplate_style.get("axis_labels", {}))
         y_label = _format_label(
@@ -1575,6 +1605,8 @@ def _plot_cop(
     target_axis: Optional[np.ndarray],
     time_start_ms: float,
     time_end_ms: float,
+    time_start_frame: Optional[float],
+    time_end_frame: Optional[float],
     device_rate: float,
     cop_channels: Sequence[str],
     grid_layout: Optional[Sequence[int]],
@@ -1717,6 +1749,16 @@ def _plot_cop(
     ax_cx.set_ylabel(cop_style.get("y_label_cx", "Cx"), fontsize=common_style["label_fontsize"])
     ax_cy.set_xlabel(cop_style.get("x_label_time", "Normalized time (0-1)"), fontsize=common_style["label_fontsize"])
     ax_cy.set_ylabel(cop_style.get("y_label_cy", "Cy"), fontsize=common_style["label_fontsize"])
+    if time_start_frame is not None and time_end_frame is not None:
+        for ax in (ax_cx, ax_cy):
+            ticks = _apply_window_definition_xticks(ax, window_spans)
+            _apply_frame_tick_labels(ax, time_start_frame=time_start_frame, time_end_frame=time_end_frame)
+            _auto_rotate_dense_xticklabels(
+                ax,
+                tick_positions=ticks,
+                time_start_frame=time_start_frame,
+                time_end_frame=time_end_frame,
+            )
 
     ax_scatter.set_xlabel(cop_style["x_label"], fontsize=common_style["label_fontsize"])
     ax_scatter.set_ylabel(cop_style["y_label"], fontsize=common_style["label_fontsize"])
@@ -1752,6 +1794,8 @@ def _plot_com(
     x_axis: Optional[np.ndarray],
     time_start_ms: float,
     time_end_ms: float,
+    time_start_frame: Optional[float],
+    time_end_frame: Optional[float],
     device_rate: float,
     com_channels: Sequence[str],
     grid_layout: Optional[Sequence[int]],
@@ -1963,6 +2007,16 @@ def _plot_com(
     if ax_z is not None:
         ax_z.set_xlabel(com_style.get("x_label_time", "Normalized time (0-1)"), fontsize=common_style["label_fontsize"])
         ax_z.set_ylabel(com_style.get("y_label_comz", comz_name), fontsize=common_style["label_fontsize"])
+    if time_start_frame is not None and time_end_frame is not None:
+        for ax in axes_to_style:
+            ticks = _apply_window_definition_xticks(ax, window_spans)
+            _apply_frame_tick_labels(ax, time_start_frame=time_start_frame, time_end_frame=time_end_frame)
+            _auto_rotate_dense_xticklabels(
+                ax,
+                tick_positions=ticks,
+                time_start_frame=time_start_frame,
+                time_end_frame=time_end_frame,
+            )
 
     ax_scatter.set_xlabel(com_style.get("x_label", comx_name), fontsize=common_style["label_fontsize"])
     ax_scatter.set_ylabel(com_style.get("y_label", comy_name), fontsize=common_style["label_fontsize"])
@@ -2000,6 +2054,8 @@ def _plot_cop_overlay(
     common_style: Dict[str, Any],
     filtered_group_fields: List[str],
     color_by_fields: Optional[List[str]] = None,
+    time_start_frame: Optional[float] = None,
+    time_end_frame: Optional[float] = None,
 ) -> None:
     import matplotlib.pyplot as plt
 
@@ -2095,6 +2151,15 @@ def _plot_cop_overlay(
             event_vlines=event_vlines_all,
             event_vline_style=event_vline_style,
         )
+        if time_start_frame is not None and time_end_frame is not None:
+            ticks = _apply_window_definition_xticks(ax, window_spans)
+            _apply_frame_tick_labels(ax, time_start_frame=time_start_frame, time_end_frame=time_end_frame)
+            _auto_rotate_dense_xticklabels(
+                ax,
+                tick_positions=ticks,
+                time_start_frame=time_start_frame,
+                time_end_frame=time_end_frame,
+            )
         ax.set_xlabel(cop_style.get("x_label_time", "Normalized time (0-1)"), fontsize=common_style["label_fontsize"])
         ax.set_ylabel(y_label, fontsize=common_style["label_fontsize"])
 
@@ -2168,6 +2233,8 @@ def _plot_com_overlay(
     common_style: Dict[str, Any],
     filtered_group_fields: List[str],
     color_by_fields: Optional[List[str]] = None,
+    time_start_frame: Optional[float] = None,
+    time_end_frame: Optional[float] = None,
 ) -> None:
     import matplotlib.pyplot as plt
 
@@ -2306,6 +2373,15 @@ def _plot_com_overlay(
             framealpha=common_style["legend_framealpha"],
             loc=common_style["legend_loc"],
         )
+        if time_start_frame is not None and time_end_frame is not None:
+            ticks = _apply_window_definition_xticks(ax, window_spans)
+            _apply_frame_tick_labels(ax, time_start_frame=time_start_frame, time_end_frame=time_end_frame)
+            _auto_rotate_dense_xticklabels(
+                ax,
+                tick_positions=ticks,
+                time_start_frame=time_start_frame,
+                time_end_frame=time_end_frame,
+            )
         ax.set_xlabel(com_style.get("x_label_time", "Normalized time (0-1)"), fontsize=common_style["label_fontsize"])
         ax.set_ylabel(y_label, fontsize=common_style["label_fontsize"])
 
@@ -3384,6 +3460,8 @@ class AggregatedSignalVisualizer:
             "common_style": self.common_style,
             "time_start_ms": self.time_start_ms,
             "time_end_ms": self.time_end_ms,
+            "time_start_frame": self.time_start_frame,
+            "time_end_frame": self.time_end_frame,
         }
 
     def _task_cop(
@@ -3412,6 +3490,8 @@ class AggregatedSignalVisualizer:
             "target_axis": self.target_axis,
             "time_start_ms": self.time_start_ms,
             "time_end_ms": self.time_end_ms,
+            "time_start_frame": self.time_start_frame,
+            "time_end_frame": self.time_end_frame,
             "device_rate": self.device_rate,
             "cop_channels": self.config["signal_groups"]["cop"]["columns"],
             "grid_layout": self.config["signal_groups"]["cop"]["grid_layout"],
@@ -3445,6 +3525,8 @@ class AggregatedSignalVisualizer:
             "x_axis": self.x_norm,
             "time_start_ms": self.time_start_ms,
             "time_end_ms": self.time_end_ms,
+            "time_start_frame": self.time_start_frame,
+            "time_end_frame": self.time_end_frame,
             "device_rate": self.device_rate,
             "com_channels": self.config["signal_groups"]["com"]["columns"],
             "grid_layout": self.config["signal_groups"]["com"]["grid_layout"],
