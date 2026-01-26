@@ -407,8 +407,21 @@ def _build_event_vline_legend_handles(
     base_kwargs = dict(style) if style else {"color": "red", "linestyle": "--", "linewidth": 1.5}
     base_kwargs.setdefault("alpha", 0.9)
 
-    linestyle = base_kwargs.get("linestyle", "--")
+    def _linestyle_for_legend(value: Any) -> Any:
+        if isinstance(value, str):
+            text = value.strip()
+            if text == "--":
+                return (0, (3, 2))
+            if text == ":":
+                return (0, (1, 2))
+            if text == "-.":
+                return (0, (3, 2, 1, 2))
+            return text if text else "--"
+        return value
+
+    linestyle = _linestyle_for_legend(base_kwargs.get("linestyle", "--"))
     linewidth = float(base_kwargs.get("linewidth", 1.5))
+    legend_linewidth = min(linewidth, 1.0)
     alpha = float(base_kwargs.get("alpha", 0.9))
     base_color = base_kwargs.get("color", "red")
 
@@ -430,7 +443,7 @@ def _build_event_vline_legend_handles(
                 [],
                 color=resolved_color,
                 linestyle=linestyle,
-                linewidth=linewidth,
+                linewidth=legend_linewidth,
                 alpha=alpha,
                 label=label,
             )
