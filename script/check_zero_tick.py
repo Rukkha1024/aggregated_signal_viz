@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
 import numpy as np
 
 
@@ -9,6 +12,7 @@ def main() -> None:
     matplotlib.use("Agg", force=True)
     import matplotlib.pyplot as plt
 
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from script.visualizer import (
         _apply_frame_tick_labels,
         _apply_window_definition_xticks,
@@ -45,4 +49,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
