@@ -205,6 +205,9 @@ plot_style:
 # - 특정 컬럼 색을 고정하려면 `event_vlines.colors`에 지정하세요.
 event_vlines:
   columns: ["platform_onset", "step_onset", "TKEO_AGLR_emg_onset_timing"]
+  # Optional: legend display names (short labels)
+  event_labels:
+    TKEO_AGLR_emg_onset_timing: "TKEO"
   # Optional:
   # colors:
   #   platform_onset: "black"
