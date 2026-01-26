@@ -1744,7 +1744,7 @@ def _plot_cop(
         title=cx_name,
         common_style=common_style,
         legend_fontsize=cop_style["legend_fontsize"],
-        window_spans=[],
+        window_spans=window_spans,
         event_vlines=event_vlines,
         event_vline_style=event_vline_style,
     )
@@ -1753,7 +1753,7 @@ def _plot_cop(
         title=cy_name,
         common_style=common_style,
         legend_fontsize=cop_style["legend_fontsize"],
-        window_spans=[],
+        window_spans=window_spans,
         event_vlines=event_vlines,
         event_vline_style=event_vline_style,
     )
@@ -1993,7 +1993,7 @@ def _plot_com(
         ax.tick_params(labelsize=common_style["tick_labelsize"])
         _apply_window_group_legends(
             ax,
-            window_spans=[],
+            window_spans=window_spans,
             group_handles=[],
             event_vlines=event_vlines,
             event_vline_style=event_vline_style,
@@ -2159,7 +2159,7 @@ def _plot_cop_overlay(
             title=ch,
             common_style=common_style,
             legend_fontsize=cop_style["legend_fontsize"],
-            window_spans=[],
+            window_spans=window_spans,
             group_handles=legend_group_handles,
             event_vlines=event_vlines_all,
             event_vline_style=event_vline_style,
@@ -2378,7 +2378,7 @@ def _plot_com_overlay(
         ax.tick_params(labelsize=common_style["tick_labelsize"])
         _apply_window_group_legends(
             ax,
-            window_spans=[],
+            window_spans=window_spans,
             group_handles=legend_group_handles,
             event_vlines=event_vlines_all,
             event_vline_style=event_vline_style,
@@ -3227,7 +3227,7 @@ class AggregatedSignalVisualizer:
                     "name": name,
                     "start": float(start_norm),
                     "end": float(end_norm),
-                    "label": f"{name} ({int(clamped_start)}-{int(clamped_end)} ms)",
+                    "label": f"{name} ({int(round(clamped_end - clamped_start))} ms)",
                     "color": self.window_colors.get(name, "#cccccc"),
                 }
             )
