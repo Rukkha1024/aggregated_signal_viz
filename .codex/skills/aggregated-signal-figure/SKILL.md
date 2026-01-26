@@ -1,6 +1,6 @@
 ---
 name: aggregated-signal-figure
-description: Create and refactor figure-generating scripts in aggregated_signal_viz (script/vis_*.py) using Polars (no pandas). Use config.yaml for channel grid_layout (signal_groups.<group>.grid_layout) and summary max_cols (figure_layout.summary_plots.<plot_type>.max_cols). Save PNG (300dpi) under Path(output.base_dir)/<plot_type>/ and keep EMG muscle order from config.yaml signal_groups.emg.columns. Triggers on onset plot, boxplot, summary plot, grid plot, aggregated signal figure, legend dashed line not visible, step/nonstep legend dashed, event vline legend dashed, legend linestyle looks solid due to linewidth.
+description: Create and refactor figure-generating scripts in aggregated_signal_viz (script/vis_*.py) using Polars (no pandas). Use config.yaml for channel grid_layout (signal_groups.<group>.grid_layout) and summary max_cols (figure_layout.summary_plots.<plot_type>.max_cols). Save PNG (300dpi) under Path(output.base_dir)/<plot_type>/ and keep EMG muscle order from config.yaml signal_groups.emg.columns. Triggers on onset plot, boxplot, summary plot, grid plot, aggregated signal figure, legend dashed line not visible, step/nonstep legend dashed, event vline legend dashed, legend linestyle looks solid due to linewidth. Triggers on windows.definition legend mismatch, COP/COM window legend parity, and min-max vs range (duration) labels in ms.
 ---
 
 # Aggregated Signal Figure Skill
@@ -46,15 +46,26 @@ description: Create and refactor figure-generating scripts in aggregated_signal_
 - After refactoring, rerun with the same inputs and compare MD5.
 - If MD5 differs unexpectedly, treat it as a regression and fix (unless an intentional change is approved).
 
-## Legend 점선(--) 가독성 문제 해결
+## Troubleshooting: Dashed Lines in Legends
 
-- 증상: `step/nonstep` 같은 그룹 라인이 **legend에서 실선처럼 보임**(linewidth가 크고 legend 샘플이 짧아서 점선이 뭉개짐).
-- 해결: **플롯 linewidth는 유지**하고, legend에는 **커스텀 handle**을 넣어서 legend 전용 linewidth를 더 얇게 캡 적용.
-  - 예시 패턴: `legend_linewidth = min(plot_linewidth, 1.0)`
-  - 구현 참고(현재 repo): `script/visualizer.py`에서 `legend_group_linewidth`, `_build_group_legend_handles`, `_style_timeseries_axis(group_handles=...)` 검색
-- 추가 증상: `platform_onset` 같은 **event vline legend**가 점선으로 안 보임.
-- 해결: **legend용 vline handle**에서만 `--/:/-.`를 legend-friendly dash tuple로 변환하고, legend linewidth도 캡 적용.
-  - 구현 참고(현재 repo): `script/visualizer.py`에서 `_build_event_vline_legend_handles` 검색
+- Symptom: Group lines (e.g., `step/nonstep`) look solid in the legend because the plot linewidth is thick and the legend sample is short.
+- Root cause: Matplotlib legends reuse plot handles and can visually compress dash patterns at larger linewidths.
+- Fix pattern: Keep the plot linewidth, but provide custom legend handles with a thinner legend-only linewidth cap (for readability).
+- Reference implementation in this repo: search `script/visualizer.py` for `legend_group_linewidth`, `_build_group_legend_handles`, and `_style_timeseries_axis(group_handles=...)`.
+
+- Related symptom: Event vline legend entries (`--`, `:`, `-.`) do not look dashed.
+- Fix pattern: Build legend-only vline handles that map common linestyles to legend-friendly dash tuples and cap legend linewidth.
+- Reference implementation in this repo: search `script/visualizer.py` for `_build_event_vline_legend_handles`.
+
+## Troubleshooting: Window Definition Legend Labels (Range vs min-max)
+
+- Symptom: `windows.definitions` legend entries differ across plots (EMG/forceplate vs COP/COM), or labels show `start-end` (min-max) instead of a range/duration.
+- Root cause: Some plot functions do not pass `window_spans` into legend assembly (via `_style_timeseries_axis`/`_apply_window_group_legends`), and window labels are formatted from clamped `start_ms`/`end_ms` instead of duration.
+- Fix pattern:
+  - Legend inclusion: pass `window_spans=window_spans` for time-series axes so window handles are included consistently.
+  - Label format: format `span["label"]` as a duration (e.g., `p1 (200 ms)`) when constructing window spans.
+  - Configuration source: window boundaries live in `config.yaml` under `windows.definitions` and colors are typically set under `plot_style.common.window_colors`.
+- Reference implementation in this repo: search `script/visualizer.py` for `_compute_window_spans`, `_apply_window_group_legends`, `_style_timeseries_axis`, `_plot_cop`, and `_plot_com`.
 
 ## Templates
 
