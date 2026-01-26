@@ -1,6 +1,6 @@
 ---
 name: aggregated-signal-figure
-description: Create and refactor figure-generating scripts in aggregated_signal_viz (script/vis_*.py) using Polars (no pandas). Use config.yaml for channel grid_layout (signal_groups.<group>.grid_layout) and summary max_cols (figure_layout.summary_plots.<plot_type>.max_cols). Save PNG (300dpi) under Path(output.base_dir)/<plot_type>/ and keep EMG muscle order from config.yaml signal_groups.emg.columns. Triggers on onset plot, boxplot, summary plot, grid plot, aggregated signal figure, legend dashed line not visible, step/nonstep legend dashed, event vline legend dashed, legend linestyle looks solid due to linewidth. Triggers on windows.definition legend mismatch, COP/COM window legend parity, and min-max vs range (duration) labels in ms.
+description: Create/refactor figure scripts in aggregated_signal_viz using Polars and config-driven layouts/outputs. Triggers: figure grids/summary plots, legend readability, and windows.definitions legend labels (COP/COM parity; duration vs min-max).
 ---
 
 # Aggregated Signal Figure Skill
@@ -46,26 +46,12 @@ description: Create and refactor figure-generating scripts in aggregated_signal_
 - After refactoring, rerun with the same inputs and compare MD5.
 - If MD5 differs unexpectedly, treat it as a regression and fix (unless an intentional change is approved).
 
-## Troubleshooting: Dashed Lines in Legends
+## Troubleshooting Notes
 
-- Symptom: Group lines (e.g., `step/nonstep`) look solid in the legend because the plot linewidth is thick and the legend sample is short.
-- Root cause: Matplotlib legends reuse plot handles and can visually compress dash patterns at larger linewidths.
-- Fix pattern: Keep the plot linewidth, but provide custom legend handles with a thinner legend-only linewidth cap (for readability).
-- Reference implementation in this repo: search `script/visualizer.py` for `legend_group_linewidth`, `_build_group_legend_handles`, and `_style_timeseries_axis(group_handles=...)`.
-
-- Related symptom: Event vline legend entries (`--`, `:`, `-.`) do not look dashed.
-- Fix pattern: Build legend-only vline handles that map common linestyles to legend-friendly dash tuples and cap legend linewidth.
-- Reference implementation in this repo: search `script/visualizer.py` for `_build_event_vline_legend_handles`.
-
-## Troubleshooting: Window Definition Legend Labels (Range vs min-max)
-
-- Symptom: `windows.definitions` legend entries differ across plots (EMG/forceplate vs COP/COM), or labels show `start-end` (min-max) instead of a range/duration.
-- Root cause: Some plot functions do not pass `window_spans` into legend assembly (via `_style_timeseries_axis`/`_apply_window_group_legends`), and window labels are formatted from clamped `start_ms`/`end_ms` instead of duration.
-- Fix pattern:
-  - Legend inclusion: pass `window_spans=window_spans` for time-series axes so window handles are included consistently.
-  - Label format: format `span["label"]` as a duration (e.g., `p1 (200 ms)`) when constructing window spans.
-  - Configuration source: window boundaries live in `config.yaml` under `windows.definitions` and colors are typically set under `plot_style.common.window_colors`.
-- Reference implementation in this repo: search `script/visualizer.py` for `_compute_window_spans`, `_apply_window_group_legends`, `_style_timeseries_axis`, `_plot_cop`, and `_plot_com`.
+- Symptom: Legends are inconsistent (dash styles look solid, or `windows.definitions` labels/parity differ across plots).
+- Root cause: Legends reuse plot handles; some plot functions omit `window_spans`; window labels may be formatted as start-end (min-max).
+- Fix pattern: Use custom legend handles with a legend-only linewidth cap; always pass `window_spans` into `_style_timeseries_axis`/`_apply_window_group_legends`; format window labels as duration (e.g., `p1 (200 ms)`), with boundaries in `config.yaml: windows.definitions`.
+- Reference implementation in this repo: `script/visualizer.py` (`legend_group_linewidth`, `_build_group_legend_handles`, `_build_event_vline_legend_handles`, `_compute_window_spans`, `_apply_window_group_legends`, `_style_timeseries_axis`, `_plot_cop`, `_plot_com`) and `config.yaml` (`windows.definitions`).
 
 ## Templates
 
