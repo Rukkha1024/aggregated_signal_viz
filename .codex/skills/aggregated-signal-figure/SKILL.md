@@ -53,6 +53,11 @@ description: Create/refactor figure scripts in aggregated_signal_viz using Polar
 - Fix pattern: Use custom legend handles with a legend-only linewidth cap; always pass `window_spans` into `_style_timeseries_axis`/`_apply_window_group_legends`; format window labels as duration (e.g., `p1 (200 ms)`), with boundaries in `config.yaml: windows.definitions`.
 - Reference implementation in this repo: `script/visualizer.py` (`legend_group_linewidth`, `_build_group_legend_handles`, `_build_event_vline_legend_handles`, `_compute_window_spans`, `_apply_window_group_legends`, `_style_timeseries_axis`, `_plot_cop`, `_plot_com`) and `config.yaml` (`windows.definitions`).
 
+- Symptom: `windows.reference_event: 0`인데 x축 tick 라벨에 `0`이 안 보임.
+- Root cause: xticks가 윈도우 경계/끝점 기반으로만 잡혀서, 시간 0이 자동 포함되지 않을 수 있음(또는 `0`을 이벤트 컬럼명으로 오해).
+- Fix pattern: `script/visualizer.py`에서 0 tick을 강제로 포함(`_ensure_time_zero_xtick`), `reference_event=0`은 “shift 없음”으로 처리.
+- Reference implementation in this repo: `script/visualizer.py`, `script/check_zero_tick.py`.
+
 ## Templates
 
 - Summary grid template: `templates/summary_grid_template.py`
