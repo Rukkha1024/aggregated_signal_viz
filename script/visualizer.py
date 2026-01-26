@@ -1353,7 +1353,7 @@ def _plot_overlay_timeseries_grid(
             common_style=common_style,
         )
         event_vlines_all = [v for key in sorted_keys for v in event_vlines_by_key.get(key, [])]
-        legend_group_linewidth = min(float(style.get("line_width", 0.8)), 0.8)
+        legend_group_linewidth = min(float(style.get("line_width", 0.6)), 0.8)
         legend_group_handles = _build_group_legend_handles(
             sorted_keys,
             group_fields,
