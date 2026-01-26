@@ -855,6 +855,41 @@ def _apply_window_definition_xticks(
     return uniq
 
 
+def _ensure_time_zero_xtick(
+    ax: Any,
+    *,
+    tick_positions: Sequence[float],
+    time_start_frame: float,
+    time_end_frame: float,
+    tol: float = 1e-6,
+) -> List[float]:
+    start = float(time_start_frame)
+    end = float(time_end_frame)
+    span = end - start
+    if span == 0 or not np.isfinite(start) or not np.isfinite(end):
+        return list(tick_positions)
+
+    x0 = (0.0 - start) / span
+    if not np.isfinite(x0):
+        return list(tick_positions)
+    if x0 < -tol or x0 > 1.0 + tol:
+        return list(tick_positions)
+
+    existing = list(tick_positions) if tick_positions else list(ax.get_xticks())
+    existing = [float(t) for t in existing if np.isfinite(t)]
+    if any(abs(float(t) - float(x0)) <= tol for t in existing):
+        return existing
+
+    existing.append(float(x0))
+    existing_sorted = sorted(existing)
+    uniq: List[float] = []
+    for t in existing_sorted:
+        if not uniq or abs(t - uniq[-1]) > tol:
+            uniq.append(float(t))
+    ax.set_xticks(uniq)
+    return uniq
+
+
 def _auto_rotate_dense_xticklabels(
     ax: Any,
     *,
@@ -1305,6 +1340,12 @@ def _plot_emg(
         )
         if time_start_frame is not None and time_end_frame is not None:
             ticks = _apply_window_definition_xticks(ax, window_spans)
+            ticks = _ensure_time_zero_xtick(
+                ax,
+                tick_positions=ticks,
+                time_start_frame=time_start_frame,
+                time_end_frame=time_end_frame,
+            )
             _apply_frame_tick_labels(ax, time_start_frame=time_start_frame, time_end_frame=time_end_frame)
             _auto_rotate_dense_xticklabels(
                 ax,
@@ -1428,6 +1469,12 @@ def _plot_overlay_timeseries_grid(
             )
             if time_start_frame is not None and time_end_frame is not None:
                 ticks = _apply_window_definition_xticks(ax, window_spans)
+                ticks = _ensure_time_zero_xtick(
+                    ax,
+                    tick_positions=ticks,
+                    time_start_frame=time_start_frame,
+                    time_end_frame=time_end_frame,
+                )
                 _apply_frame_tick_labels(ax, time_start_frame=time_start_frame, time_end_frame=time_end_frame)
                 _auto_rotate_dense_xticklabels(
                     ax,
@@ -1498,6 +1545,12 @@ def _plot_overlay_timeseries_grid(
             )
             if time_start_frame is not None and time_end_frame is not None:
                 ticks = _apply_window_definition_xticks(ax, window_spans)
+                ticks = _ensure_time_zero_xtick(
+                    ax,
+                    tick_positions=ticks,
+                    time_start_frame=time_start_frame,
+                    time_end_frame=time_end_frame,
+                )
                 _apply_frame_tick_labels(ax, time_start_frame=time_start_frame, time_end_frame=time_end_frame)
                 _auto_rotate_dense_xticklabels(
                     ax,
@@ -1580,6 +1633,12 @@ def _plot_forceplate(
         )
         if time_start_frame is not None and time_end_frame is not None:
             ticks = _apply_window_definition_xticks(ax, window_spans)
+            ticks = _ensure_time_zero_xtick(
+                ax,
+                tick_positions=ticks,
+                time_start_frame=time_start_frame,
+                time_end_frame=time_end_frame,
+            )
             _apply_frame_tick_labels(ax, time_start_frame=time_start_frame, time_end_frame=time_end_frame)
             _auto_rotate_dense_xticklabels(
                 ax,
@@ -1765,6 +1824,12 @@ def _plot_cop(
     if time_start_frame is not None and time_end_frame is not None:
         for ax in (ax_cx, ax_cy):
             ticks = _apply_window_definition_xticks(ax, window_spans)
+            ticks = _ensure_time_zero_xtick(
+                ax,
+                tick_positions=ticks,
+                time_start_frame=time_start_frame,
+                time_end_frame=time_end_frame,
+            )
             _apply_frame_tick_labels(ax, time_start_frame=time_start_frame, time_end_frame=time_end_frame)
             _auto_rotate_dense_xticklabels(
                 ax,
@@ -2023,6 +2088,12 @@ def _plot_com(
     if time_start_frame is not None and time_end_frame is not None:
         for ax in axes_to_style:
             ticks = _apply_window_definition_xticks(ax, window_spans)
+            ticks = _ensure_time_zero_xtick(
+                ax,
+                tick_positions=ticks,
+                time_start_frame=time_start_frame,
+                time_end_frame=time_end_frame,
+            )
             _apply_frame_tick_labels(ax, time_start_frame=time_start_frame, time_end_frame=time_end_frame)
             _auto_rotate_dense_xticklabels(
                 ax,
@@ -2166,6 +2237,12 @@ def _plot_cop_overlay(
         )
         if time_start_frame is not None and time_end_frame is not None:
             ticks = _apply_window_definition_xticks(ax, window_spans)
+            ticks = _ensure_time_zero_xtick(
+                ax,
+                tick_positions=ticks,
+                time_start_frame=time_start_frame,
+                time_end_frame=time_end_frame,
+            )
             _apply_frame_tick_labels(ax, time_start_frame=time_start_frame, time_end_frame=time_end_frame)
             _auto_rotate_dense_xticklabels(
                 ax,
@@ -2388,6 +2465,12 @@ def _plot_com_overlay(
         )
         if time_start_frame is not None and time_end_frame is not None:
             ticks = _apply_window_definition_xticks(ax, window_spans)
+            ticks = _ensure_time_zero_xtick(
+                ax,
+                tick_positions=ticks,
+                time_start_frame=time_start_frame,
+                time_end_frame=time_end_frame,
+            )
             _apply_frame_tick_labels(ax, time_start_frame=time_start_frame, time_end_frame=time_end_frame)
             _auto_rotate_dense_xticklabels(
                 ax,
@@ -2514,10 +2597,14 @@ class AggregatedSignalVisualizer:
         if isinstance(windows_cfg, dict):
             ref_event = windows_cfg.get("reference_event")
             if ref_event is not None:
-                ref_name = str(ref_event).strip()
-                if ref_name:
-                    self.window_reference_event = ref_name
-                    window_event_cols.append(ref_name)
+                ref_num = _coerce_float(ref_event)
+                if ref_num is not None and abs(float(ref_num)) <= 1e-9:
+                    self.window_reference_event = None
+                else:
+                    ref_name = str(ref_event).strip()
+                    if ref_name:
+                        self.window_reference_event = ref_name
+                        window_event_cols.append(ref_name)
             definitions = windows_cfg.get("definitions", {})
             if isinstance(definitions, dict):
                 for key, cfg in definitions.items():
