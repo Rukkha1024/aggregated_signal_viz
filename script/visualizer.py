@@ -469,7 +469,13 @@ def _apply_window_group_legends(
     framealpha: float,
     loc: str = "best",
 ) -> None:
-    def _clone_handle(handle: Any) -> Any:
+    # NOTE: Legend styling is intentionally kept in code (not config.yaml) per project rules.
+    # We normalize Line2D legend widths to avoid mixed linewidths when combining:
+    # - plotted series handles (often thicker)
+    # - custom event vline handles (often thinner)
+    legend_linewidth = 1.0
+
+    def _clone_handle(handle: Any, *, label_override: Optional[str] = None) -> Any:
         try:
             import matplotlib.lines as mlines
             import matplotlib.patches as mpatches
@@ -477,7 +483,7 @@ def _apply_window_group_legends(
             return handle
 
         try:
-            label = str(getattr(handle, "get_label", lambda: "")()).strip()
+            label = str(label_override if label_override is not None else getattr(handle, "get_label", lambda: "")()).strip()
         except Exception:
             label = ""
 
@@ -488,7 +494,7 @@ def _apply_window_group_legends(
                     [],
                     color=handle.get_color(),
                     linestyle=handle.get_linestyle(),
-                    linewidth=handle.get_linewidth(),
+                    linewidth=legend_linewidth,
                     alpha=handle.get_alpha(),
                     label=label,
                 )
@@ -516,15 +522,14 @@ def _apply_window_group_legends(
         if not label or label == "_nolegend_" or label in seen_labels:
             continue
         seen_labels.add(label)
-        handles.append(handle)
+        handles.append(_clone_handle(handle, label_override=label))
 
     for handle in group_handles:
-        handle = _clone_handle(handle)
         label = str(getattr(handle, "get_label", lambda: "")()).strip()
         if not label or label == "_nolegend_" or label in seen_labels:
             continue
         seen_labels.add(label)
-        handles.append(handle)
+        handles.append(_clone_handle(handle, label_override=label))
 
     if event_vlines:
         for handle in _build_event_vline_legend_handles(event_vlines, style=event_vline_style or {}):
@@ -532,7 +537,7 @@ def _apply_window_group_legends(
             if not label or label == "_nolegend_" or label in seen_labels:
                 continue
             seen_labels.add(label)
-            handles.append(handle)
+            handles.append(_clone_handle(handle, label_override=label))
 
     existing_handles, existing_labels = ax.get_legend_handles_labels()
     for handle, label in zip(existing_handles, existing_labels):
@@ -540,7 +545,7 @@ def _apply_window_group_legends(
         if not label or label == "_nolegend_" or label in seen_labels:
             continue
         seen_labels.add(label)
-        handles.append(handle)
+        handles.append(_clone_handle(handle, label_override=label))
 
     if handles:
         ax.legend(
