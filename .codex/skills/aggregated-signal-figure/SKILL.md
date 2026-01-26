@@ -1,6 +1,10 @@
 ---
 name: aggregated-signal-figure
-description: Create/refactor figure scripts in aggregated_signal_viz using Polars and config-driven layouts/outputs. Triggers: figure grids/summary plots, legend readability, and windows.definitions legend labels (COP/COM parity; duration vs min-max).
+description: >-
+  Create/refactor figure scripts in aggregated_signal_viz using Polars and
+  config-driven layouts/outputs. Triggers: figure grids/summary plots, legend
+  readability, and windows.definitions legend labels (COP/COM parity; duration
+  vs min-max).
 ---
 
 # Aggregated Signal Figure Skill
