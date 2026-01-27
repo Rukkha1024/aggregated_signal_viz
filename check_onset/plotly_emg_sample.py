@@ -1,12 +1,35 @@
 from __future__ import annotations
 
-import argparse
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from string import Formatter
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import polars as pl
+
+# ============================================================
+# RULES (edit here; no CLI options)
+# ============================================================
+
+RULES: Dict[str, Any] = {
+    # repo-root config
+    "config_path": None,  # None -> <repo_root>/config.yaml
+    # which aggregation_modes to run (None -> all enabled modes)
+    "selected_modes": ["diff_step_TF_subject"],
+    # mode overrides (same schema as config.yaml: aggregation_modes.<mode>)
+    "mode_overrides": {},
+    # output stays inside check_onset/
+    "output_base_dir": Path(__file__).resolve().parent / "output",
+    # export options
+    "export_html": True,
+    "export_png": True,
+    "figure_width": 1800,
+    "figure_height": 900,
+    # safety limits
+    "max_files_per_mode": 10,  # None -> all
+    "max_trials_per_file": None,  # e.g. 5 (when groupby groups multiple trials)
+}
 
 
 def _repo_root() -> Path:
@@ -93,12 +116,99 @@ def _mpl_linestyle_to_plotly_dash(style: Any) -> str:
     return "solid"
 
 
+def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+    out = dict(base)
+    for k, v in override.items():
+        if isinstance(v, dict) and isinstance(out.get(k), dict):
+            out[k] = _deep_merge(out[k], v)
+        else:
+            out[k] = v
+    return out
+
+
+def _normalize_field(name: str, *, id_cfg: Dict[str, Any]) -> str:
+    text = str(name).strip()
+    if not text:
+        return text
+    if text == "subject":
+        return str(id_cfg.get("subject") or "subject")
+    if text == "velocity":
+        return str(id_cfg.get("velocity") or "velocity")
+    if text in ("trial", "trial_num"):
+        return str(id_cfg.get("trial") or "trial_num")
+    return text
+
+
+def _is_reference_event_zero(value: Any) -> bool:
+    if value is None:
+        return False
+    try:
+        f = float(value)
+    except Exception:
+        return False
+    return abs(f) <= 1e-9
+
+
+def _safe_filename(text: str) -> str:
+    out = str(text)
+    for ch in ("/", "\\", ":", "\n", "\r", "\t"):
+        out = out.replace(ch, "_")
+    return out.strip() or "untitled"
+
+
+def _format_pattern(pattern: str, values: Dict[str, Any]) -> str:
+    fmt = Formatter()
+    needed = [field for _, field, _, _ in fmt.parse(pattern) if field]
+    mapping = dict(values)
+    for field in needed:
+        if field not in mapping:
+            mapping[field] = "all"
+    try:
+        return pattern.format(**mapping)
+    except Exception:
+        return pattern
+
+
+def _build_event_color_map(event_cfg: Any, event_cols: Sequence[str]) -> Dict[str, str]:
+    cfg = event_cfg if isinstance(event_cfg, dict) else {}
+    overrides = cfg.get("colors") if isinstance(cfg.get("colors"), dict) else {}
+    palette = cfg.get("palette") if isinstance(cfg.get("palette"), list) else None
+    if not palette:
+        palette = [f"C{i}" for i in range(10)]
+
+    out: Dict[str, str] = {}
+    for idx, col in enumerate(event_cols):
+        if col in overrides and str(overrides[col]).strip():
+            out[col] = _mpl_color_to_hex(overrides[col])
+        else:
+            out[col] = _mpl_color_to_hex(palette[idx % len(palette)])
+    return out
+
+
+def _window_colors_from_config(cfg: Dict[str, Any]) -> Dict[str, str]:
+    # Prefer existing centralized window_colors (used by matplotlib visualizer) for consistent semantics.
+    common = ((cfg.get("plot_style") or {}).get("common") or {})
+    raw = common.get("window_colors")
+    if isinstance(raw, dict):
+        out: Dict[str, str] = {}
+        for k, v in raw.items():
+            if k is None or v is None:
+                continue
+            kk = str(k).strip()
+            vv = str(v).strip()
+            if kk and vv:
+                out[kk] = vv
+        if out:
+            return out
+    return {"p1": "#4E79A7", "p2": "#F28E2B", "p3": "#E15759", "p4": "#59A14F"}
+
+
 def _parse_window_boundary_spec(value: Any) -> Optional[Tuple[str, Any]]:
     """
     Returns one of:
       - ("offset", float_ms)
-      - ("event", event_col)
-      - ("event_offset", (event_col, float_ms))
+      - ("event", event_name)
+      - ("event_offset", (event_name, float_ms))
     """
     if value is None:
         return None
@@ -136,6 +246,14 @@ def _parse_window_boundary_spec(value: Any) -> Optional[Tuple[str, Any]]:
     return ("event", text)
 
 
+def _nanmean(values: Sequence[Optional[float]]) -> Optional[float]:
+    arr = np.asarray([np.nan if v is None else float(v) for v in values], dtype=float)
+    arr = arr[np.isfinite(arr)]
+    if arr.size == 0:
+        return None
+    return float(arr.mean())
+
+
 @dataclass(frozen=True)
 class WindowSpan:
     name: str
@@ -150,167 +268,128 @@ class WindowSpan:
         return f"{self.name} ({dur} ms)"
 
 
-def _nanmean(values: Sequence[Optional[float]]) -> Optional[float]:
-    arr = np.asarray([np.nan if v is None else float(v) for v in values], dtype=float)
-    arr = arr[np.isfinite(arr)]
-    if arr.size == 0:
-        return None
-    return float(arr.mean())
-
-
-def _interp_trial(x_list: Sequence[float], ys_lists: Sequence[Sequence[float]], x_target: np.ndarray) -> np.ndarray:
-    x_all = np.asarray(x_list, dtype=float)
-    n_channels = len(ys_lists)
-    out = np.full((n_channels, x_target.size), np.nan, dtype=float)
-
-    for i, y_list in enumerate(ys_lists):
-        y_all = np.asarray(y_list, dtype=float)
-        valid = ~(np.isnan(x_all) | np.isnan(y_all))
-        if valid.sum() < 2:
-            continue
-
-        x = x_all[valid]
-        y = y_all[valid]
-
-        order = np.argsort(x)
-        x = x[order]
-        y = y[order]
-
-        uniq_x, inv = np.unique(x, return_inverse=True)
-        if uniq_x.size != x.size:
-            sums = np.bincount(inv, weights=y)
-            counts = np.bincount(inv)
-            y = sums / counts
-            x = uniq_x
-
-        out[i] = np.interp(x_target, x, y, left=np.nan, right=np.nan).astype(float, copy=False)
-
-    return out
-
-
-def _subject_mean_then_group_mean(
-    tensor: np.ndarray,
-    subjects: Sequence[Any],
-    indices: np.ndarray,
-) -> np.ndarray:
-    subj_vals = np.asarray(subjects, dtype=object)[indices]
-    unique_subjects = list(dict.fromkeys(subj_vals.tolist()))
-    if len(unique_subjects) <= 1:
-        return np.nanmean(tensor[indices], axis=0)
-
-    subj_means: List[np.ndarray] = []
-    for subj in unique_subjects:
-        subj_idx = indices[subj_vals == subj]
-        subj_means.append(np.nanmean(tensor[subj_idx], axis=0))
-    return np.nanmean(np.stack(subj_means, axis=0), axis=0)
-
-
-def _sorted_overlay_keys(step_values: Sequence[Any]) -> List[str]:
-    vals = ["" if v is None else str(v) for v in step_values]
-    uniq = sorted(set(vals))
-    order = {"nonstep": 0, "step": 1}
-    return sorted(uniq, key=lambda v: (order.get(v, 99), v))
-
-
-def _build_event_color_map(event_cfg: Any, event_cols: Sequence[str]) -> Dict[str, str]:
-    cfg = event_cfg if isinstance(event_cfg, dict) else {}
-    overrides = cfg.get("colors") if isinstance(cfg.get("colors"), dict) else {}
-    palette = cfg.get("palette") if isinstance(cfg.get("palette"), list) else None
-    if not palette:
-        palette = [f"C{i}" for i in range(10)]
-
-    out: Dict[str, str] = {}
-    for idx, col in enumerate(event_cols):
-        if col in overrides and str(overrides[col]).strip():
-            out[col] = _mpl_color_to_hex(overrides[col])
-        else:
-            out[col] = _mpl_color_to_hex(palette[idx % len(palette)])
-    return out
-
-
-def _window_colors_default() -> Dict[str, str]:
-    return {"p1": "#4E79A7", "p2": "#F28E2B", "p3": "#E15759", "p4": "#59A14F"}
-
-
-def _resolve_window_bound_ms(
-    spec: Tuple[str, Any],
+def _event_ms_from_trial(
     *,
-    event_means: Dict[str, float],
-    device_rate: float,
+    event_name: str,
+    platform_onset_mocap: float,
+    mocap_rate: float,
+    trial_row: Dict[str, Any],
+    tkeo_ms: Optional[float],
 ) -> Optional[float]:
-    kind, value = spec
-    if kind == "offset":
-        try:
-            # ms offset from reference_event (converted later)
-            return float(value)
-        except Exception:
+    name = str(event_name).strip()
+    if not name:
+        return None
+    if name in ("platform_onset",):
+        return 0.0
+    if name == "step_onset":
+        raw = trial_row.get("step_onset")
+        if raw is None:
             return None
-    if kind == "event":
-        name = str(value).strip()
-        return event_means.get(name)
-    if kind == "event_offset":
-        try:
-            name = str(value[0]).strip()
-            delta = float(value[1])
-        except Exception:
-            return None
-        base = event_means.get(name)
-        return None if base is None else float(base) + float(delta) * float(device_rate) / 1000.0
-    return None
+        return (float(raw) - float(platform_onset_mocap)) * 1000.0 / float(mocap_rate)
+    if name == "TKEO_AGLR_emg_onset_timing":
+        return None if tkeo_ms is None else float(tkeo_ms)
+
+    raw = trial_row.get(name)
+    if raw is None:
+        return None
+    try:
+        # event columns in merged.parquet are in the same mocap-frame domain as platform_onset.
+        return (float(raw) - float(platform_onset_mocap)) * 1000.0 / float(mocap_rate)
+    except Exception:
+        return None
 
 
-def _compute_window_spans_for_channel(
+def _compute_window_spans(
     *,
     windows_cfg: Dict[str, Any],
-    channel_event_frames: Dict[str, float],
     reference_event: Optional[str],
-    time_start_x: float,
-    time_end_x: float,
-    device_rate: float,
     window_colors: Dict[str, str],
+    device_rate: float,
+    mocap_rate: float,
+    platform_onset_mocap: float,
+    onset_device_abs: float,
+    trial_row: Dict[str, Any],
+    tkeo_ms: Optional[float],
+    crop_start_x: float,
+    crop_end_x: float,
 ) -> List[WindowSpan]:
     definitions = windows_cfg.get("definitions", {})
     if not isinstance(definitions, dict):
         return []
 
+    if _is_reference_event_zero(reference_event):
+        ref_name = "platform_onset"
+    else:
+        ref_name = str(reference_event or "").strip() or "platform_onset"
+    ref_ms = _event_ms_from_trial(
+        event_name=ref_name,
+        platform_onset_mocap=platform_onset_mocap,
+        mocap_rate=mocap_rate,
+        trial_row=trial_row,
+        tkeo_ms=tkeo_ms,
+    )
+    if ref_ms is None:
+        ref_ms = 0.0
+
     spans: List[WindowSpan] = []
-    ref_name = str(reference_event or "").strip()
-    ref_x = channel_event_frames.get(ref_name) if ref_name else None
-    if ref_x is None:
-        ref_x = channel_event_frames.get("platform_onset", 0.0)
-    for name, cfg in definitions.items():
+    for key, cfg in definitions.items():
         if not isinstance(cfg, dict):
             continue
-        wname = str(name).strip()
-        if not wname:
+        name = str(key).strip()
+        if not name:
             continue
+
         start_spec = _parse_window_boundary_spec(cfg.get("start_ms"))
         end_spec = _parse_window_boundary_spec(cfg.get("end_ms"))
         if start_spec is None or end_spec is None:
             continue
-        start = _resolve_window_bound_ms(start_spec, event_means=channel_event_frames, device_rate=device_rate)
-        end = _resolve_window_bound_ms(end_spec, event_means=channel_event_frames, device_rate=device_rate)
-        if start is None or end is None:
-            continue
-        # Interpret numeric offsets as ms offsets from the configured reference event.
-        if start_spec[0] == "offset":
-            start = float(ref_x) + float(start) * float(device_rate) / 1000.0
-        if end_spec[0] == "offset":
-            end = float(ref_x) + float(end) * float(device_rate) / 1000.0
 
-        start = max(float(start), float(time_start_x))
-        end = min(float(end), float(time_end_x))
-        if start >= end:
+        def _resolve(spec: Tuple[str, Any]) -> Optional[float]:
+            kind, value = spec
+            if kind == "offset":
+                return float(ref_ms) + float(value)
+            if kind == "event":
+                return _event_ms_from_trial(
+                    event_name=str(value),
+                    platform_onset_mocap=platform_onset_mocap,
+                    mocap_rate=mocap_rate,
+                    trial_row=trial_row,
+                    tkeo_ms=tkeo_ms,
+                )
+            if kind == "event_offset":
+                ev = _event_ms_from_trial(
+                    event_name=str(value[0]),
+                    platform_onset_mocap=platform_onset_mocap,
+                    mocap_rate=mocap_rate,
+                    trial_row=trial_row,
+                    tkeo_ms=tkeo_ms,
+                )
+                return None if ev is None else float(ev) + float(value[1])
+            return None
+
+        start_ms = _resolve(start_spec)
+        end_ms = _resolve(end_spec)
+        if start_ms is None or end_ms is None:
             continue
+
+        start_x = float(onset_device_abs) + float(start_ms) * float(device_rate) / 1000.0
+        end_x = float(onset_device_abs) + float(end_ms) * float(device_rate) / 1000.0
+
+        start_x = max(start_x, float(crop_start_x))
+        end_x = min(end_x, float(crop_end_x))
+        if start_x >= end_x:
+            continue
+
         spans.append(
             WindowSpan(
-                name=wname,
-                start_x=float(start),
-                end_x=float(end),
-                color=str(window_colors.get(wname, "#cccccc")),
-                duration_ms=(float(end) - float(start)) * (1000.0 / float(device_rate)),
+                name=name,
+                start_x=start_x,
+                end_x=end_x,
+                color=str(window_colors.get(name, "#cccccc")),
+                duration_ms=(end_x - start_x) * (1000.0 / float(device_rate)),
             )
         )
+
     return spans
 
 
@@ -318,305 +397,374 @@ def _legend_html(
     *,
     window_spans: Sequence[WindowSpan],
     event_items: Sequence[Tuple[str, str]],
-    group_items: Sequence[Tuple[str, str]],
 ) -> str:
     lines: List[str] = []
     for span in window_spans:
         lines.append(f"<span style='color:{span.color}'>█</span> {span.label}")
     for label, color in event_items:
         lines.append(f"<span style='color:{color}'>│</span> {label}")
-    for label, style_text in group_items:
-        lines.append(f"<span style='color:gray'>{style_text}</span> {label}")
     return "<br>".join(lines)
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Plotly EMG overlay sample (check_onset)")
-    parser.add_argument("--config", type=str, default=str(_repo_root() / "config.yaml"))
-    parser.add_argument("--mode", type=str, default="step_TF_mean")
-    parser.add_argument("--html", type=str, default=str(Path(__file__).with_name("output") / "emg_plotly_sample.html"))
-    parser.add_argument("--png", type=str, default=str(Path(__file__).with_name("output") / "emg_plotly_sample.png"))
-    parser.add_argument("--width", type=int, default=1800)
-    parser.add_argument("--height", type=int, default=900)
-    return parser.parse_args()
+def _load_tkeo_by_trial_channel(
+    *,
+    features_path: Path,
+    key_cols: Sequence[str],
+    channels: Sequence[str],
+    trials_df: pl.DataFrame,
+    tkeo_col: str = "TKEO_AGLR_emg_onset_timing",
+) -> Dict[Tuple[Any, ...], Dict[str, float]]:
+    if trials_df.is_empty():
+        return {}
+    df = pl.read_csv(features_path)
+    if "emg_channel" not in df.columns:
+        return {}
+    if tkeo_col not in df.columns:
+        return {}
 
+    df = df.join(trials_df.select(list(key_cols)).unique(), on=list(key_cols), how="inner")
+    if df.is_empty():
+        return {}
 
-def main() -> None:
-    load_config, resolve_path, get_frame_ratio = _import_repo_utils()
-
-    args = parse_args()
-    config_path = Path(args.config)
-    cfg = load_config(config_path)
-    base_dir = config_path.parent
-
-    data_cfg = cfg.get("data", {})
-    id_cfg = data_cfg.get("id_columns", {})
-
-    input_path = resolve_path(base_dir, data_cfg.get("input_file", "data/merged.parquet"))
-    if not input_path.exists():
-        raise FileNotFoundError(f"input_file not found: {input_path}")
-
-    mode_cfg = (cfg.get("aggregation_modes") or {}).get(args.mode)
-    if not isinstance(mode_cfg, dict):
-        raise KeyError(f"aggregation_modes.{args.mode} not found in config.yaml")
-
-    filter_cfg = mode_cfg.get("filter") if isinstance(mode_cfg.get("filter"), dict) else {}
-    group_fields = list(mode_cfg.get("groupby") or [])
-    if group_fields != ["step_TF"]:
-        raise ValueError(f"This sample expects groupby ['step_TF'], got: {group_fields}")
-
-    emg_cfg = (cfg.get("signal_groups") or {}).get("emg") or {}
-    channels = list(emg_cfg.get("columns") or [])
-    if not channels:
-        raise ValueError("signal_groups.emg.columns is empty")
-    grid_layout = emg_cfg.get("grid_layout") or [4, 4]
-    rows, cols = int(grid_layout[0]), int(grid_layout[1])
-
-    interp_cfg = cfg.get("interpolation", {})
-    time_start_ms = float(interp_cfg.get("start_ms", -100))
-    time_end_ms = float(interp_cfg.get("end_ms", 800))
-    if time_end_ms <= time_start_ms:
-        raise ValueError("interpolation.end_ms must be greater than interpolation.start_ms")
-
-    device_rate = float(data_cfg.get("device_sample_rate", 1000))
-    frame_ratio = int(get_frame_ratio(data_cfg))
-
-    subject_col = str(id_cfg.get("subject", "subject"))
-    velocity_col = str(id_cfg.get("velocity", "velocity"))
-    trial_col = str(id_cfg.get("trial", "trial_num"))
-    frame_col = str(id_cfg.get("frame", "DeviceFrame"))
-    mocap_col = str(id_cfg.get("mocap_frame", "MocapFrame"))
-    onset_col = str(id_cfg.get("onset", "platform_onset"))
-    task_col = str(id_cfg.get("task", "task"))
-
-    key_cols = [subject_col, velocity_col, trial_col]
-
-    lf = pl.scan_parquet(str(input_path))
-    available = set(lf.collect_schema().keys())
-
-    task_filter = data_cfg.get("task_filter")
-    if task_filter and task_col in available:
-        lf = lf.filter(pl.col(task_col) == task_filter)
-
-    for k, v in (filter_cfg or {}).items():
-        if k in available:
-            lf = lf.filter(pl.col(k) == v)
-
-    # We render a single subject-velocity-trial in absolute (original) device frames.
-    required_cols = set([*key_cols, frame_col, mocap_col, onset_col, "step_onset", "onset_device"])
-    if "original_DeviceFrame" in available:
-        required_cols.add("original_DeviceFrame")
-    required_cols.update(channels)
-    missing = [c for c in required_cols if c not in available]
-    if missing:
-        raise ValueError(f"Missing required columns in merged.parquet: {missing}")
-
-    x_col_abs = "original_DeviceFrame" if "original_DeviceFrame" in available else frame_col
-
-    # Select one trial (first row after filters), then render only that trial.
-    first = lf.select(key_cols).limit(1).collect()
-    if first.is_empty():
-        raise ValueError("No data available after applying filters.")
-    first_subject, first_velocity, first_trial = first.row(0)
-
-    lf_trial = lf.filter(
-        (pl.col(subject_col) == first_subject) & (pl.col(velocity_col) == first_velocity) & (pl.col(trial_col) == first_trial)
-    )
-
-    meta_row = lf_trial.select([subject_col, velocity_col, trial_col, onset_col, "step_onset", "onset_device"]).limit(1).collect()
-    if meta_row.is_empty():
-        raise ValueError("No data available for the selected trial.")
-    _, _, _, platform_onset_mocap, step_onset_mocap, onset_device_abs = meta_row.row(0)
-    if platform_onset_mocap is None or step_onset_mocap is None or onset_device_abs is None:
-        raise ValueError("Missing platform_onset/step_onset/onset_device for the selected trial.")
-
-    platform_onset_abs = float(onset_device_abs)
-    step_onset_abs = float(onset_device_abs) + (float(step_onset_mocap) - float(platform_onset_mocap)) * float(frame_ratio)
-
-    crop_start_x = platform_onset_abs + float(time_start_ms) * float(device_rate) / 1000.0
-    crop_end_x = platform_onset_abs + float(time_end_ms) * float(device_rate) / 1000.0
-    if crop_end_x <= crop_start_x:
-        raise ValueError("Invalid crop window after converting ms to frames.")
-
-    df_plot = (
-        lf_trial.select([x_col_abs, *channels])
-        .filter((pl.col(x_col_abs) >= crop_start_x) & (pl.col(x_col_abs) <= crop_end_x))
-        .collect()
-        .sort(x_col_abs)
-    )
-    if df_plot.is_empty():
-        raise ValueError("No rows remain after applying the crop window in absolute frames.")
-
-    x_abs = df_plot[x_col_abs].to_numpy()
-
-    # --- Features: channel-specific TKEO means (overall + per overlay group) ---
-    features_path_raw = data_cfg.get("features_file")
-    features_path = resolve_path(base_dir, features_path_raw) if features_path_raw else None
-    if features_path is None or not features_path.exists():
-        raise FileNotFoundError(f"features_file not found: {features_path_raw}")
-
-    feat = pl.read_csv(features_path)
-    if "emg_channel" not in feat.columns:
-        raise ValueError("features_file must contain 'emg_channel'")
-    if "TKEO_AGLR_emg_onset_timing" not in feat.columns:
-        raise ValueError("features_file must contain 'TKEO_AGLR_emg_onset_timing'")
-
-    trial_keys = pl.DataFrame({subject_col: [first_subject], velocity_col: [first_velocity], trial_col: [first_trial]})
-    feat = feat.join(trial_keys, on=key_cols, how="inner")
-    feat = feat.with_columns(
+    df = df.with_columns(
         [
             pl.col("emg_channel").cast(pl.Utf8, strict=False).alias("emg_channel"),
-            pl.col("TKEO_AGLR_emg_onset_timing").cast(pl.Float64, strict=False).fill_nan(None).alias("__tkeo"),
+            pl.col(tkeo_col).cast(pl.Float64, strict=False).fill_nan(None).alias("__tkeo"),
         ]
     )
 
-    tkeo_mean_by_channel: Dict[str, float] = {}
-    tkeo_grouped = feat.group_by("emg_channel", maintain_order=False).agg(pl.col("__tkeo").mean().alias("__tkeo"))
-    for row in tkeo_grouped.iter_rows(named=True):
+    grouped = df.group_by([*key_cols, "emg_channel"], maintain_order=False).agg(pl.col("__tkeo").mean().alias("__tkeo"))
+
+    out: Dict[Tuple[Any, ...], Dict[str, float]] = {}
+    valid_channels = {str(c) for c in channels}
+    for row in grouped.iter_rows(named=True):
         ch = row.get("emg_channel")
         val = row.get("__tkeo")
         if ch is None or val is None:
             continue
-        f = float(val)
-        if np.isfinite(f):
-            tkeo_mean_by_channel[str(ch)] = f
+        ch_name = str(ch)
+        if ch_name not in valid_channels:
+            continue
+        try:
+            fval = float(val)
+        except Exception:
+            continue
+        if not np.isfinite(fval):
+            continue
+        key = tuple(row.get(c) for c in key_cols)
+        out.setdefault(key, {})[ch_name] = fval
+    return out
 
-    # --- Plotly figure ---
+
+def _collect_required_event_columns(
+    *,
+    windows_cfg: Dict[str, Any],
+    event_cfg: Dict[str, Any],
+) -> List[str]:
+    needed: List[str] = []
+
+    raw_event_cols = (event_cfg or {}).get("columns")
+    if isinstance(raw_event_cols, list):
+        for c in raw_event_cols:
+            if c is None:
+                continue
+            name = str(c).strip()
+            if name and name not in needed and name != "TKEO_AGLR_emg_onset_timing":
+                needed.append(name)
+
+    ref = (windows_cfg or {}).get("reference_event")
+    if ref is not None and not _is_reference_event_zero(ref):
+        name = str(ref).strip()
+        if name and name not in needed and name != "TKEO_AGLR_emg_onset_timing":
+            needed.append(name)
+
+    defs = (windows_cfg or {}).get("definitions")
+    if isinstance(defs, dict):
+        for cfg in defs.values():
+            if not isinstance(cfg, dict):
+                continue
+            for key in ("start_ms", "end_ms"):
+                spec = _parse_window_boundary_spec(cfg.get(key))
+                if spec is None:
+                    continue
+                kind, value = spec
+                if kind == "event":
+                    name = str(value).strip()
+                elif kind == "event_offset":
+                    try:
+                        name = str(value[0]).strip()
+                    except Exception:
+                        continue
+                else:
+                    continue
+                if name and name not in needed and name != "TKEO_AGLR_emg_onset_timing":
+                    needed.append(name)
+
+    return needed
+
+
+def _collect_trials_series(
+    *,
+    lf: pl.LazyFrame,
+    key_cols: Sequence[str],
+    x_abs_col: str,
+    channels: Sequence[str],
+    meta_cols: Sequence[str],
+    device_rate: float,
+    time_start_ms: float,
+    time_end_ms: float,
+) -> pl.DataFrame:
+    start_rel = float(time_start_ms) * float(device_rate) / 1000.0
+    end_rel = float(time_end_ms) * float(device_rate) / 1000.0
+
+    lf = lf.with_columns((pl.col(x_abs_col) - pl.col("onset_device")).alias("__rel_from_onset"))
+    lf = lf.filter((pl.col("__rel_from_onset") >= start_rel) & (pl.col("__rel_from_onset") <= end_rel))
+
+    select_cols: List[str] = []
+    for c in [*key_cols, x_abs_col, "onset_device", "platform_onset", "step_onset", *meta_cols, *channels]:
+        if c not in select_cols:
+            select_cols.append(c)
+
+    lf = lf.select([pl.col(c) for c in select_cols])
+
+    agg_exprs: List[pl.Expr] = [
+        pl.col(x_abs_col).sort().alias("__x_abs"),
+        pl.col("onset_device").first().alias("onset_device"),
+        pl.col("platform_onset").first().alias("platform_onset"),
+        pl.col("step_onset").max().alias("step_onset"),
+    ]
+    for c in meta_cols:
+        agg_exprs.append(pl.col(c).first().alias(c))
+    for ch in channels:
+        agg_exprs.append(pl.col(ch).sort_by(x_abs_col).alias(ch))
+
+    df = lf.group_by(list(key_cols), maintain_order=False).agg(agg_exprs).collect()
+    return df
+
+
+def _mode_cfgs(cfg: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    raw_modes = cfg.get("aggregation_modes") or {}
+    if not isinstance(raw_modes, dict):
+        return {}
+
+    overrides = RULES.get("mode_overrides") or {}
+    if not isinstance(overrides, dict):
+        overrides = {}
+
+    selected = RULES.get("selected_modes")
+    if selected is None:
+        names = [n for n, mc in raw_modes.items() if isinstance(mc, dict) and bool(mc.get("enabled", True))]
+    else:
+        names = [str(n) for n in selected]
+
+    out: Dict[str, Dict[str, Any]] = {}
+    for name in names:
+        base = raw_modes.get(name)
+        if not isinstance(base, dict):
+            continue
+        if selected is None and not bool(base.get("enabled", True)):
+            continue
+        merged = _deep_merge(base, overrides.get(name, {}) if isinstance(overrides.get(name), dict) else {})
+        out[str(name)] = merged
+    return out
+
+
+def _emit_emg_figure(
+    *,
+    out_html: Optional[Path],
+    out_png: Optional[Path],
+    title: str,
+    channels: Sequence[str],
+    grid_layout: Sequence[int],
+    trials: Sequence[Dict[str, Any]],
+    key_cols: Sequence[str],
+    tkeo_by_trial_channel: Dict[Tuple[Any, ...], Dict[str, float]],
+    device_rate: float,
+    mocap_rate: float,
+    frame_ratio: int,
+    time_start_ms: float,
+    time_end_ms: float,
+    event_cfg: Dict[str, Any],
+    windows_cfg: Dict[str, Any],
+    window_colors: Dict[str, str],
+) -> None:
     import plotly.graph_objects as go
     from plotly.subplots import make_subplots
 
-    window_colors = _window_colors_default()
-    window_alpha = 0.15
-    event_cfg = cfg.get("event_vlines", {})
-    event_cols = list((event_cfg or {}).get("columns") or ["platform_onset", "step_onset", "TKEO_AGLR_emg_onset_timing"])
+    rows, cols = int(grid_layout[0]), int(grid_layout[1])
+    fig = make_subplots(rows=rows, cols=cols, subplot_titles=list(channels), horizontal_spacing=0.03, vertical_spacing=0.07)
+
+    event_cols = list((event_cfg or {}).get("columns") or [])
+    if not event_cols:
+        event_cols = ["platform_onset", "step_onset", "TKEO_AGLR_emg_onset_timing"]
     event_color_map = _build_event_color_map(event_cfg, event_cols)
     event_labels = (event_cfg or {}).get("event_labels") if isinstance(event_cfg, dict) else {}
-    tkeo_label = str((event_labels or {}).get("TKEO_AGLR_emg_onset_timing", "TKEO")).strip() or "TKEO"
 
-    windows_cfg = cfg.get("windows", {}) if isinstance(cfg.get("windows"), dict) else {}
-    reference_event = windows_cfg.get("reference_event")
+    style = (event_cfg or {}).get("style") if isinstance(event_cfg, dict) else {}
+    vline_dash = _mpl_linestyle_to_plotly_dash((style or {}).get("linestyle", "--"))
+    vline_width = float((style or {}).get("linewidth", 1.5)) if (style or {}).get("linewidth") is not None else 1.5
+    vline_alpha = float((style or {}).get("alpha", 0.9)) if (style or {}).get("alpha") is not None else 0.9
 
-    fig = make_subplots(rows=rows, cols=cols, subplot_titles=channels, horizontal_spacing=0.03, vertical_spacing=0.07)
+    ref_event = str((windows_cfg or {}).get("reference_event") or "platform_onset").strip() or "platform_onset"
 
-    for ch_idx, ch in enumerate(channels):
-        r = ch_idx // cols + 1
-        c = ch_idx % cols + 1
-        axis_idx = ch_idx + 1
+    # Keep legend content stable: derive window/event labels from the first trial.
+    legend_trial = trials[0] if trials else None
+    legend_spans_by_channel: Dict[str, List[WindowSpan]] = {}
+    legend_event_items: List[Tuple[str, str]] = []
+
+    if legend_trial is not None:
+        onset_device_raw = legend_trial.get("onset_device")
+        platform_onset_raw = legend_trial.get("platform_onset")
+        step_onset_raw = legend_trial.get("step_onset")
+
+        if onset_device_raw is not None and platform_onset_raw is not None:
+            onset_device_abs = float(onset_device_raw)
+            platform_onset_mocap = float(platform_onset_raw)
+            step_onset_mocap = None if step_onset_raw is None else float(step_onset_raw)
+
+            crop_start_x = onset_device_abs + float(time_start_ms) * float(device_rate) / 1000.0
+            crop_end_x = onset_device_abs + float(time_end_ms) * float(device_rate) / 1000.0
+
+            for ch in channels:
+                tkeo_ms = tkeo_by_trial_channel.get(tuple(legend_trial.get(c) for c in key_cols), {}).get(str(ch))
+                spans = _compute_window_spans(
+                    windows_cfg=windows_cfg,
+                    reference_event=ref_event,
+                    window_colors=window_colors,
+                    device_rate=device_rate,
+                    mocap_rate=mocap_rate,
+                    platform_onset_mocap=platform_onset_mocap,
+                    onset_device_abs=onset_device_abs,
+                    trial_row=legend_trial,
+                    tkeo_ms=tkeo_ms,
+                    crop_start_x=crop_start_x,
+                    crop_end_x=crop_end_x,
+                )
+                legend_spans_by_channel[str(ch)] = spans
+
+            legend_event_items = [
+                (
+                    str((event_labels or {}).get("platform_onset", "platform_onset")),
+                    event_color_map.get("platform_onset", "#1f77b4"),
+                ),
+            ]
+            if step_onset_mocap is not None:
+                legend_event_items.append(
+                    (
+                        str((event_labels or {}).get("step_onset", "step_onset")),
+                        event_color_map.get("step_onset", "#ff7f0e"),
+                    )
+                )
+            if "TKEO_AGLR_emg_onset_timing" in event_cols:
+                legend_event_items.append(
+                    (
+                        str((event_labels or {}).get("TKEO_AGLR_emg_onset_timing", "TKEO")),
+                        event_color_map.get("TKEO_AGLR_emg_onset_timing", "#2ca02c"),
+                    )
+                )
+
+    for idx_ch, ch in enumerate(channels):
+        r = idx_ch // cols + 1
+        c = idx_ch % cols + 1
+        axis_idx = idx_ch + 1
         xref = "x" if axis_idx == 1 else f"x{axis_idx}"
         yref_domain = "y domain" if axis_idx == 1 else f"y{axis_idx} domain"
 
-        fig.add_trace(
-            go.Scatter(
-                x=x_abs,
-                y=df_plot[str(ch)].to_numpy(),
-                mode="lines",
-                name=str(ch),
-                line=dict(color="gray", width=1.3, dash="solid"),
-                opacity=0.85,
-                showlegend=False,
-            ),
-            row=r,
-            col=c,
-        )
+        for t_idx, trial in enumerate(trials):
+            x = np.asarray(trial["__x_abs"], dtype=float)
+            y = np.asarray(trial[str(ch)], dtype=float)
+            fig.add_trace(
+                go.Scatter(
+                    x=x,
+                    y=y,
+                    mode="lines",
+                    name=str(trial.get("step_TF", "")) or f"trial{t_idx + 1}",
+                    line=dict(color="gray", width=1.2, dash="solid" if t_idx == 0 else "dash"),
+                    opacity=0.85,
+                    showlegend=False,
+                ),
+                row=r,
+                col=c,
+            )
 
-        # per-subplot legend (annotation)
-        tkeo_ms = tkeo_mean_by_channel.get(str(ch))
-        tkeo_abs = None
-        if tkeo_ms is not None and np.isfinite(float(tkeo_ms)):
-            tkeo_abs = float(platform_onset_abs) + float(tkeo_ms) * float(device_rate) / 1000.0
-
-        # Resolve event positions in absolute device frames for window definitions.
-        channel_event_frames: Dict[str, float] = {
-            "platform_onset": float(platform_onset_abs),
-            onset_col: float(platform_onset_abs),
-            "step_onset": float(step_onset_abs),
-        }
-        if tkeo_abs is not None:
-            channel_event_frames["TKEO_AGLR_emg_onset_timing"] = float(tkeo_abs)
-
-        # Generic support: if the merged table contains other mocap-domain event columns referenced by windows,
-        # interpret them as mocap frames and convert to absolute device frames.
-        for maybe_event in event_cols:
-            if maybe_event in channel_event_frames:
+            # Draw per-trial window spans + vlines (absolute frame).
+            onset_device_raw = trial.get("onset_device")
+            platform_onset_raw = trial.get("platform_onset")
+            if onset_device_raw is None or platform_onset_raw is None:
                 continue
-            if maybe_event in available:
-                try:
-                    raw = (
-                        lf_trial.select(pl.col(maybe_event).max().alias("_v")).limit(1).collect()["_v"].item()
-                    )
-                except Exception:
-                    raw = None
-                if raw is not None:
-                    try:
-                        channel_event_frames[maybe_event] = float(platform_onset_abs) + (float(raw) - float(platform_onset_mocap)) * float(frame_ratio)
-                    except Exception:
-                        pass
+            onset_device_abs = float(onset_device_raw)
+            platform_onset_mocap = float(platform_onset_raw)
+            step_onset_raw = trial.get("step_onset")
+            step_onset_mocap = None if step_onset_raw is None else float(step_onset_raw)
 
-        spans = _compute_window_spans_for_channel(
-            windows_cfg=windows_cfg,
-            channel_event_frames=channel_event_frames,
-            reference_event=str(reference_event) if reference_event is not None else None,
-            time_start_x=crop_start_x,
-            time_end_x=crop_end_x,
-            device_rate=device_rate,
-            window_colors=window_colors,
-        )
-
-        # window spans as shapes
-        for span in spans:
-            fig.add_shape(
-                type="rect",
-                xref=xref,
-                yref=yref_domain,
-                x0=span.start_x,
-                x1=span.end_x,
-                y0=0,
-                y1=1,
-                fillcolor=span.color,
-                opacity=window_alpha,
-                line=dict(width=0),
-                layer="below",
+            crop_start_x = onset_device_abs + float(time_start_ms) * float(device_rate) / 1000.0
+            crop_end_x = onset_device_abs + float(time_end_ms) * float(device_rate) / 1000.0
+            step_onset_abs = (
+                None
+                if step_onset_mocap is None
+                else onset_device_abs + (step_onset_mocap - platform_onset_mocap) * float(frame_ratio)
             )
 
-        # vlines as shapes
-        for event_name, xval in [
-            ("platform_onset", float(platform_onset_abs)),
-            ("step_onset", float(step_onset_abs)),
-        ]:
-            fig.add_shape(
-                type="line",
-                xref=xref,
-                yref=yref_domain,
-                x0=xval,
-                x1=xval,
-                y0=0,
-                y1=1,
-                line=dict(color=event_color_map.get(event_name, "#000000"), width=1.6, dash="dash"),
-                layer="above",
+            tkeo_ms = tkeo_by_trial_channel.get(tuple(trial.get(k) for k in key_cols), {}).get(str(ch))
+            tkeo_abs = None if tkeo_ms is None else onset_device_abs + float(tkeo_ms) * float(device_rate) / 1000.0
+
+            spans = _compute_window_spans(
+                windows_cfg=windows_cfg,
+                reference_event=ref_event,
+                window_colors=window_colors,
+                device_rate=device_rate,
+                mocap_rate=mocap_rate,
+                platform_onset_mocap=platform_onset_mocap,
+                onset_device_abs=onset_device_abs,
+                trial_row=trial,
+                tkeo_ms=tkeo_ms,
+                crop_start_x=crop_start_x,
+                crop_end_x=crop_end_x,
             )
+            span_alpha = 0.12 if t_idx == 0 else 0.06
+            for span in spans:
+                fig.add_shape(
+                    type="rect",
+                    xref=xref,
+                    yref=yref_domain,
+                    x0=span.start_x,
+                    x1=span.end_x,
+                    y0=0,
+                    y1=1,
+                    fillcolor=span.color,
+                    opacity=span_alpha,
+                    line=dict(width=0),
+                    layer="below",
+                )
 
-        if tkeo_abs is not None:
-            fig.add_shape(
-                type="line",
-                xref=xref,
-                yref=yref_domain,
-                x0=float(tkeo_abs),
-                x1=float(tkeo_abs),
-                y0=0,
-                y1=1,
-                line=dict(color=event_color_map.get("TKEO_AGLR_emg_onset_timing", "#2ca02c"), width=1.6, dash="dash"),
-                layer="above",
-            )
+            def _add_vline(name: str, xval: float, *, dash: Optional[str] = None) -> None:
+                fig.add_shape(
+                    type="line",
+                    xref=xref,
+                    yref=yref_domain,
+                    x0=float(xval),
+                    x1=float(xval),
+                    y0=0,
+                    y1=1,
+                    line=dict(
+                        color=event_color_map.get(name, "#000000"),
+                        width=vline_width,
+                        dash=(dash or vline_dash),
+                    ),
+                    opacity=vline_alpha if t_idx == 0 else min(vline_alpha, 0.6),
+                    layer="above",
+                )
 
-        event_items = [
-            ("platform_onset", event_color_map.get("platform_onset", "#1f77b4")),
-            ("step_onset", event_color_map.get("step_onset", "#ff7f0e")),
-        ]
-        if tkeo_abs is not None:
-            event_items.append((tkeo_label, event_color_map.get("TKEO_AGLR_emg_onset_timing", "#2ca02c")))
+            if "platform_onset" in event_cols:
+                _add_vline("platform_onset", onset_device_abs)
+            if "step_onset" in event_cols and step_onset_abs is not None:
+                _add_vline("step_onset", float(step_onset_abs))
+            if "TKEO_AGLR_emg_onset_timing" in event_cols and tkeo_abs is not None:
+                _add_vline("TKEO_AGLR_emg_onset_timing", float(tkeo_abs))
 
-        legend_text = _legend_html(window_spans=spans, event_items=event_items, group_items=[])
-
+        # per-subplot legend (annotation): show stable window/event labels (from first trial)
+        spans_for_legend = legend_spans_by_channel.get(str(ch), [])
+        legend_text = _legend_html(window_spans=spans_for_legend, event_items=legend_event_items)
         fig.add_annotation(
             x=0.98,
             y=0.98,
@@ -634,31 +782,239 @@ def main() -> None:
         )
 
     fig.update_layout(
-        title=f"{args.mode} | emg | {first_subject} | v={first_velocity} | trial={first_trial} | absolute frames ({x_col_abs})",
-        width=int(args.width),
-        height=int(args.height),
+        title=title,
+        width=int(RULES.get("figure_width", 1800)),
+        height=int(RULES.get("figure_height", 900)),
         margin=dict(l=40, r=20, t=60, b=40),
         template="plotly_white",
         showlegend=False,
     )
-
-    # x/y axis cosmetics
-    fig.update_xaxes(range=[crop_start_x, crop_end_x], showgrid=True, gridcolor="rgba(0,0,0,0.08)")
+    fig.update_xaxes(showgrid=True, gridcolor="rgba(0,0,0,0.08)")
     fig.update_yaxes(showgrid=True, gridcolor="rgba(0,0,0,0.08)")
 
-    out_html = Path(args.html)
-    out_html.parent.mkdir(parents=True, exist_ok=True)
-    fig.write_html(out_html, include_plotlyjs="cdn")
-
-    out_png = Path(args.png)
-    out_png.parent.mkdir(parents=True, exist_ok=True)
-    try:
+    if out_html is not None:
+        out_html.parent.mkdir(parents=True, exist_ok=True)
+        fig.write_html(out_html, include_plotlyjs="cdn")
+        print(f"Wrote: {out_html}")
+    if out_png is not None:
+        out_png.parent.mkdir(parents=True, exist_ok=True)
         fig.write_image(out_png)
-    except Exception as e:
-        print(f"[warn] PNG export failed (kaleido needed?): {e}")
+        print(f"Wrote: {out_png}")
 
-    print(f"Wrote: {out_html}")
-    print(f"Wrote: {out_png}")
+
+def main() -> None:
+    load_config, resolve_path, get_frame_ratio = _import_repo_utils()
+
+    cfg_path = RULES.get("config_path")
+    config_path = Path(cfg_path) if cfg_path else (_repo_root() / "config.yaml")
+    cfg = load_config(config_path)
+    base_dir = config_path.parent
+
+    data_cfg = cfg.get("data", {})
+    id_cfg = data_cfg.get("id_columns", {})
+    device_rate = float(data_cfg.get("device_sample_rate", 1000))
+    mocap_rate = float(data_cfg.get("mocap_sample_rate", 100))
+    frame_ratio = int(get_frame_ratio(data_cfg))
+
+    input_path = resolve_path(base_dir, data_cfg.get("input_file", "data/merged.parquet"))
+    features_path_raw = data_cfg.get("features_file")
+    features_path = resolve_path(base_dir, features_path_raw) if features_path_raw else None
+
+    subject_col = str(id_cfg.get("subject") or "subject")
+    velocity_col = str(id_cfg.get("velocity") or "velocity")
+    trial_col = str(id_cfg.get("trial") or "trial_num")
+    key_cols = (subject_col, velocity_col, trial_col)
+
+    emg_cfg = ((cfg.get("signal_groups") or {}).get("emg") or {})
+    channels = list(emg_cfg.get("columns") or [])
+    if not channels:
+        raise ValueError("signal_groups.emg.columns is empty")
+    grid_layout = emg_cfg.get("grid_layout") or [4, 4]
+
+    interp_cfg = cfg.get("interpolation", {})
+    time_start_ms = float(interp_cfg.get("start_ms", -100))
+    time_end_ms = float(interp_cfg.get("end_ms", 800))
+    if time_end_ms <= time_start_ms:
+        raise ValueError("interpolation.end_ms must be greater than interpolation.start_ms")
+
+    lf = pl.scan_parquet(str(input_path))
+    schema = lf.collect_schema()
+    available = set(schema.keys())
+
+    # Absolute x-axis requirement
+    if "original_DeviceFrame" not in available:
+        raise ValueError("This script requires 'original_DeviceFrame' to plot absolute device frames.")
+    x_abs_col = "original_DeviceFrame"
+
+    task_col = str(id_cfg.get("task") or "").strip()
+    task_filter = data_cfg.get("task_filter")
+    if task_filter and task_col and task_col in available:
+        lf = lf.filter(pl.col(task_col) == task_filter)
+
+    event_cfg = cfg.get("event_vlines", {}) if isinstance(cfg.get("event_vlines"), dict) else {}
+    windows_cfg = cfg.get("windows", {}) if isinstance(cfg.get("windows"), dict) else {}
+    window_colors = _window_colors_from_config(cfg)
+
+    mode_cfgs = _mode_cfgs(cfg)
+    if not mode_cfgs:
+        raise ValueError("No aggregation_modes selected/found.")
+
+    out_base = Path(RULES.get("output_base_dir") or (Path(__file__).resolve().parent / "output"))
+    max_files = RULES.get("max_files_per_mode")
+    max_trials_per_file = RULES.get("max_trials_per_file")
+    export_html = bool(RULES.get("export_html", True))
+    export_png = bool(RULES.get("export_png", True))
+
+    for mode_name, mode_cfg in mode_cfgs.items():
+        mode_filter = mode_cfg.get("filter") if isinstance(mode_cfg.get("filter"), dict) else {}
+        raw_groupby = list(mode_cfg.get("groupby") or [])
+        groupby = [_normalize_field(g, id_cfg=id_cfg) for g in raw_groupby]
+        groupby = [g for g in groupby if g]
+        # Primary processing/grouping unit is subject-velocity-trial (enforce).
+        for required in (subject_col, velocity_col, trial_col):
+            if required not in groupby:
+                groupby.append(required)
+
+        overlay = bool(mode_cfg.get("overlay", False))
+        overlay_within_raw = list(mode_cfg.get("overlay_within") or [])
+        overlay_within = [_normalize_field(g, id_cfg=id_cfg) for g in overlay_within_raw]
+        overlay_within = [g for g in overlay_within if g]
+
+        output_dir_name = str(mode_cfg.get("output_dir") or mode_name).strip() or mode_name
+        filename_pattern = str(mode_cfg.get("filename_pattern") or "{subject}_{trial}_{signal_group}.png")
+
+        lf_mode = lf
+        for col, value in mode_filter.items():
+            if col in available:
+                lf_mode = lf_mode.filter(pl.col(col) == value)
+
+        # Ensure required columns exist for the mode.
+        needed_cols = set(key_cols) | {x_abs_col, "onset_device", "platform_onset", "step_onset"} | set(channels)
+        meta_cols = set(groupby)
+        meta_cols |= set(_normalize_field(c, id_cfg=id_cfg) for c in (mode_cfg.get("color_by") or []) if c)
+        meta_cols |= set(mode_filter.keys())
+        meta_cols |= set(_collect_required_event_columns(windows_cfg=windows_cfg, event_cfg=event_cfg))
+        reserved = set(key_cols) | {x_abs_col, "onset_device", "platform_onset", "step_onset", "__x_abs"}
+        meta_cols = {c for c in meta_cols if c in available and c not in reserved and c not in channels}
+        needed_cols |= meta_cols
+
+        missing = [c for c in needed_cols if c not in available]
+        if missing:
+            raise ValueError(f"[{mode_name}] Missing required columns in merged.parquet: {missing}")
+
+        df_trials = _collect_trials_series(
+            lf=lf_mode,
+            key_cols=key_cols,
+            x_abs_col=x_abs_col,
+            channels=channels,
+            meta_cols=sorted(meta_cols),
+            device_rate=device_rate,
+            time_start_ms=time_start_ms,
+            time_end_ms=time_end_ms,
+        )
+        if df_trials.is_empty():
+            print(f"[{mode_name}] skip: no trials after filters")
+            continue
+
+        # Load per-trial, per-channel TKEO (ms) from features file.
+        tkeo_by_trial_channel: Dict[Tuple[Any, ...], Dict[str, float]] = {}
+        if features_path is not None and features_path.exists():
+            tkeo_by_trial_channel = _load_tkeo_by_trial_channel(
+                features_path=features_path,
+                key_cols=key_cols,
+                channels=channels,
+                trials_df=df_trials.select(list(key_cols)),
+            )
+
+        # Determine file grouping (mimic aggregation_modes overlay semantics).
+        file_fields: List[str]
+        if overlay:
+            if overlay_within:
+                file_fields = [f for f in groupby if f not in overlay_within]
+            else:
+                file_fields = []
+        else:
+            file_fields = list(groupby)
+
+        if not file_fields:
+            file_groups = [("all",)]
+        else:
+            file_groups = [tuple(row) for row in df_trials.select(file_fields).unique().iter_rows()]
+
+        file_count = 0
+        for file_key in file_groups:
+            if max_files is not None and file_count >= int(max_files):
+                break
+            file_count += 1
+
+            subset = df_trials
+            if file_fields and file_key != ("all",):
+                for f, v in zip(file_fields, file_key):
+                    subset = subset.filter(pl.col(f) == v)
+
+            # Determine which trials to draw in this output file.
+            # - overlay=True: multiple group keys can be drawn in one file (subset already constrained by file_fields)
+            # - overlay=False: subset should represent one group key; still guard for duplicates.
+            if overlay and groupby:
+                # one representative per groupby key
+                keys_df = subset.select(groupby).unique()
+                chosen_rows: List[Dict[str, Any]] = []
+                for key_vals in keys_df.iter_rows():
+                    part = subset
+                    for f, v in zip(groupby, key_vals):
+                        part = part.filter(pl.col(f) == v)
+                    part_limited = part.head(int(max_trials_per_file) if max_trials_per_file is not None else part.height)
+                    chosen_rows.extend(part_limited.to_dicts())
+                trials_rows = chosen_rows
+            else:
+                part_limited = subset.head(int(max_trials_per_file) if max_trials_per_file is not None else subset.height)
+                trials_rows = part_limited.to_dicts()
+
+            if not trials_rows:
+                continue
+
+            first_row = trials_rows[0]
+            format_values: Dict[str, Any] = {
+                "signal_group": "emg",
+                "subject": first_row.get(subject_col),
+                "velocity": first_row.get(velocity_col),
+                "trial": first_row.get(trial_col),
+                "trial_num": first_row.get(trial_col),
+            }
+            for col in groupby:
+                format_values[str(col)] = first_row.get(col)
+
+            filename_raw = _safe_filename(_format_pattern(filename_pattern, format_values))
+            filename_path = Path(filename_raw)
+            stem = filename_path.stem if filename_path.suffix else filename_raw
+            png_name = f"{stem}.png"
+            html_name = f"{stem}.html"
+            out_dir = out_base / output_dir_name / f"v={format_values.get('velocity')}"
+            out_png = (out_dir / png_name) if export_png else None
+            out_html = (out_dir / html_name) if export_html else None
+
+            title = (
+                f"{mode_name} | emg | absolute frames ({x_abs_col}) | "
+                f"{format_values.get('subject')} | v={format_values.get('velocity')} | trial={format_values.get('trial')}"
+            )
+            _emit_emg_figure(
+                out_html=out_html,
+                out_png=out_png,
+                title=title,
+                channels=channels,
+                grid_layout=grid_layout,
+                trials=trials_rows,
+                key_cols=key_cols,
+                tkeo_by_trial_channel=tkeo_by_trial_channel,
+                device_rate=device_rate,
+                mocap_rate=mocap_rate,
+                frame_ratio=frame_ratio,
+                time_start_ms=time_start_ms,
+                time_end_ms=time_end_ms,
+                event_cfg=event_cfg,
+                windows_cfg=windows_cfg,
+                window_colors=window_colors,
+            )
 
 
 if __name__ == "__main__":

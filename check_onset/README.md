@@ -13,9 +13,10 @@ cd "/mnt/c/Users/Alice/OneDrive - 청주대학교/근전도 분석 코드/aggreg
 conda run -n module python -c "import sys; print(sys.executable)"
 
 # 샘플 실행 (HTML/PNG 생성)
-conda run -n module python plotly_emg_sample.py --mode step_TF_mean
+# - CLI 옵션 없음: 스크립트 상단 `RULES`에서 mode/출력 등을 제어
+conda run -n module python plotly_emg_sample.py
 ```
 
 결과물:
-- `check_onset/output/emg_plotly_sample.html`
-- `check_onset/output/emg_plotly_sample.png` (kaleido 설치 시)
+- `check_onset/output/<mode>/<v=...>/*.html`
+- `check_onset/output/<mode>/<v=...>/*.png`
