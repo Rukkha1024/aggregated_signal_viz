@@ -18,5 +18,5 @@ conda run -n module python plotly_emg_sample.py
 ```
 
 결과물:
-- `check_onset/output/<mode>/<v=...>/*.html`
-- `check_onset/output/<mode>/<v=...>/*.png`
+- `check_onset/output/<mode>/*.html`
+- `check_onset/output/<mode>/*.png`

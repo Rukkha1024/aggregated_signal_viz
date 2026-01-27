@@ -27,7 +27,7 @@ RULES: Dict[str, Any] = {
     "figure_width": 1800,
     "figure_height": 900,
     # safety limits
-    "max_files_per_mode": 10,  # None -> all
+    "max_files_per_mode": None,  # None -> all
     "max_trials_per_file": None,  # e.g. 5 (when groupby groups multiple trials)
 }
 
@@ -881,7 +881,9 @@ def main() -> None:
         overlay_within = [g for g in overlay_within if g]
 
         output_dir_name = str(mode_cfg.get("output_dir") or mode_name).strip() or mode_name
-        filename_pattern = str(mode_cfg.get("filename_pattern") or "{subject}_{trial}_{signal_group}.png")
+        filename_pattern = str(
+            mode_cfg.get("filename_pattern") or "{subject}_v{velocity}_{trial_num}_{signal_group}.png"
+        )
 
         lf_mode = lf
         for col, value in mode_filter.items():
@@ -989,7 +991,7 @@ def main() -> None:
             stem = filename_path.stem if filename_path.suffix else filename_raw
             png_name = f"{stem}.png"
             html_name = f"{stem}.html"
-            out_dir = out_base / output_dir_name / f"v={format_values.get('velocity')}"
+            out_dir = out_base / output_dir_name
             out_png = (out_dir / png_name) if export_png else None
             out_html = (out_dir / html_name) if export_html else None
 
