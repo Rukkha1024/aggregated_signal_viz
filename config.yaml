@@ -65,8 +65,19 @@ aggregation_modes:
   #   color_by: ["step_TF"]
   #   overlay: true
   #   overlay_within: ["step_TF"]
-  #   output_dir: "step_TF_subject"
+  #   output_dir: "step_TF_subject_mean"
   #   filename_pattern: "step_TF_{subject}_mean_{signal_group}.png"
+  diff_step_TF_subject:
+    enabled: true
+    filter:
+      mixed: 1
+      age_group: "young"
+    groupby: ["step_TF","subject","trial"]
+    color_by: ["step_TF"]
+    overlay: true
+    overlay_within: ["step_TF"]
+    output_dir: "step_TF_subject"
+    filename_pattern: "step_TF_{subject}_{trial}_{signal_group}.png"
 
 # === Window Definitions (ms) ===
 # 참고:
