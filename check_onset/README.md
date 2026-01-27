@@ -1,6 +1,8 @@
 # check_onset (샘플)
 
-`matplotlib` 대신 `plotly`로 EMG overlay(그리드 + window span + event vline + legend 정보)를 샘플로 재현합니다.
+`matplotlib` 대신 `plotly`로 EMG 시계열(그리드 + window span + event vline + legend 정보)를 샘플로 재현합니다.
+
+주의: x축은 0-1 정규화나 onset=0 정렬이 아니라, **절대 device frame(`original_DeviceFrame`)**을 그대로 사용합니다(필요 시 `DeviceFrame` fallback).
 
 ## 실행
 
@@ -17,4 +19,3 @@ conda run -n module python plotly_emg_sample.py --mode step_TF_mean
 결과물:
 - `check_onset/output/emg_plotly_sample.html`
 - `check_onset/output/emg_plotly_sample.png` (kaleido 설치 시)
-
