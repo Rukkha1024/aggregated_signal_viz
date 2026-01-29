@@ -1,47 +1,47 @@
 ---
 name: aggregation-modes-and-event-vlines
-description: YAML/딕셔너리 기반 시계열 시각화 파이프라인에서 aggregation mode(필터→그룹→오버레이→파일 분할→파일명 포맷)와 event vlines(이벤트 세로선/범례/오버레이 그룹) 규칙을 정확히 해석하고 안전한 설정안을 제안한다. overlay/overlay_within, filename_pattern KeyError, filter 미적용(타입 불일치/컬럼 누락), event_vlines.overlay_group(그룹별 linestyle) 같은 문제를 디버깅할 때 사용한다. 이 repo에서는 `config.yaml` + `script/visualizer.py` 규칙을 기준으로 한다.
+description: Interpret and debug config-driven time-series visualization pipelines that use aggregation modes (filter → groupby → overlay → file splitting → filename formatting) and event vlines (event markers, legends, per-overlay-group styling). Use when diagnosing overlay/overlay_within behavior, filename_pattern KeyError issues, filters not applying (missing columns or type mismatches), or event_vlines.overlay_group (group-specific linestyles). In this repo, the source of truth is `config.yaml` plus the implementation in `script/visualizer.py`.
 ---
 
 # Aggregation Modes And Event Vlines
 
 ## Overview
 
-이 skill은 “config로 동작이 결정되는 시계열 시각화”에서 `aggregation_modes`(집계/오버레이/출력)와 `event_vlines`(이벤트 세로선/오버레이 그룹) 설정을 안전하게 설계/검증하는 규칙과 체크리스트를 제공한다.
+This skill provides rules and checklists to safely design and validate `aggregation_modes` (aggregation/overlay/output) and `event_vlines` (event marker vlines and overlay-group behavior) in config-driven time-series visualization workflows.
 
 ## Quick Start (작업 절차)
 
-1) `config.yaml`에서 `aggregation_modes` / `event_vlines` 블록을 확인한다.
-2) 코드 기준 동작을 확정해야 하면 구현 파일에서 아래 키워드를 찾아 실제 분기(OLD/NEW)를 확인한다.
+1) Inspect the `aggregation_modes` / `event_vlines` blocks in `config.yaml`.
+2) When you need to confirm “what really happens”, search the implementation for the keywords below to find the exact branch (OLD vs NEW):
    - `overlay_within`, `filename_pattern`, `_apply_filter_indices`, `_collect_event_vlines`, `overlay_group`
-3) 설정을 바꾸기 전, 아래 “안전 규칙”에 맞게 `groupby`/`overlay_within`/`filename_pattern` 정합성을 먼저 맞춘다.
-4) 상세 규칙/예시는 `references/aggregation-modes-and-event-vlines.ko.md`를 연다.
+3) Before changing configs, make `groupby` / `overlay_within` / `filename_pattern` consistent using the safety rules below.
+4) Open `references/aggregation-modes-and-event-vlines.en.md` for the full spec and examples.
 
 ## 핵심 안전 규칙(요약)
 
-- `aggregation_modes.<mode>.filter`는 dict만 사용하고, 조건은 AND로 결합된다. (컬럼이 없으면 경고 후 해당 조건만 스킵)
-- `overlay=true`일 때 파일 분할은 `overlay_within` 유무로 갈린다.
-  - `overlay_within`이 비어있으면(미설정 포함) **OLD 동작**: 모든 그룹을 한 파일에 오버레이
-  - `overlay_within`이 있으면 **NEW 동작**: `file_fields = groupby - overlay_within` 기준으로 파일을 쪼개고, 각 파일 안에서 오버레이
-- `filename_pattern`은 `str.format()`이므로, 오버레이 NEW에서는 **`file_fields`에 없는 키를 쓰면 KeyError**가 날 수 있다.
-- `color_by`는 “그룹 키(groupby 결과)”에서 값을 뽑아 색상 그룹을 만든다. 보통 `color_by ⊆ groupby`가 안전하다.
-- `event_vlines.overlay_group`는 오버레이 플롯에서 특정 이벤트를 “그룹별 linestyle”로 다시 그리기 위한 옵션이며, `overlay_group.columns`에 지정된 이벤트는 pooled vline에서 제외되어 중복을 피한다.
+- `aggregation_modes.<mode>.filter` must be a dict and is applied as an AND of all conditions. (If a column is missing, the implementation may warn and skip that condition.)
+- With `overlay=true`, file splitting depends on whether `overlay_within` is set:
+  - If `overlay_within` is missing/empty (**OLD behavior**): all group keys are overlaid into a single output file.
+  - If `overlay_within` is provided (**NEW behavior**): `file_fields = groupby - overlay_within`; files split by `file_fields`, with overlays within each file.
+- `filename_pattern` uses `str.format()`. Under overlay NEW behavior, using placeholders that are not present in `file_fields` can raise `KeyError`.
+- `color_by` typically derives its values from the group key; in practice, `color_by ⊆ groupby` is the safest rule.
+- `event_vlines.overlay_group` is for drawing selected events per overlay group (typically via different linestyles). Events listed in `overlay_group.columns` are usually removed from pooled vlines to avoid duplicates.
 
 ## 자주 나는 문제(증상 → 원인 → 해결)
 
-- “원래 여러 파일로 나뉘어야 하는데 한 파일로만 나온다”
-  - 원인: `overlay=true` + `overlay_within` 미설정(OLD 동작) → 전부 한 파일로 합쳐짐
-  - 해결: `overlay_within`을 명시하고, 원하는 파일 분할 기준이 `file_fields = groupby - overlay_within`에 남도록 조정
-- “png 생성 중 KeyError 발생”
-  - 원인: `filename_pattern`에 들어간 `{placeholder}`가 그 파일의 format mapping에 없음 (특히 overlay NEW에서 흔함)
-  - 해결: overlay NEW에서는 filename에 **file_fields만** 사용하거나, 패턴을 `{signal_group}` 중심으로 단순화
-- “filter를 줬는데 안 먹는 것 같다”
-  - 원인: (1) 컬럼이 meta에 없음(경고 후 스킵), (2) 타입 불일치(예: 10 vs 10.0)
-  - 해결: 입력 데이터 컬럼 존재/타입을 확인하고, config 값을 데이터 타입에 맞춤
-- “event vline이 안 보인다”
-  - 원인: (1) 이벤트 컬럼이 input/features에 없음(경고 후 스킵), (2) 이벤트 평균이 interpolation 시간축 밖
-  - 해결: `event_vlines.columns`와 이벤트 도메인(입력 parquet vs features_file)을 점검하고, `interpolation.start_ms/end_ms` 범위도 확인
+- “I expected multiple files, but only one file was produced”
+  - Cause: `overlay=true` with `overlay_within` missing/empty → OLD behavior overlays everything into one file.
+  - Fix: set `overlay_within` and ensure your intended split criteria remains in `file_fields = groupby - overlay_within`.
+- “KeyError while generating png”
+  - Cause: `filename_pattern` includes a `{placeholder}` that is not present in the formatting mapping (common under overlay NEW behavior).
+  - Fix: in overlay NEW, only use placeholders from `file_fields`, or simplify to `{signal_group}`.
+- “Filters don’t seem to apply”
+  - Cause: (1) missing column (condition is skipped), (2) type mismatch (e.g., `10` vs `10.0`).
+  - Fix: verify column existence/types in the dataset and match the config value types accordingly.
+- “Event vlines don’t show up”
+  - Cause: (1) event column missing in input/features, (2) mean event timing falls outside the plotted time window.
+  - Fix: check `event_vlines.columns`, the event domain source (input parquet vs features file), and the `interpolation.start_ms/end_ms` range.
 
 ## Reference
 
-- 자세한 규칙/스키마/예시 YAML: `references/aggregation-modes-and-event-vlines.ko.md`
+- Full spec, schema, and example YAML: `references/aggregation-modes-and-event-vlines.en.md`
