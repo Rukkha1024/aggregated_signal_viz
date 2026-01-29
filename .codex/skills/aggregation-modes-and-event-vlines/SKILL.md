@@ -1,18 +1,18 @@
 ---
 name: aggregation-modes-and-event-vlines
-description: aggregated_signal_viz에서 config.yaml의 aggregation_modes 및 event_vlines 규칙(overlay/overlay_within, filename_pattern, filter, event_vlines.overlay_group 등)을 정확히 해석하고 안전한 설정안을 제안한다. config.yaml을 수정하거나 새 aggregation mode/event vline을 추가할 때, 그림이 왜 “한 파일로 합쳐지거나” “여러 파일로 쪼개지는지” 원인을 찾을 때, KeyError(파일명 포맷), 필터 미적용(타입 불일치/컬럼 누락), 이벤트 세로선/범례(overlay_group) 동작을 점검할 때 사용한다.
+description: YAML/딕셔너리 기반 시계열 시각화 파이프라인에서 aggregation mode(필터→그룹→오버레이→파일 분할→파일명 포맷)와 event vlines(이벤트 세로선/범례/오버레이 그룹) 규칙을 정확히 해석하고 안전한 설정안을 제안한다. overlay/overlay_within, filename_pattern KeyError, filter 미적용(타입 불일치/컬럼 누락), event_vlines.overlay_group(그룹별 linestyle) 같은 문제를 디버깅할 때 사용한다. 이 repo에서는 `config.yaml` + `script/visualizer.py` 규칙을 기준으로 한다.
 ---
 
 # Aggregation Modes And Event Vlines
 
 ## Overview
 
-이 skill은 `aggregated_signal_viz`에서 `config.yaml`의 `aggregation_modes`(집계/오버레이/출력)와 `event_vlines`(이벤트 세로선/오버레이 그룹) 설정이 실제 코드(`script/visualizer.py`)에서 어떻게 해석되는지 규칙을 정리하고, 안전한 설정 패턴/디버깅 체크리스트를 제공한다.
+이 skill은 “config로 동작이 결정되는 시계열 시각화”에서 `aggregation_modes`(집계/오버레이/출력)와 `event_vlines`(이벤트 세로선/오버레이 그룹) 설정을 안전하게 설계/검증하는 규칙과 체크리스트를 제공한다.
 
 ## Quick Start (작업 절차)
 
 1) `config.yaml`에서 `aggregation_modes` / `event_vlines` 블록을 확인한다.
-2) 코드 기준 동작을 확정해야 하면 `script/visualizer.py`에서 아래 키워드를 찾아 실제 분기(OLD/NEW)를 확인한다.
+2) 코드 기준 동작을 확정해야 하면 구현 파일에서 아래 키워드를 찾아 실제 분기(OLD/NEW)를 확인한다.
    - `overlay_within`, `filename_pattern`, `_apply_filter_indices`, `_collect_event_vlines`, `overlay_group`
 3) 설정을 바꾸기 전, 아래 “안전 규칙”에 맞게 `groupby`/`overlay_within`/`filename_pattern` 정합성을 먼저 맞춘다.
 4) 상세 규칙/예시는 `references/aggregation-modes-and-event-vlines.ko.md`를 연다.
