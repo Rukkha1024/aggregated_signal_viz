@@ -990,6 +990,7 @@ def _apply_window_definition_xticks(
     *,
     include_edges: bool = True,
 ) -> List[float]:
+    ax.set_xlim(0.0, 1.0)
     if not window_spans:
         return []
 
