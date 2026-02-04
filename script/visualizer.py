@@ -960,6 +960,8 @@ def _apply_frame_tick_labels(
     *,
     time_start_frame: float,
     time_end_frame: float,
+    blank_positions: Sequence[float] = (),
+    blank_tol: float = 1e-6,
 ) -> None:
     try:
         from matplotlib.ticker import FuncFormatter
@@ -972,7 +974,26 @@ def _apply_frame_tick_labels(
     if span == 0:
         return
 
+    blanks: List[float] = []
+    if blank_positions:
+        for pos in blank_positions:
+            try:
+                x = float(pos)
+            except (TypeError, ValueError):
+                continue
+            if not np.isfinite(x):
+                continue
+            blanks.append(x)
+
     def _fmt(x: float, _pos: int) -> str:
+        if blanks:
+            try:
+                xx = float(x)
+            except Exception:
+                xx = x
+            for pos in blanks:
+                if abs(float(xx) - float(pos)) <= float(blank_tol):
+                    return ""
         try:
             frame = start + float(x) * span
         except Exception:
@@ -1089,14 +1110,113 @@ def _collect_overlay_event_vlines_for_ticks(
     return out
 
 
-def _ensure_event_vline_xticks(
+def _event_tick_positions_by_name(
+    event_vlines: Sequence[Dict[str, Any]],
+    *,
+    tol: float = 1e-6,
+) -> Dict[str, float]:
+    by_name: Dict[str, List[float]] = {}
+    for v in event_vlines:
+        name_raw = v.get("name")
+        name = str(name_raw).strip() if name_raw is not None else ""
+        if not name:
+            continue
+        x_raw = v.get("x")
+        if x_raw is None:
+            continue
+        try:
+            x = float(x_raw)
+        except (TypeError, ValueError):
+            continue
+        if not np.isfinite(x):
+            continue
+        if x < -tol or x > 1.0 + tol:
+            continue
+        by_name.setdefault(name, []).append(min(1.0, max(0.0, x)))
+
+    out: Dict[str, float] = {}
+    for name, xs in by_name.items():
+        if not xs:
+            continue
+        out[name] = float(np.mean(np.asarray(xs, dtype=float)))
+    return out
+
+
+def _select_event_tick_labels_to_blank(
+    ax: Any,
+    *,
+    event_positions: Dict[str, float],
+    event_order: Sequence[str],
+    tick_labelsize: float,
+    tol: float = 1e-6,
+) -> set[str]:
+    if len(event_positions) < 2:
+        return set()
+
+    order_map = {str(name).strip(): i for i, name in enumerate(event_order) if name is not None and str(name).strip()}
+
+    def priority(name: str) -> int:
+        return order_map.get(name, len(order_map) + 1)
+
+    width_px = float(getattr(getattr(ax, "bbox", None), "width", 0.0) or 0.0)
+    min_sep_px = max(6.0, float(tick_labelsize) * 4.0)
+    min_sep_norm = min_sep_px / width_px if width_px > 1e-6 else 0.03
+
+    items = [(name, float(x)) for name, x in event_positions.items() if np.isfinite(float(x))]
+    items.sort(key=lambda kv: kv[1])
+
+    hidden: set[str] = set()
+    while True:
+        visible = [(name, x) for name, x in items if name not in hidden]
+        if len(visible) < 2:
+            break
+        changed = False
+        for (name_a, x_a), (name_b, x_b) in zip(visible, visible[1:]):
+            if abs(float(x_b) - float(x_a)) + tol >= float(min_sep_norm):
+                continue
+            pr_a = priority(name_a)
+            pr_b = priority(name_b)
+            if pr_a == pr_b:
+                hidden.add(name_b)
+            elif pr_a < pr_b:
+                hidden.add(name_b)
+            else:
+                hidden.add(name_a)
+            changed = True
+            break
+        if not changed:
+            break
+    return hidden
+
+
+def _apply_event_vline_xticks(
     ax: Any,
     *,
     tick_positions: Sequence[float],
     event_vlines: Sequence[Dict[str, Any]],
+    event_order: Sequence[str],
+    tick_labelsize: float,
     tol: float = 1e-6,
-) -> List[float]:
+) -> Tuple[List[float], List[float]]:
     base = list(tick_positions) if tick_positions else list(ax.get_xticks())
+
+    event_positions = _event_tick_positions_by_name(event_vlines, tol=tol)
+    hidden_names = _select_event_tick_labels_to_blank(
+        ax,
+        event_positions=event_positions,
+        event_order=event_order,
+        tick_labelsize=tick_labelsize,
+        tol=tol,
+    )
+    visible_positions = [event_positions[name] for name in event_positions.keys() if name not in hidden_names]
+    blank_positions: List[float] = []
+    for name in sorted(hidden_names):
+        if name not in event_positions:
+            continue
+        x_hidden = float(event_positions[name])
+        if any(abs(float(x_visible) - x_hidden) <= tol for x_visible in visible_positions):
+            continue
+        blank_positions.append(x_hidden)
 
     merged: List[float] = []
     for value in base:
@@ -1110,22 +1230,13 @@ def _ensure_event_vline_xticks(
             continue
         merged.append(min(1.0, max(0.0, x)))
 
-    for v in event_vlines:
-        x_raw = v.get("x")
-        if x_raw is None:
+    for x in event_positions.values():
+        if not np.isfinite(float(x)):
             continue
-        try:
-            x = float(x_raw)
-        except (TypeError, ValueError):
-            continue
-        if not np.isfinite(x):
-            continue
-        if x < -tol or x > 1.0 + tol:
-            continue
-        merged.append(min(1.0, max(0.0, x)))
+        merged.append(min(1.0, max(0.0, float(x))))
 
     if not merged:
-        return base
+        return base, blank_positions
 
     merged_sorted = sorted(merged)
     uniq: List[float] = []
@@ -1134,7 +1245,7 @@ def _ensure_event_vline_xticks(
             uniq.append(t)
     if uniq:
         ax.set_xticks(uniq)
-    return uniq
+    return uniq, blank_positions
 
 
 def _auto_rotate_dense_xticklabels(
@@ -1333,6 +1444,7 @@ def _plot_task(task: Dict[str, Any]) -> None:
     common_style = task["common_style"]
     output_path = Path(task["output_path"])
     event_vline_style = task.get("event_vline_style", {})
+    event_vline_order = task.get("event_vline_order", [])
 
     if kind == "overlay":
         _plot_overlay_generic(
@@ -1345,6 +1457,7 @@ def _plot_task(task: Dict[str, Any]) -> None:
             pooled_event_vlines_by_channel=task.get("pooled_event_vlines_by_channel"),
             event_vline_style=event_vline_style,
             event_vline_overlay_cfg=task.get("event_vline_overlay_cfg"),
+            event_vline_order=event_vline_order,
             output_path=output_path,
             mode_name=task["mode_name"],
             group_fields=task["group_fields"],
@@ -1378,6 +1491,7 @@ def _plot_task(task: Dict[str, Any]) -> None:
             event_vlines=task.get("event_vlines", []),
             event_vlines_by_channel=task.get("event_vlines_by_channel"),
             event_vline_style=event_vline_style,
+            event_vline_order=event_vline_order,
             x=np.asarray(task["x"], dtype=float),
             channels=task["channels"],
             grid_layout=task["grid_layout"],
@@ -1403,6 +1517,7 @@ def _plot_task(task: Dict[str, Any]) -> None:
             markers=task["markers"],
             event_vlines=task.get("event_vlines", []),
             event_vline_style=event_vline_style,
+            event_vline_order=event_vline_order,
             x=np.asarray(task["x"], dtype=float),
             channels=task["channels"],
             grid_layout=task["grid_layout"],
@@ -1427,6 +1542,7 @@ def _plot_task(task: Dict[str, Any]) -> None:
             markers=task["markers"],
             event_vlines=task.get("event_vlines", []),
             event_vline_style=event_vline_style,
+            event_vline_order=event_vline_order,
             x_axis=np.asarray(task["x_axis"], dtype=float) if task["x_axis"] is not None else None,
             target_axis=np.asarray(task["target_axis"], dtype=float) if task["target_axis"] is not None else None,
             time_start_ms=task["time_start_ms"],
@@ -1452,6 +1568,7 @@ def _plot_task(task: Dict[str, Any]) -> None:
             markers=task["markers"],
             event_vlines=task.get("event_vlines", []),
             event_vline_style=event_vline_style,
+            event_vline_order=event_vline_order,
             x_axis=np.asarray(task["x_axis"], dtype=float) if task["x_axis"] is not None else None,
             time_start_ms=task["time_start_ms"],
             time_end_ms=task["time_end_ms"],
@@ -1481,6 +1598,7 @@ def _plot_overlay_generic(
     pooled_event_vlines_by_channel: Optional[Dict[str, List[Dict[str, Any]]]],
     event_vline_style: Dict[str, Any],
     event_vline_overlay_cfg: Optional[Dict[str, Any]],
+    event_vline_order: Sequence[str],
     output_path: Path,
     mode_name: str,
     group_fields: List[str],
@@ -1508,6 +1626,7 @@ def _plot_overlay_generic(
             pooled_event_vlines=pooled_event_vlines,
             event_vline_style=event_vline_style,
             event_vline_overlay_cfg=event_vline_overlay_cfg,
+            event_vline_order=event_vline_order,
             output_path=output_path,
             mode_name=mode_name,
             group_fields=group_fields,
@@ -1532,6 +1651,7 @@ def _plot_overlay_generic(
             pooled_event_vlines=pooled_event_vlines,
             event_vline_style=event_vline_style,
             event_vline_overlay_cfg=event_vline_overlay_cfg,
+            event_vline_order=event_vline_order,
             output_path=output_path,
             mode_name=mode_name,
             group_fields=group_fields,
@@ -1561,6 +1681,7 @@ def _plot_overlay_generic(
         pooled_event_vlines_by_channel=pooled_event_vlines_by_channel,
         event_vline_style=event_vline_style,
         event_vline_overlay_cfg=event_vline_overlay_cfg,
+        event_vline_order=event_vline_order,
         output_path=output_path,
         mode_name=mode_name,
         signal_group=signal_group,
@@ -1594,6 +1715,7 @@ def _plot_emg(
     event_vlines: List[Dict[str, Any]],
     event_vlines_by_channel: Optional[Dict[str, List[Dict[str, Any]]]],
     event_vline_style: Dict[str, Any],
+    event_vline_order: Sequence[str],
     x: np.ndarray,
     channels: List[str],
     grid_layout: List[int],
@@ -1659,12 +1781,20 @@ def _plot_emg(
                 time_start_frame=time_start_frame,
                 time_end_frame=time_end_frame,
             )
-            ticks = _ensure_event_vline_xticks(
+            tick_vlines = ch_event_vlines or event_vlines
+            ticks, blank_positions = _apply_event_vline_xticks(
                 ax,
                 tick_positions=ticks,
-                event_vlines=ch_event_vlines or event_vlines,
+                event_vlines=tick_vlines,
+                event_order=event_vline_order,
+                tick_labelsize=common_style["tick_labelsize"],
             )
-            _apply_frame_tick_labels(ax, time_start_frame=time_start_frame, time_end_frame=time_end_frame)
+            _apply_frame_tick_labels(
+                ax,
+                time_start_frame=time_start_frame,
+                time_end_frame=time_end_frame,
+                blank_positions=blank_positions,
+            )
             _auto_rotate_dense_xticklabels(
                 ax,
                 tick_positions=ticks,
@@ -1696,6 +1826,7 @@ def _plot_overlay_timeseries_grid(
     pooled_event_vlines_by_channel: Optional[Dict[str, List[Dict[str, Any]]]],
     event_vline_style: Dict[str, Any],
     event_vline_overlay_cfg: Optional[Dict[str, Any]],
+    event_vline_order: Sequence[str],
     output_path: Path,
     mode_name: str,
     signal_group: str,
@@ -1831,12 +1962,19 @@ def _plot_overlay_timeseries_grid(
                     event_vlines_by_key=event_vlines_by_key_for_tick,
                     overlay_cfg=event_vline_overlay_cfg,
                 )
-                ticks = _ensure_event_vline_xticks(
+                ticks, blank_positions = _apply_event_vline_xticks(
                     ax,
                     tick_positions=ticks,
                     event_vlines=tick_vlines,
+                    event_order=event_vline_order,
+                    tick_labelsize=common_style["tick_labelsize"],
                 )
-                _apply_frame_tick_labels(ax, time_start_frame=time_start_frame, time_end_frame=time_end_frame)
+                _apply_frame_tick_labels(
+                    ax,
+                    time_start_frame=time_start_frame,
+                    time_end_frame=time_end_frame,
+                    blank_positions=blank_positions,
+                )
                 _auto_rotate_dense_xticklabels(
                     ax,
                     tick_positions=ticks,
@@ -1931,12 +2069,19 @@ def _plot_overlay_timeseries_grid(
                     event_vlines_by_key=event_vlines_by_key,
                     overlay_cfg=event_vline_overlay_cfg,
                 )
-                ticks = _ensure_event_vline_xticks(
+                ticks, blank_positions = _apply_event_vline_xticks(
                     ax,
                     tick_positions=ticks,
                     event_vlines=tick_vlines,
+                    event_order=event_vline_order,
+                    tick_labelsize=common_style["tick_labelsize"],
                 )
-                _apply_frame_tick_labels(ax, time_start_frame=time_start_frame, time_end_frame=time_end_frame)
+                _apply_frame_tick_labels(
+                    ax,
+                    time_start_frame=time_start_frame,
+                    time_end_frame=time_end_frame,
+                    blank_positions=blank_positions,
+                )
                 _auto_rotate_dense_xticklabels(
                     ax,
                     tick_positions=ticks,
@@ -1971,6 +2116,7 @@ def _plot_forceplate(
     markers: Dict[str, Any],
     event_vlines: List[Dict[str, Any]],
     event_vline_style: Dict[str, Any],
+    event_vline_order: Sequence[str],
     x: np.ndarray,
     channels: List[str],
     grid_layout: List[int],
@@ -2024,12 +2170,19 @@ def _plot_forceplate(
                 time_start_frame=time_start_frame,
                 time_end_frame=time_end_frame,
             )
-            ticks = _ensure_event_vline_xticks(
+            ticks, blank_positions = _apply_event_vline_xticks(
                 ax,
                 tick_positions=ticks,
                 event_vlines=event_vlines,
+                event_order=event_vline_order,
+                tick_labelsize=common_style["tick_labelsize"],
             )
-            _apply_frame_tick_labels(ax, time_start_frame=time_start_frame, time_end_frame=time_end_frame)
+            _apply_frame_tick_labels(
+                ax,
+                time_start_frame=time_start_frame,
+                time_end_frame=time_end_frame,
+                blank_positions=blank_positions,
+            )
             _auto_rotate_dense_xticklabels(
                 ax,
                 tick_positions=ticks,
@@ -2063,6 +2216,7 @@ def _plot_cop(
     markers: Dict[str, Dict[str, float]],
     event_vlines: List[Dict[str, Any]],
     event_vline_style: Dict[str, Any],
+    event_vline_order: Sequence[str],
     x_axis: Optional[np.ndarray],
     target_axis: Optional[np.ndarray],
     time_start_ms: float,
@@ -2220,12 +2374,19 @@ def _plot_cop(
                 time_start_frame=time_start_frame,
                 time_end_frame=time_end_frame,
             )
-            ticks = _ensure_event_vline_xticks(
+            ticks, blank_positions = _apply_event_vline_xticks(
                 ax,
                 tick_positions=ticks,
                 event_vlines=event_vlines,
+                event_order=event_vline_order,
+                tick_labelsize=common_style["tick_labelsize"],
             )
-            _apply_frame_tick_labels(ax, time_start_frame=time_start_frame, time_end_frame=time_end_frame)
+            _apply_frame_tick_labels(
+                ax,
+                time_start_frame=time_start_frame,
+                time_end_frame=time_end_frame,
+                blank_positions=blank_positions,
+            )
             _auto_rotate_dense_xticklabels(
                 ax,
                 tick_positions=ticks,
@@ -2264,6 +2425,7 @@ def _plot_com(
     markers: Dict[str, Dict[str, float]],
     event_vlines: List[Dict[str, Any]],
     event_vline_style: Dict[str, Any],
+    event_vline_order: Sequence[str],
     x_axis: Optional[np.ndarray],
     time_start_ms: float,
     time_end_ms: float,
@@ -2489,12 +2651,19 @@ def _plot_com(
                 time_start_frame=time_start_frame,
                 time_end_frame=time_end_frame,
             )
-            ticks = _ensure_event_vline_xticks(
+            ticks, blank_positions = _apply_event_vline_xticks(
                 ax,
                 tick_positions=ticks,
                 event_vlines=event_vlines,
+                event_order=event_vline_order,
+                tick_labelsize=common_style["tick_labelsize"],
             )
-            _apply_frame_tick_labels(ax, time_start_frame=time_start_frame, time_end_frame=time_end_frame)
+            _apply_frame_tick_labels(
+                ax,
+                time_start_frame=time_start_frame,
+                time_end_frame=time_end_frame,
+                blank_positions=blank_positions,
+            )
             _auto_rotate_dense_xticklabels(
                 ax,
                 tick_positions=ticks,
@@ -2528,6 +2697,7 @@ def _plot_cop_overlay(
     pooled_event_vlines: Sequence[Dict[str, Any]],
     event_vline_style: Dict[str, Any],
     event_vline_overlay_cfg: Optional[Dict[str, Any]],
+    event_vline_order: Sequence[str],
     output_path: Path,
     mode_name: str,
     group_fields: List[str],
@@ -2670,12 +2840,19 @@ def _plot_cop_overlay(
                 event_vlines_by_key=event_vlines_by_key,
                 overlay_cfg=event_vline_overlay_cfg,
             )
-            ticks = _ensure_event_vline_xticks(
+            ticks, blank_positions = _apply_event_vline_xticks(
                 ax,
                 tick_positions=ticks,
                 event_vlines=tick_vlines,
+                event_order=event_vline_order,
+                tick_labelsize=common_style["tick_labelsize"],
             )
-            _apply_frame_tick_labels(ax, time_start_frame=time_start_frame, time_end_frame=time_end_frame)
+            _apply_frame_tick_labels(
+                ax,
+                time_start_frame=time_start_frame,
+                time_end_frame=time_end_frame,
+                blank_positions=blank_positions,
+            )
             _auto_rotate_dense_xticklabels(
                 ax,
                 tick_positions=ticks,
@@ -2745,6 +2922,7 @@ def _plot_com_overlay(
     pooled_event_vlines: Sequence[Dict[str, Any]],
     event_vline_style: Dict[str, Any],
     event_vline_overlay_cfg: Optional[Dict[str, Any]],
+    event_vline_order: Sequence[str],
     output_path: Path,
     mode_name: str,
     group_fields: List[str],
@@ -2930,12 +3108,19 @@ def _plot_com_overlay(
                 event_vlines_by_key=event_vlines_by_key,
                 overlay_cfg=event_vline_overlay_cfg,
             )
-            ticks = _ensure_event_vline_xticks(
+            ticks, blank_positions = _apply_event_vline_xticks(
                 ax,
                 tick_positions=ticks,
                 event_vlines=tick_vlines,
+                event_order=event_vline_order,
+                tick_labelsize=common_style["tick_labelsize"],
             )
-            _apply_frame_tick_labels(ax, time_start_frame=time_start_frame, time_end_frame=time_end_frame)
+            _apply_frame_tick_labels(
+                ax,
+                time_start_frame=time_start_frame,
+                time_end_frame=time_end_frame,
+                blank_positions=blank_positions,
+            )
             _auto_rotate_dense_xticklabels(
                 ax,
                 tick_positions=ticks,
@@ -3049,7 +3234,7 @@ class AggregatedSignalVisualizer:
         self._input_columns: Optional[set[str]] = None
 
         event_vlines_cfg = self.config.get("event_vlines")
-        self.event_vline_columns = _parse_event_vlines_config(event_vlines_cfg)
+        self.event_vline_columns = _parse_event_vlines_config(event_vlines_cfg)  # tick 라벨 우선순위는 이 순서를 따름
         self.event_vline_meta_cols = [_event_ms_col(col) for col in self.event_vline_columns]
         self.event_vline_style = _parse_event_vlines_style(event_vlines_cfg)
         self.event_vline_colors = _build_event_vline_color_map(self.event_vline_columns, event_vlines_cfg)
@@ -4169,6 +4354,7 @@ class AggregatedSignalVisualizer:
             "pooled_event_vlines_by_channel": pooled_event_vlines_by_channel,
             "event_vline_style": self.event_vline_style,
             "event_vline_overlay_cfg": self.event_vline_overlay_cfg,
+            "event_vline_order": self.event_vline_columns,
             "x": self.x_norm,
             "window_spans": window_spans,
             "window_spans_by_channel": window_spans_by_channel,
@@ -4252,6 +4438,7 @@ class AggregatedSignalVisualizer:
             "event_vlines": event_vlines,
             "event_vlines_by_channel": event_vlines_by_channel,
             "event_vline_style": self.event_vline_style,
+            "event_vline_order": self.event_vline_columns,
             "x": self.x_norm,
             "channels": self.config["signal_groups"]["emg"]["columns"],
             "grid_layout": self.config["signal_groups"]["emg"]["grid_layout"],
@@ -4289,6 +4476,7 @@ class AggregatedSignalVisualizer:
             "markers": markers,
             "event_vlines": event_vlines,
             "event_vline_style": self.event_vline_style,
+            "event_vline_order": self.event_vline_columns,
             "x": self.x_norm,
             "channels": self.config["signal_groups"]["forceplate"]["columns"],
             "grid_layout": self.config["signal_groups"]["forceplate"]["grid_layout"],
@@ -4324,6 +4512,7 @@ class AggregatedSignalVisualizer:
             "markers": markers,
             "event_vlines": event_vlines,
             "event_vline_style": self.event_vline_style,
+            "event_vline_order": self.event_vline_columns,
             "x_axis": self.x_norm,
             "target_axis": self.target_axis,
             "time_start_ms": self.time_start_ms,
@@ -4360,6 +4549,7 @@ class AggregatedSignalVisualizer:
             "markers": markers,
             "event_vlines": event_vlines,
             "event_vline_style": self.event_vline_style,
+            "event_vline_order": self.event_vline_columns,
             "x_axis": self.x_norm,
             "time_start_ms": self.time_start_ms,
             "time_end_ms": self.time_end_ms,
