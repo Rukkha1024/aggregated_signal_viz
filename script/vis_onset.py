@@ -139,14 +139,28 @@ def process_stats(
     df: pl.DataFrame, 
     muscle_order: List[str], 
     facet_col: Optional[str], 
-    hue_col: Optional[str]
+    hue_col: Optional[str],
+    trial_key_cols: List[str],
 ) -> pl.DataFrame:
-    """Group by (facet, hue, muscle) and compute mean/std/count (+ total_count)."""
+    """Group by (facet, hue, muscle) and compute mean/std/count (+ total_count).
+
+    Notes
+    -----
+    - `count`: number of unique trials with valid (non-null, non-NaN) values for the target column.
+    - `total_count`: number of unique trials in the (facet, hue) group (same denominator across muscles).
+    """
     target_col = VIZ_CFG.target_column
     muscle_col = VIZ_CFG.muscle_column_in_feature
     
     print(f"\n[Process Stats] Target Column: {target_col}")
     print(f"[Process Stats] Initial Data Shape: {df.shape}")
+
+    missing_trial_cols = [c for c in trial_key_cols if c not in df.columns]
+    if missing_trial_cols:
+        raise KeyError(
+            "Missing trial key columns required for counting unique trials: "
+            f"{missing_trial_cols}. Available columns: {df.columns}"
+        )
 
     df_muscle_filtered = df.filter(pl.col(muscle_col).is_in(muscle_order))
     print(f"[Process Stats] Shape after filtering muscles: {df_muscle_filtered.shape}")
@@ -168,17 +182,26 @@ def process_stats(
     if hue_col and hue_col in df.columns:
         group_cols.append(hue_col)
 
-    totals_df = df_muscle_filtered.group_by(group_cols).agg([
-        pl.col(target_col).count().alias("total_count")
+    denom_group_cols = [c for c in group_cols if c != muscle_col]
+    if not denom_group_cols:
+        denom_group_cols = ["_denom_dummy"]
+        df_muscle_filtered = df_muscle_filtered.with_columns(pl.lit(1).alias("_denom_dummy"))
+        df_clean = df_clean.with_columns(pl.lit(1).alias("_denom_dummy"))
+        group_cols.append("_denom_dummy")
+
+    trial_key_expr = pl.struct(trial_key_cols).alias("_trial_key")
+
+    totals_df = df_muscle_filtered.group_by(denom_group_cols).agg([
+        trial_key_expr.n_unique().alias("total_count")
     ])
 
     stats = df_clean.group_by(group_cols).agg([
         pl.col(target_col).mean().alias("mean"),
         pl.col(target_col).std().alias("std"),
-        pl.col(target_col).count().alias("count")
+        trial_key_expr.n_unique().alias("count"),
     ])
 
-    stats = stats.join(totals_df, on=group_cols, how="left")
+    stats = stats.join(totals_df, on=denom_group_cols, how="left")
     stats = stats.with_columns(pl.col("total_count").fill_null(0))
 
     print("\n[Process Stats] Calculated Stats Summary:")
@@ -462,12 +485,20 @@ def main():
         print("Warning: EMG columns not found in config. Using data-driven muscle list.")
         muscle_order = sorted(df[VIZ_CFG.muscle_column_in_feature].unique().to_list())
         print(f"Using data-driven muscle order: {muscle_order}")
+
+    id_cols_cfg = config.get("data", {}).get("id_columns", {})
+    trial_key_cols = [
+        id_cols_cfg.get("subject", "subject"),
+        id_cols_cfg.get("velocity", "velocity"),
+        id_cols_cfg.get("trial", "trial_num"),
+    ]
         
     stats = process_stats(
         df, 
         muscle_order=muscle_order, 
         facet_col=args.facet, 
-        hue_col=args.hue
+        hue_col=args.hue,
+        trial_key_cols=trial_key_cols,
     )
     
     if stats.is_empty():
