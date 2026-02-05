@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import matplotlib.lines as mlines
+from matplotlib.ticker import MultipleLocator
 import numpy as np
 import polars as pl
 
@@ -76,12 +77,12 @@ class VizConfig:
     
     bar_width: float = 0.6  # 한 muscle tick에 할당되는 전체 폭(여러 hue가 있으면 내부에서 분할)
     marker_alpha: float = 1.0  # 마커 투명도(0~1)
-    errorbar_alpha: float = 0.6  # 에러바 선/캡 투명도(0~1)
     
     # Error Bar Detail Style
+    errorbar_alpha: float = 0.8  # 에러바 선/캡 투명도(0~1)
     cap_size: int = 4  # 에러바 끝 캡(cap) 크기
-    errorbar_linewidth: float = 1.5  # 오차 막대 선 두께
-    errorbar_capthick: float = 1.0  # 오차 막대 캡 선 두께
+    errorbar_linewidth: float = 2  # 오차 막대 선 두께
+    errorbar_capthick: float = 3  # 오차 막대 캡 선 두께
     
     # Text Style
     text_fontsize: int = 8  # bar 옆에 표시되는 값(예: mean±std, n) 텍스트 크기
@@ -92,16 +93,17 @@ class VizConfig:
     tick_labelsize: int = 20  # y축 tick 라벨 크기(근육명)
     xtick_labelsize: int = 20  # x축 tick 라벨 크기(숫자)
     
+    # Grid Style
+    grid_alpha: float = 1  # 그리드 선 투명도(0~1)
+    grid_linestyle: str = "--"  # 그리드 선 스타일 ('-', '--', '-.', ':', 'solid', 'dashed', 'dashdot', 'dotted')
+    grid_linewidth: float = 0.8  # 그리드 선 두께
+    grid_color: str = "gray"  # 그리드 선 색상
+    
     # Layout
-    grid_alpha: float = 0.3  # 그리드 선 투명도(가독성 조절)
     layout_rect: Tuple[float, float, float, float] = (0, 0, 1, 0.95)  # tight_layout 적용 영역(left, bottom, right, top)
 
     # Sorting
-    # Sort muscles by mean onset timing value (within each facet)
-    # None: use muscle_order from config (default)
-    # "ascending": sort by mean value (earliest onset first)
-    # "descending": sort by mean value (latest onset first)
-    sort_by_mean: Optional[str] = None  # None, "ascending", or "descending"
+    sort_by_mean: Optional[str] = "ascending"  # None, "ascending", or "descending"
     
     # Output
     # NOTE: output base dir comes from config.yaml (output.base_dir).
@@ -411,7 +413,15 @@ def plot_onset_timing(
         ax.set_yticklabels(valid_muscles_reversed, fontsize=VIZ_CFG.tick_labelsize)
         ax.set_xlabel(VIZ_CFG.x_label, fontsize=VIZ_CFG.xlabel_fontsize)
         ax.tick_params(axis="x", labelsize=VIZ_CFG.xtick_labelsize)
-        ax.grid(True, axis="x", alpha=VIZ_CFG.grid_alpha, linestyle="--")
+        ax.xaxis.set_major_locator(MultipleLocator(20))
+        ax.grid(
+            True, 
+            axis="x", 
+            alpha=VIZ_CFG.grid_alpha, 
+            linestyle=VIZ_CFG.grid_linestyle,
+            linewidth=VIZ_CFG.grid_linewidth,
+            color=VIZ_CFG.grid_color
+        )
         
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
