@@ -136,35 +136,38 @@ class VizConfig:
 VIZ_CFG = VizConfig()
 
 def _apply_onset_show_options_from_config(config: Dict[str, Any]) -> None:
-    cfg = (
-        config.get("figure_layout", {})
-        .get("summary_plots", {})
-        .get("onset", {})
-    )
-    if not isinstance(cfg, dict):
-        return
+    """
+    vis_onset show_* policy:
+      - By default, follow `plot_style.common.show_*` (single source of truth).
+      - `figure_layout.summary_plots.onset` is reserved for layout-only settings (e.g., max_cols).
+    """
+    common = (config.get("plot_style") or {}).get("common") or {}
+    if not isinstance(common, dict):
+        common = {}
 
-    def _maybe_bool(key: str) -> Optional[bool]:
-        val = cfg.get(key)
-        if val is None:
+    def _as_bool(value: Any) -> Optional[bool]:
+        if value is None:
             return None
-        if isinstance(val, bool):
-            return val
-        text = str(val).strip().lower()
+        if isinstance(value, bool):
+            return value
+        text = str(value).strip().lower()
         if text in ("true", "1", "yes", "y", "on"):
             return True
         if text in ("false", "0", "no", "n", "off"):
             return False
         return None
 
-    for key, attr in (
-        ("show_title", "show_title"),
-        ("show_legend", "show_legend"),
-        ("show_xlabel", "show_xlabel"),
-        ("show_xtick_labels", "show_xtick_labels"),
-        ("show_ytick_labels", "show_ytick_labels"),
-    ):
-        b = _maybe_bool(key)
+    mapping = {
+        "show_title": ("show_subplot_titles", VIZ_CFG.show_title),
+        "show_legend": ("show_legend", VIZ_CFG.show_legend),
+        "show_xlabel": ("show_xlabel", VIZ_CFG.show_xlabel),
+        "show_xtick_labels": ("show_xtick_labels", VIZ_CFG.show_xtick_labels),
+        "show_ytick_labels": ("show_ytick_labels", VIZ_CFG.show_ytick_labels),
+    }
+
+    for attr, (key, fallback) in mapping.items():
+        raw = common.get(key, fallback)
+        b = _as_bool(raw)
         if b is None:
             continue
         setattr(VIZ_CFG, attr, bool(b))
