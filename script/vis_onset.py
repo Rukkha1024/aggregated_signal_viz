@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import os
+import string
 from dataclasses import dataclass, field
 from math import ceil
 from pathlib import Path
@@ -41,7 +43,7 @@ class VizConfig:
     # 필터 안 쓰려면 빈 딕셔너리로: {}
     filters: Dict[str, Any] = field(default_factory=lambda: {
         "mixed": "1",
-        "step_TF": "nonstep"
+        "step_TF": "step"
     })
 
     # Plot Dimensions & Style
@@ -103,11 +105,11 @@ class VizConfig:
     layout_rect: Tuple[float, float, float, float] = (0, 0, 1, 0.95)  # tight_layout 적용 영역(left, bottom, right, top)
     # Title
     title: Optional[str] = None  # None이면 각 facet의 기본 제목 사용
-    show_title: bool = True
-    show_legend: bool = True
-    show_counts_text: bool = True  # e.g., "count/total_count" next to marker
-    show_xlabel: bool = True
-    show_xtick_labels: bool = True
+    show_title: bool = False  # True, False
+    show_legend: bool = False
+    show_counts_text: bool = False  # e.g., "count/total_count" next to marker
+    show_xlabel: bool = False
+    show_xtick_labels: bool = False
 
     # Sorting
     sort_by_mean: Optional[str] = "None"  # None, "ascending", or "descending"
@@ -117,6 +119,178 @@ class VizConfig:
     output_dir: str = "onset"  # plot-type subfolder under output.base_dir (e.g., output/onset)
 
 VIZ_CFG = VizConfig()
+
+
+def _as_str_list(value: Any) -> List[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        out: List[str] = []
+        for item in value:
+            if item is None:
+                continue
+            text = str(item).strip()
+            if not text:
+                continue
+            out.append(text)
+        return out
+    text = str(value).strip()
+    return [text] if text else []
+
+
+def _get_mode_cfg(config: Dict[str, Any], mode_name: str) -> Dict[str, Any]:
+    modes = config.get("aggregation_modes", {})
+    if not isinstance(modes, dict):
+        raise TypeError("config['aggregation_modes'] must be a mapping.")
+    if mode_name not in modes:
+        available = ", ".join(sorted(modes.keys()))
+        raise KeyError(f"Unknown mode '{mode_name}'. Available: {available}")
+    mode_cfg = modes[mode_name]
+    if not isinstance(mode_cfg, dict):
+        raise TypeError(f"aggregation_modes.{mode_name} must be a mapping.")
+    if not mode_cfg.get("enabled", True):
+        print(f"Warning: aggregation_modes.{mode_name}.enabled is false (running anyway).")
+    return mode_cfg
+
+
+def _coerce_value_for_dtype(value: Any, dtype: pl.DataType) -> Any:
+    if dtype in [
+        pl.Int64,
+        pl.Int32,
+        pl.Int16,
+        pl.Int8,
+        pl.UInt64,
+        pl.UInt32,
+        pl.UInt16,
+        pl.UInt8,
+    ]:
+        try:
+            return int(value)
+        except (ValueError, TypeError):
+            return value
+    if dtype in [pl.Float64, pl.Float32]:
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            return value
+    return value
+
+
+def _apply_filters(df: pl.DataFrame, filters: Dict[str, Any]) -> pl.DataFrame:
+    if not filters:
+        return df
+
+    filter_exprs = []
+    for col_name, raw_value in filters.items():
+        if col_name not in df.columns:
+            print(f"Warning: Filter column '{col_name}' not found in data (skipping).")
+            continue
+
+        col_dtype = df[col_name].dtype
+        col_value = _coerce_value_for_dtype(raw_value, col_dtype)
+        filter_exprs.append(pl.col(col_name) == col_value)
+        print(f"Applying filter: {col_name} == {col_value!r}")
+
+    if filter_exprs:
+        df = df.filter(pl.all_horizontal(filter_exprs))
+        print(f"Data shape after filtering: {df.shape}")
+    return df
+
+
+def _combo_key_expr(cols: List[str]) -> pl.Expr:
+    parts: List[pl.Expr] = []
+    for col in cols:
+        parts.append(
+            pl.concat_str(
+                [
+                    pl.lit(f"{col}="),
+                    pl.col(col).cast(pl.Utf8),
+                ],
+                separator="",
+            )
+        )
+    return pl.concat_str(parts, separator=", ")
+
+
+def _infer_facet_and_hue_columns(
+    mode_cfg: Dict[str, Any],
+    df_columns: List[str],
+) -> Tuple[Optional[str], Optional[str], List[str], List[str]]:
+    """
+    Returns (facet_col, hue_col, facet_fields, hue_fields).
+
+    Policy (aggregation_modes-compatible, onset-friendly):
+      - Prefer `overlay_within` for hue (if present), else `color_by`.
+      - Use remaining `groupby` fields (minus `overlay_within`) as facet candidates.
+      - If multiple candidates exist, build a combined key column.
+    """
+    overlay_within = _as_str_list(mode_cfg.get("overlay_within"))
+    color_by = _as_str_list(mode_cfg.get("color_by"))
+    groupby = _as_str_list(mode_cfg.get("groupby"))
+    overlay = bool(mode_cfg.get("overlay", False))
+
+    hue_fields: List[str] = []
+    if overlay and overlay_within:
+        hue_fields = overlay_within
+    elif color_by:
+        hue_fields = color_by
+
+    hue_fields = [c for c in hue_fields if c in df_columns]
+    if len(hue_fields) == 1:
+        hue_col = hue_fields[0]
+    elif len(hue_fields) > 1:
+        hue_col = "__hue_combo"
+    else:
+        hue_col = None
+
+    facet_candidates = groupby
+    if overlay and overlay_within:
+        facet_candidates = [c for c in facet_candidates if c not in overlay_within]
+    if hue_col and hue_col in facet_candidates:
+        facet_candidates = [c for c in facet_candidates if c != hue_col]
+    facet_candidates = [c for c in facet_candidates if c in df_columns]
+
+    if len(facet_candidates) == 1:
+        facet_col = facet_candidates[0]
+    elif len(facet_candidates) > 1:
+        facet_col = "__facet_combo"
+    else:
+        facet_col = None
+
+    return facet_col, hue_col, facet_candidates, hue_fields
+
+
+def _format_mode_filename(
+    pattern: str,
+    df: pl.DataFrame,
+    filters: Dict[str, Any],
+) -> str:
+    fmt = string.Formatter()
+    fields = [field_name for _, field_name, _, _ in fmt.parse(pattern) if field_name]
+
+    context: Dict[str, Any] = {"signal_group": "onset"}
+    for key, value in (filters or {}).items():
+        context[key] = value
+
+    for field in fields:
+        if field in context:
+            continue
+        if field not in df.columns:
+            continue
+
+        series = df.get_column(field)
+        unique_vals = series.drop_nulls().unique().to_list()
+        if len(unique_vals) == 1:
+            context[field] = unique_vals[0]
+
+    missing = [f for f in fields if f not in context]
+    if missing:
+        raise KeyError(f"filename_pattern missing keys: {missing}")
+
+    filename = pattern.format(**context)
+    filename = filename.replace(os.sep, "_")
+    return filename
+
 
 def load_and_merge_data(config: Dict[str, Any], base_dir: Path) -> pl.DataFrame:
     """Load input (parquet) + features (csv) and join by trial keys."""
@@ -266,6 +440,7 @@ def plot_onset_timing(
     output_filename: str,
     config: Dict[str, Any],
     sort_by_mean: Optional[str] = None,
+    filters: Optional[Dict[str, Any]] = None,
 ):
     """Generate horizontal error-bar plot and save to output.
     
@@ -281,7 +456,7 @@ def plot_onset_timing(
     
     # Build title from active filters
     filter_title_parts = []
-    for col_name, col_value in VIZ_CFG.filters.items():
+    for col_name, col_value in (filters or {}).items():
         filter_title_parts.append(f"{col_name}={col_value}")
     filter_title = ", ".join(filter_title_parts) if filter_title_parts else "All Data"
     
@@ -498,15 +673,21 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Visualize Onset Timing (Vertical Forest Plot)")
     parser.add_argument("--config", type=str, default="config.yaml", help="Path to config.yaml")
     parser.add_argument(
+        "--mode",
+        type=str,
+        default=None,
+        help="Name of config.yaml aggregation_modes entry to use for filtering/faceting/hue/output.",
+    )
+    parser.add_argument(
         "--facet",
         type=str,
-        default=VIZ_CFG.facet_column,
+        default=argparse.SUPPRESS,
         help=f"Column for Faceting (Subplots). Default: {VIZ_CFG.facet_column}"
     )
     parser.add_argument(
         "--hue",
         type=str,
-        default=VIZ_CFG.hue_column,
+        default=argparse.SUPPRESS,
         help=f"Column for Hue (Colors). Default: {VIZ_CFG.hue_column}"
     )
     parser.add_argument("--velocity", type=float, default=None, help="Filter by velocity (optional)")
@@ -521,36 +702,40 @@ def main():
     
     df = load_and_merge_data(config, base_dir)
     
-    # Apply filters from VizConfig.filters
-    filter_exprs = []
-    for col_name, col_value in VIZ_CFG.filters.items():
-        if col_name in df.columns:
-            # Auto-convert col_value type to match column dtype
-            col_dtype = df[col_name].dtype
-            if col_dtype in [pl.Int64, pl.Int32, pl.Int16, pl.Int8, pl.UInt64, pl.UInt32, pl.UInt16, pl.UInt8]:
-                try:
-                    col_value = int(col_value)
-                except (ValueError, TypeError):
-                    pass
-            elif col_dtype in [pl.Float64, pl.Float32]:
-                try:
-                    col_value = float(col_value)
-                except (ValueError, TypeError):
-                    pass
-            
-            filter_exprs.append(pl.col(col_name) == col_value)
-            print(f"Applying filter: {col_name} == {col_value!r}")
-        else:
-            print(f"Warning: Filter column '{col_name}' not found in data")
-    
-    if filter_exprs:
-        df = df.filter(pl.all_horizontal(filter_exprs))
-        print(f"Data shape after filtering: {df.shape}")
+    mode_cfg: Optional[Dict[str, Any]] = None
+    active_filters: Dict[str, Any] = dict(VIZ_CFG.filters)
+    if args.mode:
+        mode_cfg = _get_mode_cfg(config, args.mode)
+        mode_filters = mode_cfg.get("filter", {})
+        if mode_filters is None:
+            mode_filters = {}
+        if not isinstance(mode_filters, dict):
+            raise TypeError(f"aggregation_modes.{args.mode}.filter must be a mapping.")
+        active_filters = dict(mode_filters)
+
+    df = _apply_filters(df, active_filters)
+
+    # Resolve facet/hue defaults (CLI overrides > mode inference > VizConfig defaults)
+    facet_col: Optional[str] = args.facet if hasattr(args, "facet") else VIZ_CFG.facet_column
+    hue_col: Optional[str] = args.hue if hasattr(args, "hue") else VIZ_CFG.hue_column
+
+    if mode_cfg is not None and not hasattr(args, "facet") and not hasattr(args, "hue"):
+        inferred_facet, inferred_hue, facet_fields, hue_fields = _infer_facet_and_hue_columns(
+            mode_cfg=mode_cfg,
+            df_columns=df.columns,
+        )
+        if inferred_hue == "__hue_combo" and hue_fields:
+            df = df.with_columns(_combo_key_expr(hue_fields).alias("__hue_combo"))
+        if inferred_facet == "__facet_combo" and facet_fields:
+            df = df.with_columns(_combo_key_expr(facet_fields).alias("__facet_combo"))
+        facet_col = inferred_facet
+        hue_col = inferred_hue
     
     if args.velocity is not None:
         if "velocity" in df.columns:
             print(f"Filtering velocity = {args.velocity}")
             df = df.filter(pl.col("velocity") == args.velocity)
+            print(f"Data shape after velocity filtering: {df.shape}")
     
     try:
         muscle_order = config["signal_groups"]["emg"]["columns"]
@@ -570,8 +755,8 @@ def main():
     stats = process_stats(
         df, 
         muscle_order=muscle_order, 
-        facet_col=args.facet, 
-        hue_col=args.hue,
+        facet_col=facet_col, 
+        hue_col=hue_col,
         trial_key_cols=trial_key_cols,
     )
     
@@ -582,30 +767,49 @@ def main():
     print("Final Stats for Plotting:")
     print(stats)
 
-    # Build filename from filters
-    fname_parts = [VIZ_CFG.file_prefix]
-    for col_name, col_value in VIZ_CFG.filters.items():
-        fname_parts.append(f"{col_name}-{col_value}")
-    if args.facet: 
-        fname_parts.append(f"facet-{args.facet}")
-    if args.hue: 
-        fname_parts.append(f"hue-{args.hue}")
-    filename = "_".join(fname_parts) + ".png"
-
     output_base_dir = Path(config.get("output", {}).get("base_dir", "output"))
     if not output_base_dir.is_absolute():
         output_base_dir = (base_dir / output_base_dir).resolve()
+
     output_dir = output_base_dir / VIZ_CFG.output_dir
+    filename: str
+    if mode_cfg is not None:
+        mode_out_subdir = mode_cfg.get("output_dir") or args.mode
+        output_dir = output_dir / str(mode_out_subdir)
+
+        filename_pattern = mode_cfg.get("filename_pattern")
+        if filename_pattern is not None and str(filename_pattern).strip():
+            try:
+                filename = _format_mode_filename(str(filename_pattern), df=df, filters=active_filters)
+            except KeyError as e:
+                print(f"Warning: {e}. Falling back to legacy filename policy.")
+                filename_pattern = None
+        else:
+            filename_pattern = None
+
+        if not filename_pattern:
+            filename = f"{VIZ_CFG.file_prefix}_{args.mode}.png"
+    else:
+        # Legacy filename policy (backward compatible)
+        fname_parts = [VIZ_CFG.file_prefix]
+        for col_name, col_value in active_filters.items():
+            fname_parts.append(f"{col_name}-{col_value}")
+        if facet_col:
+            fname_parts.append(f"facet-{facet_col}")
+        if hue_col:
+            fname_parts.append(f"hue-{hue_col}")
+        filename = "_".join(fname_parts) + ".png"
     
     plot_onset_timing(
         stats_df=stats,
         muscle_order=muscle_order,
-        facet_col=args.facet,
-        hue_col=args.hue,
+        facet_col=facet_col,
+        hue_col=hue_col,
         output_dir=output_dir,
         output_filename=filename,
         config=config,
         sort_by_mean=VIZ_CFG.sort_by_mean,
+        filters=active_filters,
     )
 
 if __name__ == "__main__":
