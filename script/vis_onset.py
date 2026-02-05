@@ -101,6 +101,8 @@ class VizConfig:
     
     # Layout
     layout_rect: Tuple[float, float, float, float] = (0, 0, 1, 0.95)  # tight_layout 적용 영역(left, bottom, right, top)
+    # Title
+    title: Optional[str] = "nonstep 시 노인과 성인 근활성 타이밍 비교"  # Optional override for facet titles
 
     # Sorting
     sort_by_mean: Optional[str] = "None"  # None, "ascending", or "descending"
@@ -407,7 +409,8 @@ def plot_onset_timing(
                     color=color
                 )
 
-        title = f"{facet_val}" if facet_col != "_facet_dummy" else filter_title
+        default_title = f"{facet_val}" if facet_col != "_facet_dummy" else filter_title
+        title = VIZ_CFG.title or default_title
         ax.set_title(title, fontsize=VIZ_CFG.title_fontsize, fontweight="bold")
         ax.set_yticks(y_indices)
         ax.set_yticklabels(valid_muscles_reversed, fontsize=VIZ_CFG.tick_labelsize)
