@@ -125,7 +125,7 @@ plot_style:
     show_xtick_labels: true            # x축 tick label 표시 여부
     show_ytick_labels: true            # y축 tick label 표시 여부
     show_event_vlines: true            # event_vlines 표시 여부(및 event 기반 xtick 보강)
-    show_windows: false                 # windows span 표시 여부(및 windows legend)
+    show_windows: true                 # windows span 표시 여부(및 windows legend)
     show_max_marker: false             # 최댓값 마커 표시 여부
     use_group_colors: false            # 그룹별 색상 사용 여부 (true=색상, false=라인스타일만)
     window_colors:                     # 각 윈도우 기간별 색상 (p1~p4)
