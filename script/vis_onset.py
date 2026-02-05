@@ -102,7 +102,12 @@ class VizConfig:
     # Layout
     layout_rect: Tuple[float, float, float, float] = (0, 0, 1, 0.95)  # tight_layout 적용 영역(left, bottom, right, top)
     # Title
-    title: Optional[str] = None  # Optional override for facet titles
+    title: Optional[str] = None  # None이면 각 facet의 기본 제목 사용
+    show_title: bool = True
+    show_legend: bool = True
+    show_counts_text: bool = True  # e.g., "count/total_count" next to marker
+    show_xlabel: bool = True
+    show_xtick_labels: bool = True
 
     # Sorting
     sort_by_mean: Optional[str] = "None"  # None, "ascending", or "descending"
@@ -395,41 +400,46 @@ def plot_onset_timing(
             for cap in caps:
                 cap.set_alpha(VIZ_CFG.errorbar_alpha)
             
-            for idx, (x, y, c, tc) in enumerate(zip(means, ys, counts, total_counts)):
-                if np.isnan(x):
-                    continue
-                text_x = x + stds[idx] + VIZ_CFG.text_offset_x
-                ax.text(
-                    text_x,
-                    y,
-                    f"{int(c)}/{int(tc)}",
-                    va="center",
-                    ha="left",
-                    fontsize=VIZ_CFG.text_fontsize,
-                    color=color,
-                    fontfamily=VIZ_CFG.font_family,
-                )
+            if VIZ_CFG.show_counts_text:
+                for idx, (x, y, c, tc) in enumerate(zip(means, ys, counts, total_counts)):
+                    if np.isnan(x):
+                        continue
+                    text_x = x + stds[idx] + VIZ_CFG.text_offset_x
+                    ax.text(
+                        text_x,
+                        y,
+                        f"{int(c)}/{int(tc)}",
+                        va="center",
+                        ha="left",
+                        fontsize=VIZ_CFG.text_fontsize,
+                        color=color,
+                        fontfamily=VIZ_CFG.font_family,
+                    )
 
         default_title = f"{facet_val}" if facet_col != "_facet_dummy" else filter_title
         title = VIZ_CFG.title or default_title
-        ax.set_title(
-            title,
-            fontsize=VIZ_CFG.title_fontsize,
-            fontweight="bold",
-            fontfamily=VIZ_CFG.font_family,
-        )
+        if VIZ_CFG.show_title:
+            ax.set_title(
+                title,
+                fontsize=VIZ_CFG.title_fontsize,
+                fontweight="bold",
+                fontfamily=VIZ_CFG.font_family,
+            )
         ax.set_yticks(y_indices)
         ax.set_yticklabels(
             valid_muscles_reversed,
             fontsize=VIZ_CFG.tick_labelsize,
             fontfamily=VIZ_CFG.font_family,
         )
-        ax.set_xlabel(
-            VIZ_CFG.x_label,
-            fontsize=VIZ_CFG.xlabel_fontsize,
-            fontfamily=VIZ_CFG.font_family,
-        )
+        if VIZ_CFG.show_xlabel:
+            ax.set_xlabel(
+                VIZ_CFG.x_label,
+                fontsize=VIZ_CFG.xlabel_fontsize,
+                fontfamily=VIZ_CFG.font_family,
+            )
         ax.tick_params(axis="x", labelsize=VIZ_CFG.xtick_labelsize)
+        if not VIZ_CFG.show_xtick_labels:
+            ax.tick_params(axis="x", labelbottom=False)
         ax.xaxis.set_major_locator(MultipleLocator(20))
         ax.grid(
             True, 
@@ -446,7 +456,7 @@ def plot_onset_timing(
     for ax in axes_flat[len(facets):]:
         ax.axis("off")
 
-    if hue_col:
+    if hue_col and VIZ_CFG.show_legend:
         # Create proxy artists for legend (marker only, no errorbar)
         legend_handles = []
         for hue_idx, hue_val in enumerate(hues):
