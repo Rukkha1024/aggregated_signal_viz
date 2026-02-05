@@ -48,17 +48,6 @@ interpolation:
 #   - 단일 컬럼: filter: { mixed: 1 }
 #   - 다중 컬럼: 모든 조건을 AND로 결합
 aggregation_modes:
-  step_TF_mean:
-    enabled: true
-    filter:
-      mixed: 1
-      age_group: "young"
-    groupby: ["step_TF"]
-    color_by: ["step_TF"]
-    overlay: true
-    overlay_within: ["step_TF"]
-    output_dir: "step_TF"
-    filename_pattern: "step_TF_mean_{signal_group}.png"
   nonstep_age_group_mean:
     enabled: true
     filter:
@@ -70,6 +59,17 @@ aggregation_modes:
     overlay_within: ["age_group"]
     output_dir: "age_group"
     filename_pattern: "nonstep_●노인 vs. ▲성인_{signal_group}.png"
+  step_age_group_mean:
+    enabled: true
+    filter:
+      mixed: 1
+      step_TF: "step"
+    groupby: ["age_group"]
+    color_by: ["age_group"]
+    overlay: true
+    overlay_within: ["age_group"]
+    output_dir: "age_group"
+    filename_pattern: "step_●노인 vs. ▲성인_{signal_group}.png"
   # diff_step_TF_subject_mean:
   #   enabled: true
   #   filter:
@@ -232,7 +232,7 @@ plot_style:
 # - 기본적으로 각 컬럼은 팔레트에서 서로 다른 색을 할당받습니다.
 # - 특정 컬럼 색을 고정하려면 `event_vlines.colors`에 지정하세요.
 event_vlines:
-  columns: ["platform_onset", "step_onset"] # "platform_onset", "step_onset", "TKEO_AGLR_emg_onset_timing"
+  columns: ["platform_onset", "step_onset", "TKEO_AGLR_emg_onset_timing"] # "platform_onset", "step_onset", "TKEO_AGLR_emg_onset_timing"
   # Optional: legend display names (short labels)
   event_labels:
     TKEO_AGLR_emg_onset_timing: "onset"
@@ -247,7 +247,7 @@ event_vlines:
     alpha: 0.9
   # Overlay plots can draw one vline per overlay group (e.g., step vs nonstep) for selected events.
   overlay_group:
-    enabled: true
+    enabled: true    # 얘를 false해야 legend에 "TKEO_AGLR_emg_onset_timing"과 같은게 안 나옴 
     mode: "linestyle"                 # currently supported: "linestyle" (keep colors identical)
     columns: ["TKEO_AGLR_emg_onset_timing"]  # only these events are drawn per overlay group
     linestyles: ["-", "--", ":", "-."]       # applied per overlay group (cycling)
