@@ -102,7 +102,7 @@ class VizConfig:
     # Layout
     layout_rect: Tuple[float, float, float, float] = (0, 0, 1, 0.95)  # tight_layout 적용 영역(left, bottom, right, top)
     # Title
-    title: Optional[str] = "nonstep 시 노인과 성인 근활성 타이밍 비교"  # Optional override for facet titles
+    title: Optional[str] = None  # Optional override for facet titles
 
     # Sorting
     sort_by_mean: Optional[str] = "None"  # None, "ascending", or "descending"
@@ -270,6 +270,9 @@ def plot_onset_timing(
         Sort muscles by mean value: None (config order), "ascending", or "descending"
     """
     import matplotlib.pyplot as plt
+
+    plt.rcParams["font.family"] = VIZ_CFG.font_family
+    plt.rcParams["axes.unicode_minus"] = False
     
     # Build title from active filters
     filter_title_parts = []
@@ -310,9 +313,6 @@ def plot_onset_timing(
         squeeze=False
     )
     axes_flat = axes.flatten()
-    
-    plt.rcParams["font.family"] = VIZ_CFG.font_family
-    plt.rcParams["axes.unicode_minus"] = False
 
     group_height = VIZ_CFG.bar_width / n_hues
     
@@ -406,15 +406,29 @@ def plot_onset_timing(
                     va="center",
                     ha="left",
                     fontsize=VIZ_CFG.text_fontsize,
-                    color=color
+                    color=color,
+                    fontfamily=VIZ_CFG.font_family,
                 )
 
         default_title = f"{facet_val}" if facet_col != "_facet_dummy" else filter_title
         title = VIZ_CFG.title or default_title
-        ax.set_title(title, fontsize=VIZ_CFG.title_fontsize, fontweight="bold")
+        ax.set_title(
+            title,
+            fontsize=VIZ_CFG.title_fontsize,
+            fontweight="bold",
+            fontfamily=VIZ_CFG.font_family,
+        )
         ax.set_yticks(y_indices)
-        ax.set_yticklabels(valid_muscles_reversed, fontsize=VIZ_CFG.tick_labelsize)
-        ax.set_xlabel(VIZ_CFG.x_label, fontsize=VIZ_CFG.xlabel_fontsize)
+        ax.set_yticklabels(
+            valid_muscles_reversed,
+            fontsize=VIZ_CFG.tick_labelsize,
+            fontfamily=VIZ_CFG.font_family,
+        )
+        ax.set_xlabel(
+            VIZ_CFG.x_label,
+            fontsize=VIZ_CFG.xlabel_fontsize,
+            fontfamily=VIZ_CFG.font_family,
+        )
         ax.tick_params(axis="x", labelsize=VIZ_CFG.xtick_labelsize)
         ax.xaxis.set_major_locator(MultipleLocator(20))
         ax.grid(
@@ -457,7 +471,7 @@ def plot_onset_timing(
             handles=legend_handles,
             loc="best",
             frameon=False,
-            fontsize=VIZ_CFG.legend_fontsize,
+            prop={"family": VIZ_CFG.font_family, "size": VIZ_CFG.legend_fontsize},
         )
 
     plt.tight_layout(rect=VIZ_CFG.layout_rect)
