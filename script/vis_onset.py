@@ -135,11 +135,15 @@ class VizConfig:
 
 VIZ_CFG = VizConfig()
 
+# Faceted error-bar plot grid policy (hardcoded by design).
+# 중앙제어(config.yaml)에서 관리하지 않습니다.
+# 너무 많은 facet이 생겨도 figure가 가로로 무한히 늘어나지 않도록 상한을 둡니다.
+ONSET_SUMMARY_MAX_COLS = 6
+
 def _apply_onset_show_options_from_config(config: Dict[str, Any]) -> None:
     """
     vis_onset show_* policy:
       - By default, follow `plot_style.common.show_*` (single source of truth).
-      - `figure_layout.summary_plots.onset` is reserved for layout-only settings (e.g., max_cols).
     """
     common = (config.get("plot_style") or {}).get("common") or {}
     if not isinstance(common, dict):
@@ -454,30 +458,17 @@ def process_stats(
 # 3. PLOTTING
 
 def resolve_summary_grid_layout(
-    config: Dict[str, Any],
-    plot_type: str,
     n_panels: int,
 ) -> Tuple[int, int]:
     """
-    Summary-plot grid policy (config-driven):
-      - figure_layout.summary_plots.<plot_type>.max_cols controls columns upper bound
+    Summary-plot grid policy (hardcoded, onset-only):
+      - cols is capped by ONSET_SUMMARY_MAX_COLS
       - rows is derived from n_panels and cols
     """
     if n_panels <= 0:
         return 1, 1
 
-    max_cols_raw = (
-        config.get("figure_layout", {})
-        .get("summary_plots", {})
-        .get(plot_type, {})
-        .get("max_cols")
-    )
-    try:
-        max_cols = int(max_cols_raw) if max_cols_raw is not None else n_panels
-    except (TypeError, ValueError):
-        max_cols = n_panels
-    max_cols = max(1, max_cols)
-
+    max_cols = max(1, int(ONSET_SUMMARY_MAX_COLS))
     cols = min(max_cols, n_panels)
     rows = int(ceil(n_panels / cols))
     return rows, cols
@@ -528,8 +519,6 @@ def plot_onset_timing(
     n_hues = len(hues)
 
     grid_rows, grid_cols = resolve_summary_grid_layout(
-        config=config,
-        plot_type=VIZ_CFG.output_dir,
         n_panels=n_facets,
     )
     

@@ -265,12 +265,6 @@ event_vlines:
     columns: ["TKEO_AGLR_emg_onset_timing"]  # only these events are drawn per overlay group
     linestyles: ["-", "--", ":", "-."]       # applied per overlay group (cycling)
 
-# === Figure Layout ===
-figure_layout:
-  summary_plots:
-    onset:
-      max_cols: 99
-
 # === CoP Crossing-based EMG Analysis ===
 # NOTE: This analysis computes CoP(step vs nonstep) crossings from merged.parquet directly
 # and defines EMG windows based on those crossings (no precomputed feature reuse).
