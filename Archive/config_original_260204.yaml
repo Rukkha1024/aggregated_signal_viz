@@ -1,6 +1,3 @@
-# 박다훈 과제 제출을 위한 설정 파일. 
-# window 같은거 안 보이게 함. 그냥 parameter에 아무것도 안 만들면 그만임.
-# e.g. event_vlines: [], windows: null 
 # === Data Settings ===
 data:
   input_file: "data/merged.parquet"
@@ -70,17 +67,17 @@ aggregation_modes:
   #   overlay_within: ["step_TF"]
   #   output_dir: "step_TF_subject_mean"
   #   filename_pattern: "step_TF_{subject}_mean_{signal_group}.png"
-  # diff_step_TF_subject:
-  #   enabled: true
-  #   filter:
-  #     mixed: 1
-  #     age_group: "young"
-  #   groupby: ["step_TF", "subject", "velocity", "trial_num"]
-  #   color_by: ["step_TF"]
-  #   overlay: true
-  #   overlay_within: ["step_TF"]
-  #   output_dir: "step_TF_subject"
-  #   filename_pattern: "step_TF_{subject}_v{velocity}_{trial_num}_{signal_group}.png"
+  diff_step_TF_subject:
+    enabled: true
+    filter:
+      mixed: 1
+      age_group: "young"
+    groupby: ["step_TF", "subject", "velocity", "trial_num"]
+    color_by: ["step_TF"]
+    overlay: true
+    overlay_within: ["step_TF"]
+    output_dir: "step_TF_subject"
+    filename_pattern: "step_TF_{subject}_v{velocity}_{trial_num}_{signal_group}.png"
 
 # === Window Definitions (ms) ===
 # 참고:
@@ -95,6 +92,17 @@ aggregation_modes:
 #   1) `data.input_file`: `data.id_columns.onset`과 동일한 도메인(mocap frame)으로 해석 후 ms로 변환
 #   2) `data.features_file`만 존재: platform_onset 기준 ms로 해석
 windows:
+  reference_event: "platform_onset"
+  definitions:
+    p1:
+      start_ms: "TKEO_AGLR_emg_onset_timing"
+      end_ms: "TKEO_AGLR_emg_onset_timing + 125"
+    p2:
+      start_ms: "TKEO_AGLR_emg_onset_timing + 125"
+      end_ms: "step_onset"
+    p3:
+      start_ms: "step_onset"
+      end_ms: "600"
 
 # === 플롯 스타일 ===
 plot_style:
@@ -210,7 +218,7 @@ event_vlines:
   columns: ["platform_onset", "step_onset", "TKEO_AGLR_emg_onset_timing"]
   # Optional: legend display names (short labels)
   event_labels:
-    TKEO_AGLR_emg_onset_timing: "onset"
+    TKEO_AGLR_emg_onset_timing: "TKEO"
   # Optional:
   # colors:
   #   platform_onset: "black"

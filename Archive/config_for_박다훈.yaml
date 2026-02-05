@@ -70,17 +70,17 @@ aggregation_modes:
   #   overlay_within: ["step_TF"]
   #   output_dir: "step_TF_subject_mean"
   #   filename_pattern: "step_TF_{subject}_mean_{signal_group}.png"
-  # diff_step_TF_subject:
-  #   enabled: true
-  #   filter:
-  #     mixed: 1
-  #     age_group: "young"
-  #   groupby: ["step_TF", "subject", "velocity", "trial_num"]
-  #   color_by: ["step_TF"]
-  #   overlay: true
-  #   overlay_within: ["step_TF"]
-  #   output_dir: "step_TF_subject"
-  #   filename_pattern: "step_TF_{subject}_v{velocity}_{trial_num}_{signal_group}.png"
+  diff_step_TF_subject:
+    enabled: true
+    filter:
+      mixed: 1
+      age_group: "young"
+    groupby: ["step_TF", "subject", "velocity", "trial_num"]
+    color_by: ["step_TF"]
+    overlay: true
+    overlay_within: ["step_TF"]
+    output_dir: "step_TF_subject"
+    filename_pattern: "step_TF_{subject}_v{velocity}_{trial_num}_{signal_group}.png"
 
 # === Window Definitions (ms) ===
 # 참고:
@@ -210,7 +210,7 @@ event_vlines:
   columns: ["platform_onset", "step_onset", "TKEO_AGLR_emg_onset_timing"]
   # Optional: legend display names (short labels)
   event_labels:
-    TKEO_AGLR_emg_onset_timing: "onset"
+    TKEO_AGLR_emg_onset_timing: "TKEO"
   # Optional:
   # colors:
   #   platform_onset: "black"

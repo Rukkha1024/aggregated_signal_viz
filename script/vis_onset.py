@@ -96,6 +96,13 @@ class VizConfig:
     grid_alpha: float = 0.3  # 그리드 선 투명도(가독성 조절)
     layout_rect: Tuple[float, float, float, float] = (0, 0, 1, 0.95)  # tight_layout 적용 영역(left, bottom, right, top)
 
+    # Sorting
+    # Sort muscles by mean onset timing value (within each facet)
+    # None: use muscle_order from config (default)
+    # "ascending": sort by mean value (earliest onset first)
+    # "descending": sort by mean value (latest onset first)
+    sort_by_mean: Optional[str] = None  # None, "ascending", or "descending"
+    
     # Output
     # NOTE: output base dir comes from config.yaml (output.base_dir).
     output_dir: str = "onset"  # plot-type subfolder under output.base_dir (e.g., output/onset)
@@ -249,8 +256,15 @@ def plot_onset_timing(
     output_dir: Path,
     output_filename: str,
     config: Dict[str, Any],
+    sort_by_mean: Optional[str] = None,
 ):
-    """Generate horizontal error-bar plot and save to output."""
+    """Generate horizontal error-bar plot and save to output.
+    
+    Parameters
+    ----------
+    sort_by_mean : Optional[str]
+        Sort muscles by mean value: None (config order), "ascending", or "descending"
+    """
     import matplotlib.pyplot as plt
     
     # Build title from active filters
@@ -300,13 +314,36 @@ def plot_onset_timing(
     
     existing_muscles = set(stats_df[VIZ_CFG.muscle_column_in_feature].unique().to_list())
     valid_muscles = [m for m in muscle_order if m in existing_muscles]
-    valid_muscles_reversed = valid_muscles[::-1]
-    
-    y_indices = np.arange(len(valid_muscles_reversed))
-    muscle_to_y = {m: i for i, m in enumerate(valid_muscles_reversed)}
 
     for ax, facet_val in zip(axes_flat, facets):
         facet_data = stats_df.filter(pl.col(facet_col) == facet_val)
+        
+        # Sort muscles by mean value if requested (per facet)
+        if sort_by_mean in ["ascending", "descending"]:
+            # Compute mean across all hues for this facet
+            facet_means = (
+                facet_data
+                .group_by(VIZ_CFG.muscle_column_in_feature)
+                .agg(pl.col("mean").mean().alias("avg_mean"))
+            )
+            muscle_mean_dict = dict(zip(
+                facet_means[VIZ_CFG.muscle_column_in_feature].to_list(),
+                facet_means["avg_mean"].to_list()
+            ))
+            
+            # Sort valid_muscles by mean value
+            sorted_muscles = sorted(
+                valid_muscles,
+                key=lambda m: muscle_mean_dict.get(m, float('inf')),
+                reverse=(sort_by_mean == "descending")
+            )
+            valid_muscles_reversed = sorted_muscles[::-1]
+        else:
+            # Use original order from config
+            valid_muscles_reversed = valid_muscles[::-1]
+        
+        y_indices = np.arange(len(valid_muscles_reversed))
+        muscle_to_y = {m: i for i, m in enumerate(valid_muscles_reversed)}
         
         for hue_idx, hue_val in enumerate(hues):
             if hue_col:
@@ -531,6 +568,7 @@ def main():
         output_dir=output_dir,
         output_filename=filename,
         config=config,
+        sort_by_mean=VIZ_CFG.sort_by_mean,
     )
 
 if __name__ == "__main__":
