@@ -34,18 +34,6 @@ class VizConfig:
     x_label: str = "Onset Timing (ms)"
     file_prefix: str = "onset_viz"
 
-    # Facet & Hue Configuration (Default values)
-    facet_column: Optional[str] = None  # No faceting by default
-    hue_column: str = "age_group"
-
-    # Data Filtering (자유롭게 컬럼명: 값 추가/제거 가능)
-    # 예: {"mixed": "1", "age_group": "young", "velocity": 10}
-    # 필터 안 쓰려면 빈 딕셔너리로: {}
-    filters: Dict[str, Any] = field(default_factory=lambda: {
-        "mixed": "1",
-        "step_TF": "step"
-    })
-
     # Plot Dimensions & Style
     figure_size: Tuple[int, int] = (12, 10)  # (가로, 세로) 인치. facet 개수/라벨 길이에 따라 조절 권장
     dpi: int = 300  # 저장 이미지 해상도. 논문/보고서용이면 300 이상 권장
@@ -672,24 +660,6 @@ def plot_onset_timing(
 def parse_args():
     parser = argparse.ArgumentParser(description="Visualize Onset Timing (Vertical Forest Plot)")
     parser.add_argument("--config", type=str, default="config.yaml", help="Path to config.yaml")
-    parser.add_argument(
-        "--mode",
-        type=str,
-        default=None,
-        help="Name of config.yaml aggregation_modes entry to use for filtering/faceting/hue/output.",
-    )
-    parser.add_argument(
-        "--facet",
-        type=str,
-        default=argparse.SUPPRESS,
-        help=f"Column for Faceting (Subplots). Default: {VIZ_CFG.facet_column}"
-    )
-    parser.add_argument(
-        "--hue",
-        type=str,
-        default=argparse.SUPPRESS,
-        help=f"Column for Hue (Colors). Default: {VIZ_CFG.hue_column}"
-    )
     parser.add_argument("--velocity", type=float, default=None, help="Filter by velocity (optional)")
     return parser.parse_args()
 
@@ -701,42 +671,7 @@ def main():
     base_dir = config_path.parent
     
     df = load_and_merge_data(config, base_dir)
-    
-    mode_cfg: Optional[Dict[str, Any]] = None
-    active_filters: Dict[str, Any] = dict(VIZ_CFG.filters)
-    if args.mode:
-        mode_cfg = _get_mode_cfg(config, args.mode)
-        mode_filters = mode_cfg.get("filter", {})
-        if mode_filters is None:
-            mode_filters = {}
-        if not isinstance(mode_filters, dict):
-            raise TypeError(f"aggregation_modes.{args.mode}.filter must be a mapping.")
-        active_filters = dict(mode_filters)
 
-    df = _apply_filters(df, active_filters)
-
-    # Resolve facet/hue defaults (CLI overrides > mode inference > VizConfig defaults)
-    facet_col: Optional[str] = args.facet if hasattr(args, "facet") else VIZ_CFG.facet_column
-    hue_col: Optional[str] = args.hue if hasattr(args, "hue") else VIZ_CFG.hue_column
-
-    if mode_cfg is not None and not hasattr(args, "facet") and not hasattr(args, "hue"):
-        inferred_facet, inferred_hue, facet_fields, hue_fields = _infer_facet_and_hue_columns(
-            mode_cfg=mode_cfg,
-            df_columns=df.columns,
-        )
-        if inferred_hue == "__hue_combo" and hue_fields:
-            df = df.with_columns(_combo_key_expr(hue_fields).alias("__hue_combo"))
-        if inferred_facet == "__facet_combo" and facet_fields:
-            df = df.with_columns(_combo_key_expr(facet_fields).alias("__facet_combo"))
-        facet_col = inferred_facet
-        hue_col = inferred_hue
-    
-    if args.velocity is not None:
-        if "velocity" in df.columns:
-            print(f"Filtering velocity = {args.velocity}")
-            df = df.filter(pl.col("velocity") == args.velocity)
-            print(f"Data shape after velocity filtering: {df.shape}")
-    
     try:
         muscle_order = config["signal_groups"]["emg"]["columns"]
         print(f"Using muscle order from config: {muscle_order}")
@@ -751,66 +686,90 @@ def main():
         id_cols_cfg.get("velocity", "velocity"),
         id_cols_cfg.get("trial", "trial_num"),
     ]
-        
-    stats = process_stats(
-        df, 
-        muscle_order=muscle_order, 
-        facet_col=facet_col, 
-        hue_col=hue_col,
-        trial_key_cols=trial_key_cols,
-    )
-    
-    if stats.is_empty():
-        print("No data available after filtering. Exiting.")
-        return
 
-    print("Final Stats for Plotting:")
-    print(stats)
+    modes_cfg = config.get("aggregation_modes", {})
+    if not isinstance(modes_cfg, dict) or not modes_cfg:
+        raise KeyError("config.yaml must define non-empty 'aggregation_modes' to run vis_onset.")
 
     output_base_dir = Path(config.get("output", {}).get("base_dir", "output"))
     if not output_base_dir.is_absolute():
         output_base_dir = (base_dir / output_base_dir).resolve()
 
-    output_dir = output_base_dir / VIZ_CFG.output_dir
-    filename: str
-    if mode_cfg is not None:
-        mode_out_subdir = mode_cfg.get("output_dir") or args.mode
-        output_dir = output_dir / str(mode_out_subdir)
+    ran_any = False
+    for mode_name, mode_cfg in modes_cfg.items():
+        if not isinstance(mode_cfg, dict):
+            print(f"Skipping mode '{mode_name}': config is not a mapping.")
+            continue
+        if not mode_cfg.get("enabled", True):
+            continue
+
+        print(f"\n=== [Mode] {mode_name} ===")
+        ran_any = True
+
+        active_filters = mode_cfg.get("filter", {})
+        if active_filters is None:
+            active_filters = {}
+        if not isinstance(active_filters, dict):
+            raise TypeError(f"aggregation_modes.{mode_name}.filter must be a mapping.")
+
+        df_mode = _apply_filters(df, dict(active_filters))
+
+        if args.velocity is not None:
+            if "velocity" in df_mode.columns:
+                print(f"Filtering velocity = {args.velocity}")
+                df_mode = df_mode.filter(pl.col("velocity") == args.velocity)
+                print(f"Data shape after velocity filtering: {df_mode.shape}")
+
+        facet_col, hue_col, facet_fields, hue_fields = _infer_facet_and_hue_columns(
+            mode_cfg=mode_cfg,
+            df_columns=df_mode.columns,
+        )
+        if hue_col == "__hue_combo" and hue_fields:
+            df_mode = df_mode.with_columns(_combo_key_expr(hue_fields).alias("__hue_combo"))
+        if facet_col == "__facet_combo" and facet_fields:
+            df_mode = df_mode.with_columns(_combo_key_expr(facet_fields).alias("__facet_combo"))
+
+        stats = process_stats(
+            df_mode,
+            muscle_order=muscle_order,
+            facet_col=facet_col,
+            hue_col=hue_col,
+            trial_key_cols=trial_key_cols,
+        )
+
+        if stats.is_empty():
+            print(f"[Mode] {mode_name}: no data after filtering (skipping).")
+            continue
+
+        print(f"[Mode] {mode_name}: final stats ready for plotting.")
+
+        mode_out_subdir = mode_cfg.get("output_dir") or str(mode_name)
+        output_dir = output_base_dir / VIZ_CFG.output_dir / str(mode_out_subdir)
 
         filename_pattern = mode_cfg.get("filename_pattern")
         if filename_pattern is not None and str(filename_pattern).strip():
             try:
-                filename = _format_mode_filename(str(filename_pattern), df=df, filters=active_filters)
+                filename = _format_mode_filename(str(filename_pattern), df=df_mode, filters=dict(active_filters))
             except KeyError as e:
-                print(f"Warning: {e}. Falling back to legacy filename policy.")
-                filename_pattern = None
+                print(f"Warning: {e}. Falling back to default filename policy.")
+                filename = f"{VIZ_CFG.file_prefix}_{mode_name}.png"
         else:
-            filename_pattern = None
+            filename = f"{VIZ_CFG.file_prefix}_{mode_name}.png"
 
-        if not filename_pattern:
-            filename = f"{VIZ_CFG.file_prefix}_{args.mode}.png"
-    else:
-        # Legacy filename policy (backward compatible)
-        fname_parts = [VIZ_CFG.file_prefix]
-        for col_name, col_value in active_filters.items():
-            fname_parts.append(f"{col_name}-{col_value}")
-        if facet_col:
-            fname_parts.append(f"facet-{facet_col}")
-        if hue_col:
-            fname_parts.append(f"hue-{hue_col}")
-        filename = "_".join(fname_parts) + ".png"
-    
-    plot_onset_timing(
-        stats_df=stats,
-        muscle_order=muscle_order,
-        facet_col=facet_col,
-        hue_col=hue_col,
-        output_dir=output_dir,
-        output_filename=filename,
-        config=config,
-        sort_by_mean=VIZ_CFG.sort_by_mean,
-        filters=active_filters,
-    )
+        plot_onset_timing(
+            stats_df=stats,
+            muscle_order=muscle_order,
+            facet_col=facet_col,
+            hue_col=hue_col,
+            output_dir=output_dir,
+            output_filename=filename,
+            config=config,
+            sort_by_mean=VIZ_CFG.sort_by_mean,
+            filters=dict(active_filters),
+        )
+
+    if not ran_any:
+        print("No enabled modes found in config.yaml aggregation_modes. Nothing to do.")
 
 if __name__ == "__main__":
     main()
