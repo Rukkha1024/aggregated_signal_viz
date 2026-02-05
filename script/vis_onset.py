@@ -6,7 +6,7 @@ import string
 from dataclasses import dataclass, field
 from math import ceil
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import matplotlib.lines as mlines
@@ -25,22 +25,45 @@ except ModuleNotFoundError:  # Allows running as `python script/vis_onset.py`
 
 @dataclass
 class VizConfig:
-    """Configuration for visualization style and parameters."""
+    """
+    Onset summary-plot configuration (visualization + fixed columns).
 
-    # File & Column Settings
+    Important
+    ---------
+    - Aggregation behavior (filter/groupby/overlay/filename_pattern/output_dir) is controlled
+      exclusively via `config.yaml: aggregation_modes`.
+    - `VizConfig` intentionally does NOT contain aggregation-related knobs (no facet/hue/filters).
+      It only defines:
+        1) which numeric column to visualize (features CSV),
+        2) the muscle-name column (features CSV),
+        3) plot appearance (colors/markers/fonts/layout),
+        4) the plot-type subfolder name under `output.base_dir`.
+    """
+
+    # -----------------------------------------------------------------------------
+    # Data Columns (features CSV)
+    # -----------------------------------------------------------------------------
     # Any numeric feature column in the features CSV can be used here.
     target_column: str = "TKEO_AGLR_emg_onset_timing"
-    muscle_column_in_feature: str = "emg_channel"  # Column name in CSV holding 'TA', 'SOL' etc.
+    # Column name in CSV holding muscle labels like 'TA', 'SOL' etc.
+    muscle_column_in_feature: str = "emg_channel"
     x_label: str = "Onset Timing (ms)"
+    # Base filename used when `aggregation_modes.<mode>.filename_pattern` is not provided.
     file_prefix: str = "onset_viz"
 
+    # -----------------------------------------------------------------------------
+    # Plot Dimensions & Style (visualization-only; not in config.yaml)
+    # -----------------------------------------------------------------------------
     # Plot Dimensions & Style
-    figure_size: Tuple[int, int] = (12, 10)  # (가로, 세로) 인치. facet 개수/라벨 길이에 따라 조절 권장
+    # (가로, 세로) inches. facet(패널) 개수/라벨 길이에 따라 조절 권장.
+    figure_size: Tuple[float, float] = (12, 10)
     dpi: int = 300  # 저장 이미지 해상도. 논문/보고서용이면 300 이상 권장
     font_family: str = "NanumGothic"  # 한글 깨짐 방지용 폰트 패밀리(시스템에 설치되어 있어야 함)
     
     # Colors (Hue Palette)
-    # hue_col 범주별 색상 팔레트(고대비 기본값). 범주 수가 많아지면 리스트를 확장하세요.
+    # hue(= aggregation_modes로부터 유도된 overlay 그룹) 범주별 색상 팔레트(고대비 기본값).
+    # hue 값들은 정렬(sorted)된 순서대로 색상/마커가 할당됩니다.
+    # 범주 수가 많아지면 리스트를 확장하세요.
     colors: List[str] = field(default_factory=lambda: [
         "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", 
         "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf"
@@ -100,7 +123,10 @@ class VizConfig:
     show_xtick_labels: bool = False
 
     # Sorting
-    sort_by_mean: Optional[str] = "None"  # None, "ascending", or "descending"
+    # Muscle ordering within each facet:
+    #   - None: use order from `config.signal_groups.emg.columns` (or data-driven fallback)
+    #   - "ascending"/"descending": sort by facet-wise mean (averaged across hues)
+    sort_by_mean: Optional[Literal["ascending", "descending"]] = None
     
     # Output
     # NOTE: output base dir comes from config.yaml (output.base_dir).
