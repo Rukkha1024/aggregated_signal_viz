@@ -125,6 +125,18 @@ plot_style:
     savefig_bbox_inches: "tight"       # 저장 시 테두리 처리 ("tight"로 여백 최소화)
     savefig_facecolor: "white"         # 배경색 ("white", "gray" 등)
     font_family: "NanumGothic"         # 폰트 ("NanumGothic", "Arial" 등)
+    # show_* options: controls visibility of plot elements (not visual styling).
+    # Defaults are defined to preserve current behavior when running `conda run -n module python main.py`.
+    show_suptitle: true                # figure-level suptitle 표시 여부
+    show_subplot_titles: true          # 각 subplot title(채널명 등) 표시 여부
+    show_grid: true                    # grid 표시 여부
+    show_legend: true                  # legend 표시 여부
+    show_xlabel: true                  # x축 라벨 표시 여부
+    show_ylabel: true                  # y축 라벨 표시 여부
+    show_xtick_labels: true            # x축 tick label 표시 여부
+    show_ytick_labels: true            # y축 tick label 표시 여부
+    show_event_vlines: true            # event_vlines 표시 여부(및 event 기반 xtick 보강)
+    show_windows: true                 # windows span 표시 여부(및 windows legend)
     show_max_marker: false             # 최댓값 마커 표시 여부
     use_group_colors: false            # 그룹별 색상 사용 여부 (true=색상, false=라인스타일만)
     window_colors:                     # 각 윈도우 기간별 색상 (p1~p4)
@@ -243,6 +255,11 @@ figure_layout:
   summary_plots:
     onset:
       max_cols: 99
+      show_title: false
+      show_legend: false
+      show_xlabel: false
+      show_xtick_labels: false
+      show_ytick_labels: true
 
 # === Output Settings ===
 output:

@@ -121,6 +121,7 @@ class VizConfig:
     show_counts_text: bool = False  # e.g., "count/total_count" next to marker
     show_xlabel: bool = False
     show_xtick_labels: bool = False
+    show_ytick_labels: bool = True
 
     # Sorting
     # Muscle ordering within each facet:
@@ -133,6 +134,40 @@ class VizConfig:
     output_dir: str = "onset"  # plot-type subfolder under output.base_dir (e.g., output/onset)
 
 VIZ_CFG = VizConfig()
+
+def _apply_onset_show_options_from_config(config: Dict[str, Any]) -> None:
+    cfg = (
+        config.get("figure_layout", {})
+        .get("summary_plots", {})
+        .get("onset", {})
+    )
+    if not isinstance(cfg, dict):
+        return
+
+    def _maybe_bool(key: str) -> Optional[bool]:
+        val = cfg.get(key)
+        if val is None:
+            return None
+        if isinstance(val, bool):
+            return val
+        text = str(val).strip().lower()
+        if text in ("true", "1", "yes", "y", "on"):
+            return True
+        if text in ("false", "0", "no", "n", "off"):
+            return False
+        return None
+
+    for key, attr in (
+        ("show_title", "show_title"),
+        ("show_legend", "show_legend"),
+        ("show_xlabel", "show_xlabel"),
+        ("show_xtick_labels", "show_xtick_labels"),
+        ("show_ytick_labels", "show_ytick_labels"),
+    ):
+        b = _maybe_bool(key)
+        if b is None:
+            continue
+        setattr(VIZ_CFG, attr, bool(b))
 
 
 def _as_str_list(value: Any) -> List[str]:
@@ -615,11 +650,14 @@ def plot_onset_timing(
                 fontfamily=VIZ_CFG.font_family,
             )
         ax.set_yticks(y_indices)
-        ax.set_yticklabels(
-            valid_muscles_reversed,
-            fontsize=VIZ_CFG.tick_labelsize,
-            fontfamily=VIZ_CFG.font_family,
-        )
+        if VIZ_CFG.show_ytick_labels:
+            ax.set_yticklabels(
+                valid_muscles_reversed,
+                fontsize=VIZ_CFG.tick_labelsize,
+                fontfamily=VIZ_CFG.font_family,
+            )
+        else:
+            ax.tick_params(axis="y", labelleft=False)
         if VIZ_CFG.show_xlabel:
             ax.set_xlabel(
                 VIZ_CFG.x_label,
@@ -694,6 +732,7 @@ def main():
     
     config_path = Path(args.config)
     config = load_config(config_path)
+    _apply_onset_show_options_from_config(config)
     base_dir = config_path.parent
     
     df = load_and_merge_data(config, base_dir)

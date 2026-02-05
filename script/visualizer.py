@@ -1406,24 +1406,93 @@ def _style_timeseries_axis(
     event_vlines: Sequence[Dict[str, Any]],
     event_vline_style: Dict[str, Any],
 ) -> None:
-    ax.set_title(
-        title,
-        fontsize=common_style["title_fontsize"],
-        fontweight=common_style["title_fontweight"],
-        pad=common_style["title_pad"],
-    )
-    ax.grid(True, alpha=common_style["grid_alpha"])
-    ax.tick_params(labelsize=common_style["tick_labelsize"])
-    _apply_window_group_legends(
+    if common_style.get("show_subplot_titles", True):
+        ax.set_title(
+            title,
+            fontsize=common_style["title_fontsize"],
+            fontweight=common_style["title_fontweight"],
+            pad=common_style["title_pad"],
+        )
+
+    if common_style.get("show_grid", True):
+        ax.grid(True, alpha=common_style["grid_alpha"])
+    else:
+        ax.grid(False)
+
+    show_xtick_labels = bool(common_style.get("show_xtick_labels", True))
+    show_ytick_labels = bool(common_style.get("show_ytick_labels", True))
+    ax.tick_params(axis="x", labelsize=common_style["tick_labelsize"], labelbottom=show_xtick_labels)
+    ax.tick_params(axis="y", labelsize=common_style["tick_labelsize"], labelleft=show_ytick_labels)
+
+    if common_style.get("show_legend", True):
+        show_windows = bool(common_style.get("show_windows", True))
+        show_event_vlines = bool(common_style.get("show_event_vlines", True))
+        _apply_window_group_legends(
+            ax,
+            window_spans=window_spans if show_windows else (),
+            group_handles=group_handles,
+            event_vlines=event_vlines if show_event_vlines else (),
+            event_vline_style=event_vline_style,
+            legend_fontsize=legend_fontsize,
+            framealpha=common_style["legend_framealpha"],
+            loc=common_style["legend_loc"],
+        )
+
+
+def _apply_time_axis_ticks(
+    ax: Any,
+    *,
+    common_style: Dict[str, Any],
+    window_spans: Sequence[Dict[str, Any]],
+    event_vlines: Sequence[Dict[str, Any]],
+    event_order: Sequence[str],
+    time_start_frame: float,
+    time_end_frame: float,
+    tick_labelsize: float,
+) -> None:
+    ax.set_xlim(0.0, 1.0)
+
+    show_windows = bool(common_style.get("show_windows", True))
+    show_event_vlines = bool(common_style.get("show_event_vlines", True))
+
+    if show_windows:
+        ticks = _apply_window_definition_xticks(ax, window_spans)
+    else:
+        ticks = list(ax.get_xticks())
+        if not ticks:
+            ticks = [0.0, 1.0]
+
+    ticks = _ensure_time_zero_xtick(
         ax,
-        window_spans=window_spans,
-        group_handles=group_handles,
-        event_vlines=event_vlines,
-        event_vline_style=event_vline_style,
-        legend_fontsize=legend_fontsize,
-        framealpha=common_style["legend_framealpha"],
-        loc=common_style["legend_loc"],
+        tick_positions=ticks,
+        time_start_frame=time_start_frame,
+        time_end_frame=time_end_frame,
     )
+
+    blank_positions: List[float] = []
+    if show_event_vlines:
+        ticks, blank_positions = _apply_event_vline_xticks(
+            ax,
+            tick_positions=ticks,
+            event_vlines=event_vlines,
+            event_order=event_order,
+            tick_labelsize=tick_labelsize,
+        )
+
+    _apply_frame_tick_labels(
+        ax,
+        time_start_frame=time_start_frame,
+        time_end_frame=time_end_frame,
+        blank_positions=blank_positions,
+    )
+
+    if common_style.get("show_xtick_labels", True):
+        _auto_rotate_dense_xticklabels(
+            ax,
+            tick_positions=ticks,
+            time_start_frame=time_start_frame,
+            time_end_frame=time_end_frame,
+        )
 
 
 def _savefig_and_close(fig: Any, output_path: Path, common_style: Dict[str, Any], *, bbox: bool = True) -> None:
@@ -1752,9 +1821,11 @@ def _plot_emg(
             alpha=emg_style["line_alpha"],
         )
 
-        _draw_window_spans(ax, ch_window_spans or window_spans, alpha=window_span_alpha, with_labels=True)
+        if common_style.get("show_windows", True):
+            _draw_window_spans(ax, ch_window_spans or window_spans, alpha=window_span_alpha, with_labels=True)
 
-        _draw_event_vlines(ax, ch_event_vlines or event_vlines, style=event_vline_style)
+        if common_style.get("show_event_vlines", True):
+            _draw_event_vlines(ax, ch_event_vlines or event_vlines, style=event_vline_style)
 
         marker_info = markers.get(ch, {})
         if common_style.get("show_max_marker", True):
@@ -1774,45 +1845,31 @@ def _plot_emg(
             event_vline_style=event_vline_style,
         )
         if time_start_frame is not None and time_end_frame is not None:
-            ticks = _apply_window_definition_xticks(ax, ch_window_spans or window_spans)
-            ticks = _ensure_time_zero_xtick(
+            _apply_time_axis_ticks(
                 ax,
-                tick_positions=ticks,
-                time_start_frame=time_start_frame,
-                time_end_frame=time_end_frame,
-            )
-            tick_vlines = ch_event_vlines or event_vlines
-            ticks, blank_positions = _apply_event_vline_xticks(
-                ax,
-                tick_positions=ticks,
-                event_vlines=tick_vlines,
+                common_style=common_style,
+                window_spans=ch_window_spans or window_spans,
+                event_vlines=ch_event_vlines or event_vlines,
                 event_order=event_vline_order,
-                tick_labelsize=common_style["tick_labelsize"],
-            )
-            _apply_frame_tick_labels(
-                ax,
                 time_start_frame=time_start_frame,
                 time_end_frame=time_end_frame,
-                blank_positions=blank_positions,
-            )
-            _auto_rotate_dense_xticklabels(
-                ax,
-                tick_positions=ticks,
-                time_start_frame=time_start_frame,
-                time_end_frame=time_end_frame,
+                tick_labelsize=float(common_style["tick_labelsize"]),
             )
 
     for ax in axes_flat[len(channels) :]:
         ax.axis("off")
 
-    fig.suptitle(
-        _format_title(signal_group="emg", mode_name=mode_name, group_fields=group_fields, key=key),
-        fontsize=common_style["title_fontsize"],
-        fontweight=common_style["title_fontweight"],
-    )
-    fig.supxlabel(emg_style["x_label"], fontsize=common_style["label_fontsize"])
-    y_label = _format_label(emg_style.get("y_label", "Amplitude"), channel="Amplitude")
-    fig.supylabel(y_label, fontsize=common_style["label_fontsize"])
+    if common_style.get("show_suptitle", True):
+        fig.suptitle(
+            _format_title(signal_group="emg", mode_name=mode_name, group_fields=group_fields, key=key),
+            fontsize=common_style["title_fontsize"],
+            fontweight=common_style["title_fontweight"],
+        )
+    if common_style.get("show_xlabel", True):
+        fig.supxlabel(emg_style["x_label"], fontsize=common_style["label_fontsize"])
+    if common_style.get("show_ylabel", True):
+        y_label = _format_label(emg_style.get("y_label", "Amplitude"), channel="Amplitude")
+        fig.supylabel(y_label, fontsize=common_style["label_fontsize"])
     _savefig_and_close(fig, output_path, common_style, bbox=True)
 
 
@@ -1893,7 +1950,8 @@ def _plot_overlay_timeseries_grid(
 
             single_color = style.get("line_color", "blue")
             ch_window_spans = window_spans_by_channel.get(ch) if window_spans_by_channel else None
-            _draw_window_spans(ax, ch_window_spans or window_spans, alpha=window_span_alpha, with_labels=True)
+            if common_style.get("show_windows", True):
+                _draw_window_spans(ax, ch_window_spans or window_spans, alpha=window_span_alpha, with_labels=True)
             _plot_overlay_channel_series(
                 ax,
                 x=x,
@@ -1911,7 +1969,7 @@ def _plot_overlay_timeseries_grid(
             )
 
             pooled_vlines = pooled_event_vlines_by_channel.get(ch, []) if pooled_event_vlines_by_channel else pooled_event_vlines
-            if pooled_vlines:
+            if pooled_vlines and common_style.get("show_event_vlines", True):
                 _draw_event_vlines(ax, pooled_vlines, style=event_vline_style)
 
             event_vlines_by_key_for_tick = event_vlines_by_key
@@ -1920,14 +1978,15 @@ def _plot_overlay_timeseries_grid(
                     key: event_vlines_by_key_by_channel.get(key, {}).get(ch, []) for key in sorted_keys
                 }
 
-            _draw_event_vlines_for_keys(
-                ax,
-                sorted_keys=sorted_keys,
-                event_vlines_by_key=event_vlines_by_key_for_tick,
-                style=event_vline_style,
-                overlay_cfg=event_vline_overlay_cfg,
-                key_to_linestyle=key_to_linestyle,
-            )
+            if common_style.get("show_event_vlines", True):
+                _draw_event_vlines_for_keys(
+                    ax,
+                    sorted_keys=sorted_keys,
+                    event_vlines_by_key=event_vlines_by_key_for_tick,
+                    style=event_vline_style,
+                    overlay_cfg=event_vline_overlay_cfg,
+                    key_to_linestyle=key_to_linestyle,
+                )
 
             for key in sorted_keys:
                 marker_info = markers_by_key.get(key, {}).get(ch, {})
@@ -1950,50 +2009,37 @@ def _plot_overlay_timeseries_grid(
                 event_vline_style=event_vline_style,
             )
             if time_start_frame is not None and time_end_frame is not None:
-                ticks = _apply_window_definition_xticks(ax, ch_window_spans or window_spans)
-                ticks = _ensure_time_zero_xtick(
-                    ax,
-                    tick_positions=ticks,
-                    time_start_frame=time_start_frame,
-                    time_end_frame=time_end_frame,
-                )
                 tick_vlines = list(pooled_vlines) + _collect_overlay_event_vlines_for_ticks(
                     sorted_keys=sorted_keys,
                     event_vlines_by_key=event_vlines_by_key_for_tick,
                     overlay_cfg=event_vline_overlay_cfg,
                 )
-                ticks, blank_positions = _apply_event_vline_xticks(
+                _apply_time_axis_ticks(
                     ax,
-                    tick_positions=ticks,
+                    common_style=common_style,
+                    window_spans=ch_window_spans or window_spans,
                     event_vlines=tick_vlines,
                     event_order=event_vline_order,
-                    tick_labelsize=common_style["tick_labelsize"],
-                )
-                _apply_frame_tick_labels(
-                    ax,
                     time_start_frame=time_start_frame,
                     time_end_frame=time_end_frame,
-                    blank_positions=blank_positions,
-                )
-                _auto_rotate_dense_xticklabels(
-                    ax,
-                    tick_positions=ticks,
-                    time_start_frame=time_start_frame,
-                    time_end_frame=time_end_frame,
+                    tick_labelsize=float(common_style["tick_labelsize"]),
                 )
 
         for ax in axes_flat[len(channels) :]:
             ax.axis("off")
 
         overlay_by = ", ".join(group_fields) if group_fields else "all"
-        fig.suptitle(
-            f"{mode_name} | emg | overlay by {overlay_by}",
-            fontsize=common_style["title_fontsize"],
-            fontweight=common_style["title_fontweight"],
-        )
-        fig.supxlabel(style["x_label"], fontsize=common_style["label_fontsize"])
-        y_label = _format_label(style.get("y_label", "Amplitude"), channel="Amplitude")
-        fig.supylabel(y_label, fontsize=common_style["label_fontsize"])
+        if common_style.get("show_suptitle", True):
+            fig.suptitle(
+                f"{mode_name} | emg | overlay by {overlay_by}",
+                fontsize=common_style["title_fontsize"],
+                fontweight=common_style["title_fontweight"],
+            )
+        if common_style.get("show_xlabel", True):
+            fig.supxlabel(style["x_label"], fontsize=common_style["label_fontsize"])
+        if common_style.get("show_ylabel", True):
+            y_label = _format_label(style.get("y_label", "Amplitude"), channel="Amplitude")
+            fig.supylabel(y_label, fontsize=common_style["label_fontsize"])
         _savefig_and_close(fig, output_path, common_style, bbox=True)
         return
 
@@ -2016,7 +2062,8 @@ def _plot_overlay_timeseries_grid(
         event_vlines_all = list(pooled_event_vlines) + overlay_legend_vlines
 
         for ax, ch in zip(np.ravel(axes), channels):
-            _draw_window_spans(ax, window_spans, alpha=window_span_alpha, with_labels=True)
+            if common_style.get("show_windows", True):
+                _draw_window_spans(ax, window_spans, alpha=window_span_alpha, with_labels=True)
 
             channel_color = _resolve_forceplate_line_color(ch, style.get("line_colors", {}) or {})
             _plot_overlay_channel_series(
@@ -2035,17 +2082,18 @@ def _plot_overlay_timeseries_grid(
                 key_to_linestyle=key_to_linestyle,
             )
 
-            if pooled_event_vlines:
+            if pooled_event_vlines and common_style.get("show_event_vlines", True):
                 _draw_event_vlines(ax, pooled_event_vlines, style=event_vline_style)
 
-            _draw_event_vlines_for_keys(
-                ax,
-                sorted_keys=sorted_keys,
-                event_vlines_by_key=event_vlines_by_key,
-                style=event_vline_style,
-                overlay_cfg=event_vline_overlay_cfg,
-                key_to_linestyle=key_to_linestyle,
-            )
+            if common_style.get("show_event_vlines", True):
+                _draw_event_vlines_for_keys(
+                    ax,
+                    sorted_keys=sorted_keys,
+                    event_vlines_by_key=event_vlines_by_key,
+                    style=event_vline_style,
+                    overlay_cfg=event_vline_overlay_cfg,
+                    key_to_linestyle=key_to_linestyle,
+                )
 
             _style_timeseries_axis(
                 ax,
@@ -2057,48 +2105,35 @@ def _plot_overlay_timeseries_grid(
                 event_vline_style=event_vline_style,
             )
             if time_start_frame is not None and time_end_frame is not None:
-                ticks = _apply_window_definition_xticks(ax, window_spans)
-                ticks = _ensure_time_zero_xtick(
-                    ax,
-                    tick_positions=ticks,
-                    time_start_frame=time_start_frame,
-                    time_end_frame=time_end_frame,
-                )
                 tick_vlines = list(pooled_event_vlines) + _collect_overlay_event_vlines_for_ticks(
                     sorted_keys=sorted_keys,
                     event_vlines_by_key=event_vlines_by_key,
                     overlay_cfg=event_vline_overlay_cfg,
                 )
-                ticks, blank_positions = _apply_event_vline_xticks(
+                _apply_time_axis_ticks(
                     ax,
-                    tick_positions=ticks,
+                    common_style=common_style,
+                    window_spans=window_spans,
                     event_vlines=tick_vlines,
                     event_order=event_vline_order,
-                    tick_labelsize=common_style["tick_labelsize"],
-                )
-                _apply_frame_tick_labels(
-                    ax,
                     time_start_frame=time_start_frame,
                     time_end_frame=time_end_frame,
-                    blank_positions=blank_positions,
+                    tick_labelsize=float(common_style["tick_labelsize"]),
                 )
-                _auto_rotate_dense_xticklabels(
-                    ax,
-                    tick_positions=ticks,
-                    time_start_frame=time_start_frame,
-                    time_end_frame=time_end_frame,
-                )
-            ax.set_xlabel(style["x_label"], fontsize=common_style["label_fontsize"])
+            if common_style.get("show_xlabel", True):
+                ax.set_xlabel(style["x_label"], fontsize=common_style["label_fontsize"])
             axis_label = _resolve_forceplate_axis_label(ch, style.get("axis_labels", {}))
             y_label = _format_label(style.get("y_label", "{channel} Value"), channel=ch, axis_label=axis_label)
-            ax.set_ylabel(y_label, fontsize=common_style["label_fontsize"])
+            if common_style.get("show_ylabel", True):
+                ax.set_ylabel(y_label, fontsize=common_style["label_fontsize"])
 
         overlay_by = ", ".join(group_fields) if group_fields else "all"
-        fig.suptitle(
-            f"{mode_name} | forceplate | overlay by {overlay_by}",
-            fontsize=common_style["title_fontsize"],
-            fontweight=common_style["title_fontweight"],
-        )
+        if common_style.get("show_suptitle", True):
+            fig.suptitle(
+                f"{mode_name} | forceplate | overlay by {overlay_by}",
+                fontsize=common_style["title_fontsize"],
+                fontweight=common_style["title_fontweight"],
+            )
         _savefig_and_close(fig, output_path, common_style, bbox=True)
         return
 
@@ -2149,9 +2184,11 @@ def _plot_forceplate(
             alpha=forceplate_style["line_alpha"],
         )
 
-        _draw_window_spans(ax, window_spans, alpha=window_span_alpha, with_labels=True)
+        if common_style.get("show_windows", True):
+            _draw_window_spans(ax, window_spans, alpha=window_span_alpha, with_labels=True)
 
-        _draw_event_vlines(ax, event_vlines, style=event_vline_style)
+        if common_style.get("show_event_vlines", True):
+            _draw_event_vlines(ax, event_vlines, style=event_vline_style)
 
         _style_timeseries_axis(
             ax,
@@ -2163,46 +2200,33 @@ def _plot_forceplate(
             event_vline_style=event_vline_style,
         )
         if time_start_frame is not None and time_end_frame is not None:
-            ticks = _apply_window_definition_xticks(ax, window_spans)
-            ticks = _ensure_time_zero_xtick(
+            _apply_time_axis_ticks(
                 ax,
-                tick_positions=ticks,
-                time_start_frame=time_start_frame,
-                time_end_frame=time_end_frame,
-            )
-            ticks, blank_positions = _apply_event_vline_xticks(
-                ax,
-                tick_positions=ticks,
+                common_style=common_style,
+                window_spans=window_spans,
                 event_vlines=event_vlines,
                 event_order=event_vline_order,
-                tick_labelsize=common_style["tick_labelsize"],
-            )
-            _apply_frame_tick_labels(
-                ax,
                 time_start_frame=time_start_frame,
                 time_end_frame=time_end_frame,
-                blank_positions=blank_positions,
+                tick_labelsize=float(common_style["tick_labelsize"]),
             )
-            _auto_rotate_dense_xticklabels(
-                ax,
-                tick_positions=ticks,
-                time_start_frame=time_start_frame,
-                time_end_frame=time_end_frame,
-            )
-        ax.set_xlabel(forceplate_style["x_label"], fontsize=common_style["label_fontsize"])
+        if common_style.get("show_xlabel", True):
+            ax.set_xlabel(forceplate_style["x_label"], fontsize=common_style["label_fontsize"])
         axis_label = _resolve_forceplate_axis_label(ch, forceplate_style.get("axis_labels", {}))
         y_label = _format_label(
             forceplate_style.get("y_label", "{channel} Value"),
             channel=ch,
             axis_label=axis_label,
         )
-        ax.set_ylabel(y_label, fontsize=common_style["label_fontsize"])
+        if common_style.get("show_ylabel", True):
+            ax.set_ylabel(y_label, fontsize=common_style["label_fontsize"])
 
-    fig.suptitle(
-        _format_title(signal_group="forceplate", mode_name=mode_name, group_fields=group_fields, key=key),
-        fontsize=common_style["title_fontsize"],
-        fontweight=common_style["title_fontweight"],
-    )
+    if common_style.get("show_suptitle", True):
+        fig.suptitle(
+            _format_title(signal_group="forceplate", mode_name=mode_name, group_fields=group_fields, key=key),
+            fontsize=common_style["title_fontsize"],
+            fontweight=common_style["title_fontweight"],
+        )
     _savefig_and_close(fig, output_path, common_style, bbox=True)
 
 
@@ -2275,7 +2299,8 @@ def _plot_cop(
     window_span_alpha = float(cop_style.get("window_span_alpha", 0.15))
 
     for ax in (ax_cx, ax_cy):
-        _draw_window_spans(ax, window_spans, alpha=window_span_alpha, with_labels=False)
+        if common_style.get("show_windows", True):
+            _draw_window_spans(ax, window_spans, alpha=window_span_alpha, with_labels=False)
 
     cx_color = cop_style.get("line_colors", {}).get("Cx", "gray")
     cy_color = cop_style.get("line_colors", {}).get("Cy", "gray")
@@ -2297,8 +2322,9 @@ def _plot_cop(
         label="Cy",
     )
 
-    _draw_event_vlines(ax_cx, event_vlines, style=event_vline_style)
-    _draw_event_vlines(ax_cy, event_vlines, style=event_vline_style)
+    if common_style.get("show_event_vlines", True):
+        _draw_event_vlines(ax_cx, event_vlines, style=event_vline_style)
+        _draw_event_vlines(ax_cy, event_vlines, style=event_vline_style)
 
     ax_scatter.scatter(
         ml_vals,
@@ -2308,7 +2334,7 @@ def _plot_cop(
         s=cop_style["background_size"],
     )
 
-    if x_axis is not None:
+    if x_axis is not None and common_style.get("show_windows", True):
         for span in window_spans:
             mask = (x_axis >= span["start"]) & (x_axis <= span["end"])
             if mask.any():
@@ -2361,41 +2387,29 @@ def _plot_cop(
         event_vline_style=event_vline_style,
     )
 
-    ax_cx.set_xlabel(cop_style.get("x_label_time", "Normalized time (0-1)"), fontsize=common_style["label_fontsize"])
-    ax_cx.set_ylabel(cop_style.get("y_label_cx", "Cx"), fontsize=common_style["label_fontsize"])
-    ax_cy.set_xlabel(cop_style.get("x_label_time", "Normalized time (0-1)"), fontsize=common_style["label_fontsize"])
-    ax_cy.set_ylabel(cop_style.get("y_label_cy", "Cy"), fontsize=common_style["label_fontsize"])
+    if common_style.get("show_xlabel", True):
+        ax_cx.set_xlabel(cop_style.get("x_label_time", "Normalized time (0-1)"), fontsize=common_style["label_fontsize"])
+        ax_cy.set_xlabel(cop_style.get("x_label_time", "Normalized time (0-1)"), fontsize=common_style["label_fontsize"])
+    if common_style.get("show_ylabel", True):
+        ax_cx.set_ylabel(cop_style.get("y_label_cx", "Cx"), fontsize=common_style["label_fontsize"])
+        ax_cy.set_ylabel(cop_style.get("y_label_cy", "Cy"), fontsize=common_style["label_fontsize"])
     if time_start_frame is not None and time_end_frame is not None:
         for ax in (ax_cx, ax_cy):
-            ticks = _apply_window_definition_xticks(ax, window_spans)
-            ticks = _ensure_time_zero_xtick(
+            _apply_time_axis_ticks(
                 ax,
-                tick_positions=ticks,
-                time_start_frame=time_start_frame,
-                time_end_frame=time_end_frame,
-            )
-            ticks, blank_positions = _apply_event_vline_xticks(
-                ax,
-                tick_positions=ticks,
+                common_style=common_style,
+                window_spans=window_spans,
                 event_vlines=event_vlines,
                 event_order=event_vline_order,
-                tick_labelsize=common_style["tick_labelsize"],
-            )
-            _apply_frame_tick_labels(
-                ax,
                 time_start_frame=time_start_frame,
                 time_end_frame=time_end_frame,
-                blank_positions=blank_positions,
-            )
-            _auto_rotate_dense_xticklabels(
-                ax,
-                tick_positions=ticks,
-                time_start_frame=time_start_frame,
-                time_end_frame=time_end_frame,
+                tick_labelsize=float(common_style["tick_labelsize"]),
             )
 
-    ax_scatter.set_xlabel(cop_style["x_label"], fontsize=common_style["label_fontsize"])
-    ax_scatter.set_ylabel(cop_style["y_label"], fontsize=common_style["label_fontsize"])
+    if common_style.get("show_xlabel", True):
+        ax_scatter.set_xlabel(cop_style["x_label"], fontsize=common_style["label_fontsize"])
+    if common_style.get("show_ylabel", True):
+        ax_scatter.set_ylabel(cop_style["y_label"], fontsize=common_style["label_fontsize"])
     ax_scatter.set_aspect("equal", adjustable="datalim")
     _style_timeseries_axis(
         ax_scatter,
@@ -2407,11 +2421,12 @@ def _plot_cop(
         event_vline_style=event_vline_style,
     )
 
-    fig.suptitle(
-        _format_title(signal_group="cop", mode_name=mode_name, group_fields=group_fields, key=key),
-        fontsize=common_style["title_fontsize"],
-        fontweight=common_style["title_fontweight"],
-    )
+    if common_style.get("show_suptitle", True):
+        fig.suptitle(
+            _format_title(signal_group="cop", mode_name=mode_name, group_fields=group_fields, key=key),
+            fontsize=common_style["title_fontsize"],
+            fontweight=common_style["title_fontweight"],
+        )
     _savefig_and_close(fig, output_path, common_style, bbox=False)
 
 
@@ -2514,15 +2529,9 @@ def _plot_com(
 
     window_span_alpha = float(com_style.get("window_span_alpha", 0.15))
     time_axes = [ax_x, ax_y] + ([ax_z] if ax_z is not None else [])
-    for ax in time_axes:
-        for span in window_spans:
-            ax.axvspan(
-                span["start"],
-                span["end"],
-                color=span["color"],
-                alpha=window_span_alpha,
-                label="_nolegend_",
-            )
+    if common_style.get("show_windows", True):
+        for ax in time_axes:
+            _draw_window_spans(ax, window_spans, alpha=window_span_alpha, with_labels=False)
 
     x_color = com_style.get("line_colors", {}).get(comx_name, "gray")
     y_color = com_style.get("line_colors", {}).get(comy_name, "gray")
@@ -2554,8 +2563,9 @@ def _plot_com(
             label=comz_name,
         )
 
-    for ax in time_axes:
-        _draw_event_vlines(ax, event_vlines, style=event_vline_style)
+    if common_style.get("show_event_vlines", True):
+        for ax in time_axes:
+            _draw_event_vlines(ax, event_vlines, style=event_vline_style)
 
     ax_scatter.scatter(
         ml_vals,
@@ -2565,7 +2575,7 @@ def _plot_com(
         s=com_style["background_size"],
     )
 
-    if x_axis is not None:
+    if x_axis is not None and common_style.get("show_windows", True):
         for span in window_spans:
             mask = (x_axis >= span["start"]) & (x_axis <= span["end"])
             if mask.any():
@@ -2583,105 +2593,125 @@ def _plot_com(
         if max_time is not None and _is_within_time_axis(max_time, time_start_ms, time_end_ms):
             pass
 
-    ax_x.set_title(
-        comx_name,
-        fontsize=common_style["title_fontsize"],
-        fontweight=common_style["title_fontweight"],
-        pad=common_style["title_pad"],
-    )
-    ax_y.set_title(
-        comy_name,
-        fontsize=common_style["title_fontsize"],
-        fontweight=common_style["title_fontweight"],
-        pad=common_style["title_pad"],
-    )
-    if ax_z is not None:
-        ax_z.set_title(
-            comz_name,
+    if common_style.get("show_subplot_titles", True):
+        ax_x.set_title(
+            comx_name,
             fontsize=common_style["title_fontsize"],
             fontweight=common_style["title_fontweight"],
             pad=common_style["title_pad"],
         )
-    ax_scatter.set_title(
-        "COMxy",
-        fontsize=common_style["title_fontsize"],
-        fontweight=common_style["title_fontweight"],
-        pad=common_style["title_pad"],
-    )
+        ax_y.set_title(
+            comy_name,
+            fontsize=common_style["title_fontsize"],
+            fontweight=common_style["title_fontweight"],
+            pad=common_style["title_pad"],
+        )
+        if ax_z is not None:
+            ax_z.set_title(
+                comz_name,
+                fontsize=common_style["title_fontsize"],
+                fontweight=common_style["title_fontweight"],
+                pad=common_style["title_pad"],
+            )
+        ax_scatter.set_title(
+            "COMxy",
+            fontsize=common_style["title_fontsize"],
+            fontweight=common_style["title_fontweight"],
+            pad=common_style["title_pad"],
+        )
 
     axes_to_style = [ax_x, ax_y] + ([ax_z] if ax_z is not None else [])
     for ax in axes_to_style:
-        ax.grid(True, alpha=common_style["grid_alpha"])
-        ax.tick_params(labelsize=common_style["tick_labelsize"])
+        if common_style.get("show_grid", True):
+            ax.grid(True, alpha=common_style["grid_alpha"])
+        else:
+            ax.grid(False)
+        ax.tick_params(
+            axis="x",
+            labelsize=common_style["tick_labelsize"],
+            labelbottom=bool(common_style.get("show_xtick_labels", True)),
+        )
+        ax.tick_params(
+            axis="y",
+            labelsize=common_style["tick_labelsize"],
+            labelleft=bool(common_style.get("show_ytick_labels", True)),
+        )
+        if common_style.get("show_legend", True):
+            _apply_window_group_legends(
+                ax,
+                window_spans=window_spans if common_style.get("show_windows", True) else (),
+                group_handles=[],
+                event_vlines=event_vlines if common_style.get("show_event_vlines", True) else (),
+                event_vline_style=event_vline_style,
+                legend_fontsize=com_style["legend_fontsize"],
+                framealpha=common_style["legend_framealpha"],
+                loc=common_style["legend_loc"],
+            )
+
+    if common_style.get("show_grid", True):
+        ax_scatter.grid(True, alpha=common_style["grid_alpha"])
+    else:
+        ax_scatter.grid(False)
+    ax_scatter.tick_params(
+        axis="x",
+        labelsize=common_style["tick_labelsize"],
+        labelbottom=bool(common_style.get("show_xtick_labels", True)),
+    )
+    ax_scatter.tick_params(
+        axis="y",
+        labelsize=common_style["tick_labelsize"],
+        labelleft=bool(common_style.get("show_ytick_labels", True)),
+    )
+    if common_style.get("show_legend", True):
         _apply_window_group_legends(
-            ax,
-            window_spans=window_spans,
+            ax_scatter,
+            window_spans=window_spans if common_style.get("show_windows", True) else (),
             group_handles=[],
-            event_vlines=event_vlines,
-            event_vline_style=event_vline_style,
             legend_fontsize=com_style["legend_fontsize"],
             framealpha=common_style["legend_framealpha"],
             loc=common_style["legend_loc"],
         )
 
-    ax_scatter.grid(True, alpha=common_style["grid_alpha"])
-    ax_scatter.tick_params(labelsize=common_style["tick_labelsize"])
-    _apply_window_group_legends(
-        ax_scatter,
-        window_spans=window_spans,
-        group_handles=[],
-        legend_fontsize=com_style["legend_fontsize"],
-        framealpha=common_style["legend_framealpha"],
-        loc=common_style["legend_loc"],
-    )
-
-    ax_x.set_xlabel(com_style.get("x_label_time", "Normalized time (0-1)"), fontsize=common_style["label_fontsize"])
-    ax_x.set_ylabel(com_style.get("y_label_comx", comx_name), fontsize=common_style["label_fontsize"])
-    ax_y.set_xlabel(com_style.get("x_label_time", "Normalized time (0-1)"), fontsize=common_style["label_fontsize"])
-    ax_y.set_ylabel(com_style.get("y_label_comy", comy_name), fontsize=common_style["label_fontsize"])
-    if ax_z is not None:
-        ax_z.set_xlabel(com_style.get("x_label_time", "Normalized time (0-1)"), fontsize=common_style["label_fontsize"])
-        ax_z.set_ylabel(com_style.get("y_label_comz", comz_name), fontsize=common_style["label_fontsize"])
+    if common_style.get("show_xlabel", True):
+        ax_x.set_xlabel(com_style.get("x_label_time", "Normalized time (0-1)"), fontsize=common_style["label_fontsize"])
+        ax_y.set_xlabel(com_style.get("x_label_time", "Normalized time (0-1)"), fontsize=common_style["label_fontsize"])
+        if ax_z is not None:
+            ax_z.set_xlabel(
+                com_style.get("x_label_time", "Normalized time (0-1)"),
+                fontsize=common_style["label_fontsize"],
+            )
+    if common_style.get("show_ylabel", True):
+        ax_x.set_ylabel(com_style.get("y_label_comx", comx_name), fontsize=common_style["label_fontsize"])
+        ax_y.set_ylabel(com_style.get("y_label_comy", comy_name), fontsize=common_style["label_fontsize"])
+        if ax_z is not None:
+            ax_z.set_ylabel(com_style.get("y_label_comz", comz_name), fontsize=common_style["label_fontsize"])
     if time_start_frame is not None and time_end_frame is not None:
         for ax in axes_to_style:
-            ticks = _apply_window_definition_xticks(ax, window_spans)
-            ticks = _ensure_time_zero_xtick(
+            _apply_time_axis_ticks(
                 ax,
-                tick_positions=ticks,
-                time_start_frame=time_start_frame,
-                time_end_frame=time_end_frame,
-            )
-            ticks, blank_positions = _apply_event_vline_xticks(
-                ax,
-                tick_positions=ticks,
+                common_style=common_style,
+                window_spans=window_spans,
                 event_vlines=event_vlines,
                 event_order=event_vline_order,
-                tick_labelsize=common_style["tick_labelsize"],
-            )
-            _apply_frame_tick_labels(
-                ax,
                 time_start_frame=time_start_frame,
                 time_end_frame=time_end_frame,
-                blank_positions=blank_positions,
-            )
-            _auto_rotate_dense_xticklabels(
-                ax,
-                tick_positions=ticks,
-                time_start_frame=time_start_frame,
-                time_end_frame=time_end_frame,
+                tick_labelsize=float(common_style["tick_labelsize"]),
             )
 
-    ax_scatter.set_xlabel(com_style.get("x_label", comx_name), fontsize=common_style["label_fontsize"])
-    ax_scatter.set_ylabel(com_style.get("y_label", comy_name), fontsize=common_style["label_fontsize"])
+    if common_style.get("show_xlabel", True):
+        ax_scatter.set_xlabel(com_style.get("x_label", comx_name), fontsize=common_style["label_fontsize"])
+    if common_style.get("show_ylabel", True):
+        ax_scatter.set_ylabel(com_style.get("y_label", comy_name), fontsize=common_style["label_fontsize"])
     ax_scatter.set_aspect("equal", adjustable="datalim")
 
     # window legend handled via _apply_window_group_legends(ax_scatter, ...)
 
-    fig.suptitle(
-        _format_title(signal_group="com", mode_name=mode_name, group_fields=group_fields, key=key),
-        fontsize=common_style["title_fontsize"],
-        fontweight=common_style["title_fontweight"],
-    )
+    if common_style.get("show_suptitle", True):
+        fig.suptitle(
+            _format_title(signal_group="com", mode_name=mode_name, group_fields=group_fields, key=key),
+            fontsize=common_style["title_fontsize"],
+            fontweight=common_style["title_fontweight"],
+        )
     fig.tight_layout(rect=common_style["tight_layout_rect"])
     fig.savefig(
         output_path,
@@ -2745,7 +2775,8 @@ def _plot_cop_overlay(
 
     window_span_alpha = float(cop_style.get("window_span_alpha", 0.15))
     for ax in (ax_cx, ax_cy):
-        _draw_window_spans(ax, window_spans, alpha=window_span_alpha, with_labels=False)
+        if common_style.get("show_windows", True):
+            _draw_window_spans(ax, window_spans, alpha=window_span_alpha, with_labels=False)
 
     use_group_colors, key_to_color, key_to_linestyle = _prepare_overlay_group_styles(
         sorted_keys=sorted_keys,
@@ -2806,17 +2837,18 @@ def _plot_cop_overlay(
                 label=plot_label,
             )
 
-        if pooled_event_vlines:
+        if pooled_event_vlines and common_style.get("show_event_vlines", True):
             _draw_event_vlines(ax, pooled_event_vlines, style=event_vline_style)
 
-        _draw_event_vlines_for_keys(
-            ax,
-            sorted_keys=sorted_keys,
-            event_vlines_by_key=event_vlines_by_key,
-            style=event_vline_style,
-            overlay_cfg=event_vline_overlay_cfg,
-            key_to_linestyle=key_to_linestyle,
-        )
+        if common_style.get("show_event_vlines", True):
+            _draw_event_vlines_for_keys(
+                ax,
+                sorted_keys=sorted_keys,
+                event_vlines_by_key=event_vlines_by_key,
+                style=event_vline_style,
+                overlay_cfg=event_vline_overlay_cfg,
+                key_to_linestyle=key_to_linestyle,
+            )
         _style_timeseries_axis(
             ax,
             title=ch,
@@ -2828,90 +2860,94 @@ def _plot_cop_overlay(
             event_vline_style=event_vline_style,
         )
         if time_start_frame is not None and time_end_frame is not None:
-            ticks = _apply_window_definition_xticks(ax, window_spans)
-            ticks = _ensure_time_zero_xtick(
-                ax,
-                tick_positions=ticks,
-                time_start_frame=time_start_frame,
-                time_end_frame=time_end_frame,
-            )
             tick_vlines = list(pooled_event_vlines) + _collect_overlay_event_vlines_for_ticks(
                 sorted_keys=sorted_keys,
                 event_vlines_by_key=event_vlines_by_key,
                 overlay_cfg=event_vline_overlay_cfg,
             )
-            ticks, blank_positions = _apply_event_vline_xticks(
+            _apply_time_axis_ticks(
                 ax,
-                tick_positions=ticks,
+                common_style=common_style,
+                window_spans=window_spans,
                 event_vlines=tick_vlines,
                 event_order=event_vline_order,
-                tick_labelsize=common_style["tick_labelsize"],
-            )
-            _apply_frame_tick_labels(
-                ax,
                 time_start_frame=time_start_frame,
                 time_end_frame=time_end_frame,
-                blank_positions=blank_positions,
+                tick_labelsize=float(common_style["tick_labelsize"]),
             )
-            _auto_rotate_dense_xticklabels(
-                ax,
-                tick_positions=ticks,
-                time_start_frame=time_start_frame,
-                time_end_frame=time_end_frame,
-            )
-        ax.set_xlabel(cop_style.get("x_label_time", "Normalized time (0-1)"), fontsize=common_style["label_fontsize"])
-        ax.set_ylabel(y_label, fontsize=common_style["label_fontsize"])
+        if common_style.get("show_xlabel", True):
+            ax.set_xlabel(cop_style.get("x_label_time", "Normalized time (0-1)"), fontsize=common_style["label_fontsize"])
+        if common_style.get("show_ylabel", True):
+            ax.set_ylabel(y_label, fontsize=common_style["label_fontsize"])
 
     # Overlay line segments: window color, group line style
     overlay_linewidth = float(cop_style.get("line_width", 0.8))
     overlay_alpha = float(cop_style.get("scatter_alpha", 0.7))
-    for span in window_spans:
-        mask = (x >= span["start"]) & (x <= span["end"])
-        if not mask.any():
-            continue
-        for key in sorted_keys:
-            cx = aggregated_by_key.get(key, {}).get(cx_name)
-            cy = aggregated_by_key.get(key, {}).get(cy_name)
-            if cx is None or cy is None:
+    if common_style.get("show_windows", True):
+        for span in window_spans:
+            mask = (x >= span["start"]) & (x <= span["end"])
+            if not mask.any():
                 continue
-            ml_vals = (-cy) if cop_style["y_invert"] else cy
-            linestyle = key_to_linestyle.get(key, "-")
-            ax_scatter.plot(
-                ml_vals[mask],
-                cx[mask],
-                color=span["color"],
-                linestyle=linestyle,
-                linewidth=overlay_linewidth,
-                alpha=overlay_alpha,
-                label="_nolegend_",
-            )
+            for key in sorted_keys:
+                cx = aggregated_by_key.get(key, {}).get(cx_name)
+                cy = aggregated_by_key.get(key, {}).get(cy_name)
+                if cx is None or cy is None:
+                    continue
+                ml_vals = (-cy) if cop_style["y_invert"] else cy
+                linestyle = key_to_linestyle.get(key, "-")
+                ax_scatter.plot(
+                    ml_vals[mask],
+                    cx[mask],
+                    color=span["color"],
+                    linestyle=linestyle,
+                    linewidth=overlay_linewidth,
+                    alpha=overlay_alpha,
+                    label="_nolegend_",
+                )
 
-    ax_scatter.grid(True, alpha=common_style["grid_alpha"])
-    ax_scatter.tick_params(labelsize=common_style["tick_labelsize"])
-    _apply_window_group_legends(
-        ax_scatter,
-        window_spans=window_spans,
-        group_handles=legend_group_handles,
-        legend_fontsize=cop_style["legend_fontsize"],
-        framealpha=common_style["legend_framealpha"],
-        loc=common_style["legend_loc"],
+    if common_style.get("show_grid", True):
+        ax_scatter.grid(True, alpha=common_style["grid_alpha"])
+    else:
+        ax_scatter.grid(False)
+    ax_scatter.tick_params(
+        axis="x",
+        labelsize=common_style["tick_labelsize"],
+        labelbottom=bool(common_style.get("show_xtick_labels", True)),
     )
-    ax_scatter.set_title(
-        "Cxy",
-        fontsize=common_style["title_fontsize"],
-        fontweight=common_style["title_fontweight"],
-        pad=common_style["title_pad"],
+    ax_scatter.tick_params(
+        axis="y",
+        labelsize=common_style["tick_labelsize"],
+        labelleft=bool(common_style.get("show_ytick_labels", True)),
     )
-    ax_scatter.set_xlabel(cop_style["x_label"], fontsize=common_style["label_fontsize"])
-    ax_scatter.set_ylabel(cop_style["y_label"], fontsize=common_style["label_fontsize"])
+    if common_style.get("show_legend", True):
+        _apply_window_group_legends(
+            ax_scatter,
+            window_spans=window_spans if common_style.get("show_windows", True) else (),
+            group_handles=legend_group_handles,
+            legend_fontsize=cop_style["legend_fontsize"],
+            framealpha=common_style["legend_framealpha"],
+            loc=common_style["legend_loc"],
+        )
+    if common_style.get("show_subplot_titles", True):
+        ax_scatter.set_title(
+            "Cxy",
+            fontsize=common_style["title_fontsize"],
+            fontweight=common_style["title_fontweight"],
+            pad=common_style["title_pad"],
+        )
+    if common_style.get("show_xlabel", True):
+        ax_scatter.set_xlabel(cop_style["x_label"], fontsize=common_style["label_fontsize"])
+    if common_style.get("show_ylabel", True):
+        ax_scatter.set_ylabel(cop_style["y_label"], fontsize=common_style["label_fontsize"])
     ax_scatter.set_aspect("equal", adjustable="datalim")
 
     overlay_by = ", ".join(group_fields) if group_fields else "all"
-    fig.suptitle(
-        f"{mode_name} | cop | overlay by {overlay_by}",
-        fontsize=common_style["title_fontsize"],
-        fontweight=common_style["title_fontweight"],
-    )
+    if common_style.get("show_suptitle", True):
+        fig.suptitle(
+            f"{mode_name} | cop | overlay by {overlay_by}",
+            fontsize=common_style["title_fontsize"],
+            fontweight=common_style["title_fontweight"],
+        )
     _savefig_and_close(fig, output_path, common_style, bbox=False)
 
 
@@ -3000,15 +3036,9 @@ def _plot_com_overlay(
 
     window_span_alpha = float(com_style.get("window_span_alpha", 0.15))
     time_axes = [ax_x, ax_y] + ([ax_z] if ax_z is not None else [])
-    for ax in time_axes:
-        for span in window_spans:
-            ax.axvspan(
-                span["start"],
-                span["end"],
-                color=span["color"],
-                alpha=window_span_alpha,
-                label="_nolegend_",
-            )
+    if common_style.get("show_windows", True):
+        for ax in time_axes:
+            _draw_window_spans(ax, window_spans, alpha=window_span_alpha, with_labels=False)
 
     import matplotlib as mpl
 
@@ -3072,109 +3102,123 @@ def _plot_com_overlay(
                 label=plot_label,
             )
 
-        if pooled_event_vlines:
+        if pooled_event_vlines and common_style.get("show_event_vlines", True):
             _draw_event_vlines(ax, pooled_event_vlines, style=event_vline_style)
-        _draw_event_vlines_for_keys(
-            ax,
-            sorted_keys=sorted_keys,
-            event_vlines_by_key=event_vlines_by_key,
-            style=event_vline_style,
-            overlay_cfg=event_vline_overlay_cfg,
-            key_to_linestyle=key_to_linestyle,
-        )
-
-        ax.grid(True, alpha=common_style["grid_alpha"])
-        ax.tick_params(labelsize=common_style["tick_labelsize"])
-        _apply_window_group_legends(
-            ax,
-            window_spans=window_spans,
-            group_handles=legend_group_handles,
-            event_vlines=event_vlines_all,
-            event_vline_style=event_vline_style,
-            legend_fontsize=com_style["legend_fontsize"],
-            framealpha=common_style["legend_framealpha"],
-            loc=common_style["legend_loc"],
-        )
-        if time_start_frame is not None and time_end_frame is not None:
-            ticks = _apply_window_definition_xticks(ax, window_spans)
-            ticks = _ensure_time_zero_xtick(
+        if common_style.get("show_event_vlines", True):
+            _draw_event_vlines_for_keys(
                 ax,
-                tick_positions=ticks,
-                time_start_frame=time_start_frame,
-                time_end_frame=time_end_frame,
+                sorted_keys=sorted_keys,
+                event_vlines_by_key=event_vlines_by_key,
+                style=event_vline_style,
+                overlay_cfg=event_vline_overlay_cfg,
+                key_to_linestyle=key_to_linestyle,
             )
+
+        if common_style.get("show_grid", True):
+            ax.grid(True, alpha=common_style["grid_alpha"])
+        else:
+            ax.grid(False)
+        ax.tick_params(
+            axis="x",
+            labelsize=common_style["tick_labelsize"],
+            labelbottom=bool(common_style.get("show_xtick_labels", True)),
+        )
+        ax.tick_params(
+            axis="y",
+            labelsize=common_style["tick_labelsize"],
+            labelleft=bool(common_style.get("show_ytick_labels", True)),
+        )
+        if common_style.get("show_legend", True):
+            _apply_window_group_legends(
+                ax,
+                window_spans=window_spans if common_style.get("show_windows", True) else (),
+                group_handles=legend_group_handles,
+                event_vlines=event_vlines_all if common_style.get("show_event_vlines", True) else (),
+                event_vline_style=event_vline_style,
+                legend_fontsize=com_style["legend_fontsize"],
+                framealpha=common_style["legend_framealpha"],
+                loc=common_style["legend_loc"],
+            )
+        if time_start_frame is not None and time_end_frame is not None:
             tick_vlines = list(pooled_event_vlines) + _collect_overlay_event_vlines_for_ticks(
                 sorted_keys=sorted_keys,
                 event_vlines_by_key=event_vlines_by_key,
                 overlay_cfg=event_vline_overlay_cfg,
             )
-            ticks, blank_positions = _apply_event_vline_xticks(
+            _apply_time_axis_ticks(
                 ax,
-                tick_positions=ticks,
+                common_style=common_style,
+                window_spans=window_spans,
                 event_vlines=tick_vlines,
                 event_order=event_vline_order,
-                tick_labelsize=common_style["tick_labelsize"],
-            )
-            _apply_frame_tick_labels(
-                ax,
                 time_start_frame=time_start_frame,
                 time_end_frame=time_end_frame,
-                blank_positions=blank_positions,
+                tick_labelsize=float(common_style["tick_labelsize"]),
             )
-            _auto_rotate_dense_xticklabels(
-                ax,
-                tick_positions=ticks,
-                time_start_frame=time_start_frame,
-                time_end_frame=time_end_frame,
-            )
-        ax.set_xlabel(com_style.get("x_label_time", "Normalized time (0-1)"), fontsize=common_style["label_fontsize"])
-        ax.set_ylabel(y_label, fontsize=common_style["label_fontsize"])
+        if common_style.get("show_xlabel", True):
+            ax.set_xlabel(com_style.get("x_label_time", "Normalized time (0-1)"), fontsize=common_style["label_fontsize"])
+        if common_style.get("show_ylabel", True):
+            ax.set_ylabel(y_label, fontsize=common_style["label_fontsize"])
 
-    ax_x.set_title(
-        comx_name,
-        fontsize=common_style["title_fontsize"],
-        fontweight=common_style["title_fontweight"],
-        pad=common_style["title_pad"],
-    )
-    ax_y.set_title(
-        comy_name,
-        fontsize=common_style["title_fontsize"],
-        fontweight=common_style["title_fontweight"],
-        pad=common_style["title_pad"],
-    )
-    if ax_z is not None and comz_name is not None:
-        ax_z.set_title(
-            comz_name,
+    if common_style.get("show_subplot_titles", True):
+        ax_x.set_title(
+            comx_name,
             fontsize=common_style["title_fontsize"],
             fontweight=common_style["title_fontweight"],
             pad=common_style["title_pad"],
         )
+        ax_y.set_title(
+            comy_name,
+            fontsize=common_style["title_fontsize"],
+            fontweight=common_style["title_fontweight"],
+            pad=common_style["title_pad"],
+        )
+        if ax_z is not None and comz_name is not None:
+            ax_z.set_title(
+                comz_name,
+                fontsize=common_style["title_fontsize"],
+                fontweight=common_style["title_fontweight"],
+                pad=common_style["title_pad"],
+            )
 
     overlay_linewidth = float(com_style.get("line_width", 0.8))
     overlay_alpha = float(com_style.get("scatter_alpha", 0.7))
-    for span in window_spans:
-        mask = (x >= span["start"]) & (x <= span["end"])
-        if not mask.any():
-            continue
-        for key in sorted_keys:
-            comx = aggregated_by_key.get(key, {}).get(comx_name)
-            comy = aggregated_by_key.get(key, {}).get(comy_name)
-            if comx is None or comy is None:
+    if common_style.get("show_windows", True):
+        for span in window_spans:
+            mask = (x >= span["start"]) & (x <= span["end"])
+            if not mask.any():
                 continue
-            ml_vals = (-comy) if com_style.get("y_invert", False) else comy
-            linestyle = key_to_linestyle.get(key, "-")
-            ax_scatter.plot(
-                ml_vals[mask],
-                comx[mask],
-                color=span["color"],
-                linestyle=linestyle,
-                linewidth=overlay_linewidth,
-                alpha=overlay_alpha,
-                label="_nolegend_",
-            )
+            for key in sorted_keys:
+                comx = aggregated_by_key.get(key, {}).get(comx_name)
+                comy = aggregated_by_key.get(key, {}).get(comy_name)
+                if comx is None or comy is None:
+                    continue
+                ml_vals = (-comy) if com_style.get("y_invert", False) else comy
+                linestyle = key_to_linestyle.get(key, "-")
+                ax_scatter.plot(
+                    ml_vals[mask],
+                    comx[mask],
+                    color=span["color"],
+                    linestyle=linestyle,
+                    linewidth=overlay_linewidth,
+                    alpha=overlay_alpha,
+                    label="_nolegend_",
+                )
 
-    ax_scatter.grid(True, alpha=common_style["grid_alpha"])
-    ax_scatter.tick_params(labelsize=common_style["tick_labelsize"])
+    if common_style.get("show_grid", True):
+        ax_scatter.grid(True, alpha=common_style["grid_alpha"])
+    else:
+        ax_scatter.grid(False)
+    ax_scatter.tick_params(
+        axis="x",
+        labelsize=common_style["tick_labelsize"],
+        labelbottom=bool(common_style.get("show_xtick_labels", True)),
+    )
+    ax_scatter.tick_params(
+        axis="y",
+        labelsize=common_style["tick_labelsize"],
+        labelleft=bool(common_style.get("show_ytick_labels", True)),
+    )
     group_handles = _build_group_legend_handles(
         sorted_keys,
         group_fields,
@@ -3182,31 +3226,36 @@ def _plot_com_overlay(
         key_to_linestyle,
         linewidth=legend_group_linewidth,
     )
-    _apply_window_group_legends(
-        ax_scatter,
-        window_spans=window_spans,
-        group_handles=group_handles,
-        legend_fontsize=com_style["legend_fontsize"],
-        framealpha=common_style["legend_framealpha"],
-        loc=common_style["legend_loc"],
-    )
+    if common_style.get("show_legend", True):
+        _apply_window_group_legends(
+            ax_scatter,
+            window_spans=window_spans if common_style.get("show_windows", True) else (),
+            group_handles=group_handles,
+            legend_fontsize=com_style["legend_fontsize"],
+            framealpha=common_style["legend_framealpha"],
+            loc=common_style["legend_loc"],
+        )
 
-    ax_scatter.set_title(
-        "COMxy",
-        fontsize=common_style["title_fontsize"],
-        fontweight=common_style["title_fontweight"],
-        pad=common_style["title_pad"],
-    )
-    ax_scatter.set_xlabel(com_style.get("x_label", comx_name), fontsize=common_style["label_fontsize"])
-    ax_scatter.set_ylabel(com_style.get("y_label", comy_name), fontsize=common_style["label_fontsize"])
+    if common_style.get("show_subplot_titles", True):
+        ax_scatter.set_title(
+            "COMxy",
+            fontsize=common_style["title_fontsize"],
+            fontweight=common_style["title_fontweight"],
+            pad=common_style["title_pad"],
+        )
+    if common_style.get("show_xlabel", True):
+        ax_scatter.set_xlabel(com_style.get("x_label", comx_name), fontsize=common_style["label_fontsize"])
+    if common_style.get("show_ylabel", True):
+        ax_scatter.set_ylabel(com_style.get("y_label", comy_name), fontsize=common_style["label_fontsize"])
     ax_scatter.set_aspect("equal", adjustable="datalim")
 
     overlay_by = ", ".join(group_fields) if group_fields else "all"
-    fig.suptitle(
-        f"{mode_name} | com | overlay by {overlay_by}",
-        fontsize=common_style["title_fontsize"],
-        fontweight=common_style["title_fontweight"],
-    )
+    if common_style.get("show_suptitle", True):
+        fig.suptitle(
+            f"{mode_name} | com | overlay by {overlay_by}",
+            fontsize=common_style["title_fontsize"],
+            fontweight=common_style["title_fontweight"],
+        )
     fig.tight_layout(rect=common_style["tight_layout_rect"])
     fig.savefig(
         output_path,
@@ -4586,6 +4635,16 @@ class AggregatedSignalVisualizer:
             "savefig_bbox_inches": cfg["savefig_bbox_inches"],
             "savefig_facecolor": cfg["savefig_facecolor"],
             "font_family": cfg["font_family"],
+            "show_suptitle": bool(cfg.get("show_suptitle", True)),
+            "show_subplot_titles": bool(cfg.get("show_subplot_titles", True)),
+            "show_grid": bool(cfg.get("show_grid", True)),
+            "show_legend": bool(cfg.get("show_legend", True)),
+            "show_xlabel": bool(cfg.get("show_xlabel", True)),
+            "show_ylabel": bool(cfg.get("show_ylabel", True)),
+            "show_xtick_labels": bool(cfg.get("show_xtick_labels", True)),
+            "show_ytick_labels": bool(cfg.get("show_ytick_labels", True)),
+            "show_event_vlines": bool(cfg.get("show_event_vlines", True)),
+            "show_windows": bool(cfg.get("show_windows", True)),
             "show_max_marker": cfg["show_max_marker"],
             "use_group_colors": bool(cfg.get("use_group_colors", False)),
             "group_linestyles": _parse_group_linestyles(cfg.get("group_linestyles")),
