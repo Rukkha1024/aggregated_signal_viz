@@ -34,14 +34,14 @@ class VizConfig:
 
     # Facet & Hue Configuration (Default values)
     facet_column: Optional[str] = None  # No faceting by default
-    hue_column: str = "step_TF"
+    hue_column: str = "age_group"
 
     # Data Filtering (자유롭게 컬럼명: 값 추가/제거 가능)
     # 예: {"mixed": "1", "age_group": "young", "velocity": 10}
     # 필터 안 쓰려면 빈 딕셔너리로: {}
     filters: Dict[str, Any] = field(default_factory=lambda: {
         "mixed": "1",
-        "age_group": "young"
+        "step_TF": "nonstep"
     })
 
     # Plot Dimensions & Style
@@ -103,7 +103,7 @@ class VizConfig:
     layout_rect: Tuple[float, float, float, float] = (0, 0, 1, 0.95)  # tight_layout 적용 영역(left, bottom, right, top)
 
     # Sorting
-    sort_by_mean: Optional[str] = "ascending"  # None, "ascending", or "descending"
+    sort_by_mean: Optional[str] = "None"  # None, "ascending", or "descending"
     
     # Output
     # NOTE: output base dir comes from config.yaml (output.base_dir).
