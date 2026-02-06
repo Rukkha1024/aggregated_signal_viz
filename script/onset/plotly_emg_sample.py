@@ -19,8 +19,11 @@ RULES: Dict[str, Any] = {
     "selected_modes": ["diff_step_TF_subject"],
     # mode overrides (same schema as config.yaml: aggregation_modes.<mode>)
     "mode_overrides": {},
-    # output stays inside check_onset/
-    "output_base_dir": Path(__file__).resolve().parent / "output",
+    # output path policy:
+    # - default: <config.output.base_dir>/plotly_check_onset
+    # - optional override: set an absolute/relative path here
+    "output_base_dir": None,
+    "output_subdir": "plotly_check_onset",
     # export options
     "export_html": True,
     "export_png": True,
@@ -33,7 +36,11 @@ RULES: Dict[str, Any] = {
 
 
 def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[1]
+    here = Path(__file__).resolve()
+    for candidate in (here.parent, *here.parents):
+        if (candidate / "config.yaml").exists():
+            return candidate
+    return here.parents[2]
 
 
 def _import_repo_utils() -> Tuple[Any, Any, Any]:
@@ -904,7 +911,14 @@ def main() -> None:
     if not mode_cfgs:
         raise ValueError("No aggregation_modes selected/found.")
 
-    out_base = Path(RULES.get("output_base_dir") or (Path(__file__).resolve().parent / "output"))
+    output_base_cfg = (cfg.get("output") or {}).get("base_dir", "output")
+    output_base_dir = resolve_path(base_dir, output_base_cfg)
+    output_subdir = str(RULES.get("output_subdir") or "plotly_check_onset").strip() or "plotly_check_onset"
+    out_base_override = RULES.get("output_base_dir")
+    if out_base_override:
+        out_base = resolve_path(base_dir, out_base_override)
+    else:
+        out_base = output_base_dir / output_subdir
     max_files = RULES.get("max_files_per_mode")
     max_trials_per_file = RULES.get("max_trials_per_file")
     export_html = bool(RULES.get("export_html", True))

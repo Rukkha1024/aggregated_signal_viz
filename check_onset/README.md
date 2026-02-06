@@ -7,16 +7,16 @@
 ## 실행
 
 ```bash
-cd "/mnt/c/Users/Alice/OneDrive - 청주대학교/근전도 분석 코드/aggregated_signal_viz/check_onset"
+cd "/mnt/c/Users/Alice/OneDrive - 청주대학교/근전도 분석 코드/aggregated_signal_viz"
 
 # (환경 확인)
 conda run -n module python -c "import sys; print(sys.executable)"
 
 # 샘플 실행 (HTML/PNG 생성)
 # - CLI 옵션 없음: 스크립트 상단 `RULES`에서 mode/출력 등을 제어
-conda run -n module python plotly_emg_sample.py
+conda run -n module python script/onset/plotly_emg_sample.py
 ```
 
 결과물:
-- `check_onset/output/<mode>/*.html`
-- `check_onset/output/<mode>/*.png`
+- `output/plotly_check_onset/<mode>/*.html`
+- `output/plotly_check_onset/<mode>/*.png`

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 import string
 from dataclasses import dataclass, field
 from math import ceil
@@ -16,8 +17,11 @@ import polars as pl
 
 try:
     from script.config_utils import load_config, resolve_path, strip_bom_columns
-except ModuleNotFoundError:  # Allows running as `python script/vis_onset.py`
-    from config_utils import load_config, resolve_path, strip_bom_columns
+except ModuleNotFoundError:  # Allows running as `python script/onset/vis_onset.py`
+    repo_root = Path(__file__).resolve().parents[2]
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+    from script.config_utils import load_config, resolve_path, strip_bom_columns
 
 # =============================================================================
 # 1. VISUALIZATION CONFIGURATION (CONSTANTS)
