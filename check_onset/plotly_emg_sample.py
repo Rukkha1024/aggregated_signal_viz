@@ -708,10 +708,18 @@ def _emit_emg_figure(
         axis_idx = idx_ch + 1
         xref = "x" if axis_idx == 1 else f"x{axis_idx}"
         yref_domain = "y domain" if axis_idx == 1 else f"y{axis_idx} domain"
+        axis_min_x: Optional[float] = None
+        axis_max_x: Optional[float] = None
 
         for t_idx, trial in enumerate(trials):
             x = np.asarray(trial["__x_abs"], dtype=float)
             y = np.asarray(trial[str(ch)], dtype=float)
+            finite_x = x[np.isfinite(x)]
+            if finite_x.size > 0:
+                cur_min = float(finite_x.min())
+                cur_max = float(finite_x.max())
+                axis_min_x = cur_min if axis_min_x is None else min(axis_min_x, cur_min)
+                axis_max_x = cur_max if axis_max_x is None else max(axis_max_x, cur_max)
             fig.add_trace(
                 go.Scatter(
                     x=x,
@@ -800,6 +808,9 @@ def _emit_emg_figure(
                 _add_vline("step_onset", float(step_onset_abs))
             if "TKEO_AGLR_emg_onset_timing" in event_cols and tkeo_abs is not None:
                 _add_vline("TKEO_AGLR_emg_onset_timing", float(tkeo_abs))
+
+        if axis_min_x is not None and axis_max_x is not None and axis_max_x > axis_min_x:
+            fig.update_xaxes(range=[axis_min_x, axis_max_x], row=r, col=c)
 
         # per-subplot legend (annotation): show stable window/event labels (from first trial)
         spans_for_legend = legend_spans_by_channel.get(str(ch), [])
