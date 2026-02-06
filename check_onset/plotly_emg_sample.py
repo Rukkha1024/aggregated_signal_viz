@@ -24,8 +24,8 @@ RULES: Dict[str, Any] = {
     # export options
     "export_html": True,
     "export_png": True,
-    "figure_width": 1800,
-    "figure_height": 900,
+    "figure_width": 3600,
+    "figure_height": 1800,
     # safety limits
     "max_files_per_mode": None,  # None -> all
     "max_trials_per_file": None,  # e.g. 5 (when groupby groups multiple trials)
@@ -542,6 +542,45 @@ def _collect_trials_series(
     return df
 
 
+def _resolve_time_window_ms(
+    *,
+    lf: pl.LazyFrame,
+    x_abs_col: str,
+    device_rate: float,
+    interp_cfg: Dict[str, Any],
+) -> Tuple[float, float]:
+    start_cfg = interp_cfg.get("start_ms", -100)
+    end_cfg = interp_cfg.get("end_ms", 800)
+
+    data_start_ms: Optional[float] = None
+    data_end_ms: Optional[float] = None
+    if start_cfg is None or end_cfg is None:
+        stats = (
+            lf.select(
+                [
+                    (pl.col(x_abs_col) - pl.col("onset_device")).min().alias("min_rel"),
+                    (pl.col(x_abs_col) - pl.col("onset_device")).max().alias("max_rel"),
+                ]
+            ).collect()
+        )
+        if stats.is_empty():
+            raise ValueError("No data available to resolve interpolation time window.")
+
+        min_rel = stats["min_rel"].item()
+        max_rel = stats["max_rel"].item()
+        if min_rel is None or max_rel is None:
+            raise ValueError("No valid onset-aligned frames found to resolve interpolation time window.")
+
+        data_start_ms = float(min_rel) * 1000.0 / float(device_rate)
+        data_end_ms = float(max_rel) * 1000.0 / float(device_rate)
+
+    time_start_ms = float(start_cfg) if start_cfg is not None else float(data_start_ms)
+    time_end_ms = float(end_cfg) if end_cfg is not None else float(data_end_ms)
+    if time_end_ms <= time_start_ms:
+        raise ValueError("interpolation.end_ms must be greater than interpolation.start_ms")
+    return time_start_ms, time_end_ms
+
+
 def _mode_cfgs(cfg: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     raw_modes = cfg.get("aggregation_modes") or {}
     if not isinstance(raw_modes, dict):
@@ -832,11 +871,6 @@ def main() -> None:
     grid_layout = emg_cfg.get("grid_layout") or [4, 4]
 
     interp_cfg = cfg.get("interpolation", {})
-    time_start_ms = float(interp_cfg.get("start_ms", -100))
-    time_end_ms = float(interp_cfg.get("end_ms", 800))
-    if time_end_ms <= time_start_ms:
-        raise ValueError("interpolation.end_ms must be greater than interpolation.start_ms")
-
     lf = pl.scan_parquet(str(input_path))
     schema = lf.collect_schema()
     available = set(schema.keys())
@@ -903,6 +937,13 @@ def main() -> None:
         missing = [c for c in needed_cols if c not in available]
         if missing:
             raise ValueError(f"[{mode_name}] Missing required columns in merged.parquet: {missing}")
+
+        time_start_ms, time_end_ms = _resolve_time_window_ms(
+            lf=lf_mode,
+            x_abs_col=x_abs_col,
+            device_rate=device_rate,
+            interp_cfg=interp_cfg,
+        )
 
         df_trials = _collect_trials_series(
             lf=lf_mode,
