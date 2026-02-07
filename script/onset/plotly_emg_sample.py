@@ -31,6 +31,8 @@ RULES: Dict[str, Any] = {
     "figure_height": 1500,
     # x-axis tick interval (None -> Plotly auto). e.g. 25 for 25-frame steps.
     "x_tick_dtick": 25,
+    # grid transparency (0~1). None -> use config.yaml plot_style.common.grid_alpha.
+    "grid_alpha": None,
     # safety limits
     "max_files_per_mode": None,  # None -> all
     "max_trials_per_file": None,  # e.g. 5 (when groupby groups multiple trials)
@@ -684,6 +686,7 @@ def _emit_emg_figure(
     event_cfg: Dict[str, Any],
     windows_cfg: Dict[str, Any],
     window_colors: Dict[str, str],
+    grid_alpha: float,
     x_axis_zeroing_enabled: bool,
     x_axis_zeroing_reference_event: str,
 ) -> None:
@@ -960,7 +963,8 @@ def _emit_emg_figure(
         template="plotly_white",
         showlegend=False,
     )
-    xaxes_kwargs: Dict[str, Any] = {"showgrid": True, "gridcolor": "rgba(0,0,0,0.08)"}
+    grid_color = f"rgba(0,0,0,{float(grid_alpha):.3f})"
+    xaxes_kwargs: Dict[str, Any] = {"showgrid": True, "gridcolor": grid_color}
     x_tick_dtick = RULES.get("x_tick_dtick")
     if x_tick_dtick is not None:
         try:
@@ -972,7 +976,7 @@ def _emit_emg_figure(
         xaxes_kwargs.update({"tickmode": "linear", "dtick": dtick_value})
 
     fig.update_xaxes(**xaxes_kwargs)
-    fig.update_yaxes(showgrid=True, gridcolor="rgba(0,0,0,0.08)")
+    fig.update_yaxes(showgrid=True, gridcolor=grid_color)
 
     if out_html is not None:
         out_html.parent.mkdir(parents=True, exist_ok=True)
@@ -1030,10 +1034,21 @@ def main() -> None:
     event_cfg = cfg.get("event_vlines", {}) if isinstance(cfg.get("event_vlines"), dict) else {}
     windows_cfg = cfg.get("windows", {}) if isinstance(cfg.get("windows"), dict) else {}
     window_colors = _window_colors_from_config(cfg)
+    common_style_cfg = ((cfg.get("plot_style") or {}).get("common") or {})
     x_zero_cfg = cfg.get("x_axis_zeroing", {}) if isinstance(cfg.get("x_axis_zeroing"), dict) else {}
     onset_col = str(id_cfg.get("onset") or "platform_onset").strip() or "platform_onset"
     x_axis_zeroing_enabled = _coerce_bool(x_zero_cfg.get("enabled"), False)
     x_axis_zeroing_reference_event = str(x_zero_cfg.get("reference_event") or onset_col).strip() or onset_col
+    rule_grid_alpha = RULES.get("grid_alpha")
+    grid_alpha_raw = common_style_cfg.get("grid_alpha", 0.08) if rule_grid_alpha is None else rule_grid_alpha
+    try:
+        grid_alpha = float(grid_alpha_raw)
+    except Exception as exc:
+        raise ValueError(
+            "grid_alpha must be numeric (RULES['grid_alpha'] or config plot_style.common.grid_alpha)"
+        ) from exc
+    if not (0.0 <= grid_alpha <= 1.0):
+        raise ValueError("grid_alpha must be in [0, 1]")
 
     mode_cfgs = _mode_cfgs(cfg)
     if not mode_cfgs:
@@ -1225,6 +1240,7 @@ def main() -> None:
                 event_cfg=event_cfg,
                 windows_cfg=windows_cfg,
                 window_colors=window_colors,
+                grid_alpha=grid_alpha,
                 x_axis_zeroing_enabled=x_axis_zeroing_enabled,
                 x_axis_zeroing_reference_event=x_axis_zeroing_reference_event,
             )

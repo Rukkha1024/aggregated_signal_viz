@@ -62,6 +62,11 @@ description: >-
 - Fix pattern: `script/visualizer.py`에서 0 tick을 강제로 포함(`_ensure_time_zero_xtick`), `reference_event=0`은 “shift 없음”으로 처리.
 - Reference implementation in this repo: `script/visualizer.py`, `script/check_zero_tick.py`.
 
+- Symptom: Figure script마다 x tick 간격/격자 투명도 같은 axis style을 매번 수동 수정해야 함.
+- Root cause: 축 스타일 우선순위가 불명확하거나 하드코딩되어 `RULES`와 `config.yaml` fallback이 분리됨.
+- Fix pattern: Precedence는 script-level `RULES`가 first override. 해당 값이 `None`일 때만 `config.yaml`의 `plot_style.common.*`를 fallback으로 사용.
+- Reference (generic): Figure scripts에서는 공통으로 `RULES -> (if None) plot_style.common.*` 패턴을 유지.
+
 ## Templates
 
 - Summary grid template: `templates/summary_grid_template.py`
