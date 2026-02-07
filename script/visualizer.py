@@ -273,6 +273,19 @@ def _coerce_float(value: Any) -> Optional[float]:
     return None
 
 
+def _coerce_bool(value: Any, default: bool = False) -> bool:
+    if value is None:
+        return bool(default)
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in ("1", "true", "yes", "y", "on"):
+        return True
+    if text in ("0", "false", "no", "n", "off"):
+        return False
+    return bool(default)
+
+
 def _parse_window_boundary_spec(value: Any) -> Optional[Tuple[str, Any]]:
     """
     윈도우 경계(start_ms/end_ms) 정의를 파싱합니다.
@@ -960,6 +973,7 @@ def _apply_frame_tick_labels(
     *,
     time_start_frame: float,
     time_end_frame: float,
+    time_zero_frame: float = 0.0,
     blank_positions: Sequence[float] = (),
     blank_tol: float = 1e-6,
 ) -> None:
@@ -971,6 +985,7 @@ def _apply_frame_tick_labels(
     start = float(time_start_frame)
     end = float(time_end_frame)
     span = end - start
+    zero_frame = float(time_zero_frame)
     if span == 0:
         return
 
@@ -998,6 +1013,9 @@ def _apply_frame_tick_labels(
             frame = start + float(x) * span
         except Exception:
             return ""
+        if not np.isfinite(frame):
+            return ""
+        frame -= zero_frame
         if not np.isfinite(frame):
             return ""
         return f"{frame:.0f}"
@@ -1049,15 +1067,17 @@ def _ensure_time_zero_xtick(
     tick_positions: Sequence[float],
     time_start_frame: float,
     time_end_frame: float,
+    time_zero_frame: float = 0.0,
     tol: float = 1e-6,
 ) -> List[float]:
     start = float(time_start_frame)
     end = float(time_end_frame)
+    zero_frame = float(time_zero_frame)
     span = end - start
     if span == 0 or not np.isfinite(start) or not np.isfinite(end):
         return list(tick_positions)
 
-    x0 = (0.0 - start) / span
+    x0 = (zero_frame - start) / span
     if not np.isfinite(x0):
         return list(tick_positions)
     if x0 < -tol or x0 > 1.0 + tol:
@@ -1449,6 +1469,7 @@ def _apply_time_axis_ticks(
     time_start_frame: float,
     time_end_frame: float,
     tick_labelsize: float,
+    time_zero_frame: float = 0.0,
 ) -> None:
     ax.set_xlim(0.0, 1.0)
 
@@ -1467,6 +1488,7 @@ def _apply_time_axis_ticks(
         tick_positions=ticks,
         time_start_frame=time_start_frame,
         time_end_frame=time_end_frame,
+        time_zero_frame=time_zero_frame,
     )
 
     blank_positions: List[float] = []
@@ -1483,6 +1505,7 @@ def _apply_time_axis_ticks(
         ax,
         time_start_frame=time_start_frame,
         time_end_frame=time_end_frame,
+        time_zero_frame=time_zero_frame,
         blank_positions=blank_positions,
     )
 
@@ -1544,6 +1567,7 @@ def _plot_task(task: Dict[str, Any]) -> None:
             time_end_ms=task.get("time_end_ms"),
             time_start_frame=task.get("time_start_frame"),
             time_end_frame=task.get("time_end_frame"),
+            time_zero_frame=float(task.get("time_zero_frame", 0.0)),
             filtered_group_fields=task["filtered_group_fields"],
             color_by_fields=task.get("color_by_fields"),
         )
@@ -1573,6 +1597,7 @@ def _plot_task(task: Dict[str, Any]) -> None:
             time_end_ms=task["time_end_ms"],
             time_start_frame=task.get("time_start_frame"),
             time_end_frame=task.get("time_end_frame"),
+            time_zero_frame=float(task.get("time_zero_frame", 0.0)),
         )
         return
 
@@ -1598,6 +1623,7 @@ def _plot_task(task: Dict[str, Any]) -> None:
             time_end_ms=task["time_end_ms"],
             time_start_frame=task.get("time_start_frame"),
             time_end_frame=task.get("time_end_frame"),
+            time_zero_frame=float(task.get("time_zero_frame", 0.0)),
         )
         return
 
@@ -1618,6 +1644,7 @@ def _plot_task(task: Dict[str, Any]) -> None:
             time_end_ms=task["time_end_ms"],
             time_start_frame=task.get("time_start_frame"),
             time_end_frame=task.get("time_end_frame"),
+            time_zero_frame=float(task.get("time_zero_frame", 0.0)),
             device_rate=float(task["device_rate"]),
             cop_channels=task["cop_channels"],
             grid_layout=task.get("grid_layout"),
@@ -1643,6 +1670,7 @@ def _plot_task(task: Dict[str, Any]) -> None:
             time_end_ms=task["time_end_ms"],
             time_start_frame=task.get("time_start_frame"),
             time_end_frame=task.get("time_end_frame"),
+            time_zero_frame=float(task.get("time_zero_frame", 0.0)),
             device_rate=float(task["device_rate"]),
             com_channels=task["com_channels"],
             grid_layout=task.get("grid_layout"),
@@ -1686,6 +1714,7 @@ def _plot_overlay_generic(
     time_start_frame: Optional[float],
     time_end_frame: Optional[float],
     filtered_group_fields: List[str],
+    time_zero_frame: float = 0.0,
     color_by_fields: Optional[List[str]] = None,
 ) -> None:
     if signal_group == "cop":
@@ -1710,6 +1739,7 @@ def _plot_overlay_generic(
             color_by_fields=color_by_fields,
             time_start_frame=time_start_frame,
             time_end_frame=time_end_frame,
+            time_zero_frame=time_zero_frame,
         )
         return
 
@@ -1735,6 +1765,7 @@ def _plot_overlay_generic(
             color_by_fields=color_by_fields,
             time_start_frame=time_start_frame,
             time_end_frame=time_end_frame,
+            time_zero_frame=time_zero_frame,
         )
         return
 
@@ -1768,6 +1799,7 @@ def _plot_overlay_generic(
         time_end_ms=time_end_ms,
         time_start_frame=time_start_frame,
         time_end_frame=time_end_frame,
+        time_zero_frame=time_zero_frame,
         filtered_group_fields=filtered_group_fields,
         color_by_fields=color_by_fields,
     )
@@ -1797,6 +1829,7 @@ def _plot_emg(
     time_end_ms: float,
     time_start_frame: Optional[float],
     time_end_frame: Optional[float],
+    time_zero_frame: float = 0.0,
 ) -> None:
     import matplotlib.pyplot as plt
 
@@ -1853,6 +1886,7 @@ def _plot_emg(
                 event_order=event_vline_order,
                 time_start_frame=time_start_frame,
                 time_end_frame=time_end_frame,
+                time_zero_frame=time_zero_frame,
                 tick_labelsize=float(common_style["tick_labelsize"]),
             )
 
@@ -1902,6 +1936,7 @@ def _plot_overlay_timeseries_grid(
     time_start_frame: Optional[float] = None,
     time_end_frame: Optional[float] = None,
     filtered_group_fields: List[str],
+    time_zero_frame: float = 0.0,
     color_by_fields: Optional[List[str]] = None,
 ) -> None:
     import matplotlib.pyplot as plt
@@ -2022,6 +2057,7 @@ def _plot_overlay_timeseries_grid(
                     event_order=event_vline_order,
                     time_start_frame=time_start_frame,
                     time_end_frame=time_end_frame,
+                    time_zero_frame=time_zero_frame,
                     tick_labelsize=float(common_style["tick_labelsize"]),
                 )
 
@@ -2118,6 +2154,7 @@ def _plot_overlay_timeseries_grid(
                     event_order=event_vline_order,
                     time_start_frame=time_start_frame,
                     time_end_frame=time_end_frame,
+                    time_zero_frame=time_zero_frame,
                     tick_labelsize=float(common_style["tick_labelsize"]),
                 )
             if common_style.get("show_xlabel", True):
@@ -2163,6 +2200,7 @@ def _plot_forceplate(
     time_end_ms: float,
     time_start_frame: Optional[float],
     time_end_frame: Optional[float],
+    time_zero_frame: float = 0.0,
 ) -> None:
     import matplotlib.pyplot as plt
 
@@ -2208,6 +2246,7 @@ def _plot_forceplate(
                 event_order=event_vline_order,
                 time_start_frame=time_start_frame,
                 time_end_frame=time_end_frame,
+                time_zero_frame=time_zero_frame,
                 tick_labelsize=float(common_style["tick_labelsize"]),
             )
         if common_style.get("show_xlabel", True):
@@ -2247,6 +2286,7 @@ def _plot_cop(
     time_end_ms: float,
     time_start_frame: Optional[float],
     time_end_frame: Optional[float],
+    time_zero_frame: float = 0.0,
     device_rate: float,
     cop_channels: Sequence[str],
     grid_layout: Optional[Sequence[int]],
@@ -2403,6 +2443,7 @@ def _plot_cop(
                 event_order=event_vline_order,
                 time_start_frame=time_start_frame,
                 time_end_frame=time_end_frame,
+                time_zero_frame=time_zero_frame,
                 tick_labelsize=float(common_style["tick_labelsize"]),
             )
 
@@ -2446,6 +2487,7 @@ def _plot_com(
     time_end_ms: float,
     time_start_frame: Optional[float],
     time_end_frame: Optional[float],
+    time_zero_frame: float = 0.0,
     device_rate: float,
     com_channels: Sequence[str],
     grid_layout: Optional[Sequence[int]],
@@ -2695,6 +2737,7 @@ def _plot_com(
                 event_order=event_vline_order,
                 time_start_frame=time_start_frame,
                 time_end_frame=time_end_frame,
+                time_zero_frame=time_zero_frame,
                 tick_labelsize=float(common_style["tick_labelsize"]),
             )
 
@@ -2742,6 +2785,7 @@ def _plot_cop_overlay(
     color_by_fields: Optional[List[str]] = None,
     time_start_frame: Optional[float] = None,
     time_end_frame: Optional[float] = None,
+    time_zero_frame: float = 0.0,
 ) -> None:
     import matplotlib.pyplot as plt
 
@@ -2873,6 +2917,7 @@ def _plot_cop_overlay(
                 event_order=event_vline_order,
                 time_start_frame=time_start_frame,
                 time_end_frame=time_end_frame,
+                time_zero_frame=time_zero_frame,
                 tick_labelsize=float(common_style["tick_labelsize"]),
             )
         if common_style.get("show_xlabel", True):
@@ -2973,6 +3018,7 @@ def _plot_com_overlay(
     color_by_fields: Optional[List[str]] = None,
     time_start_frame: Optional[float] = None,
     time_end_frame: Optional[float] = None,
+    time_zero_frame: float = 0.0,
 ) -> None:
     import matplotlib.pyplot as plt
 
@@ -3153,6 +3199,7 @@ def _plot_com_overlay(
                 event_order=event_vline_order,
                 time_start_frame=time_start_frame,
                 time_end_frame=time_end_frame,
+                time_zero_frame=time_zero_frame,
                 tick_labelsize=float(common_style["tick_labelsize"]),
             )
         if common_style.get("show_xlabel", True):
@@ -3329,8 +3376,26 @@ class AggregatedSignalVisualizer:
                         window_event_cols.append(str(end_spec[1][0]))
 
         self.window_event_columns = [c for c in dict.fromkeys(window_event_cols) if c]
+        x_zero_cfg = self.config.get("x_axis_zeroing", {})
+        onset_col_for_zero = str(self.id_cfg.get("onset") or "platform_onset").strip() or "platform_onset"
+        self.x_axis_zeroing_enabled = False
+        self.x_axis_zeroing_reference_event = onset_col_for_zero
+        if isinstance(x_zero_cfg, dict):
+            self.x_axis_zeroing_enabled = _coerce_bool(x_zero_cfg.get("enabled"), False)
+            ref_raw = x_zero_cfg.get("reference_event")
+            if ref_raw is not None and str(ref_raw).strip():
+                self.x_axis_zeroing_reference_event = str(ref_raw).strip()
+
+        x_zero_event_columns: List[str] = []
+        if self.x_axis_zeroing_enabled:
+            ref_col = str(self.x_axis_zeroing_reference_event or "").strip()
+            if ref_col and ref_col != onset_col_for_zero:
+                x_zero_event_columns.append(ref_col)
+
         self.required_event_columns = [
-            c for c in dict.fromkeys([*self.event_vline_columns, *self.window_event_columns]) if c
+            c
+            for c in dict.fromkeys([*self.event_vline_columns, *self.window_event_columns, *x_zero_event_columns])
+            if c
         ]
         self.required_event_ms_meta_cols = [_event_ms_col(col) for col in self.required_event_columns]
 
@@ -3826,6 +3891,13 @@ class AggregatedSignalVisualizer:
                     mapping["signal_group"] = signal_group
                     filename = filename_pattern.format(**mapping)
                 output_path = output_dir / filename
+                time_zero_frame = self._resolve_time_zero_frame(
+                    meta_df=meta_df,
+                    indices=filtered_idx,
+                    mode_name=mode_name,
+                    signal_group=signal_group,
+                    key_label="all",
+                )
 
                 tasks.append(
                     self._task_overlay(
@@ -3842,6 +3914,7 @@ class AggregatedSignalVisualizer:
                         sorted_keys=sorted_keys,
                         window_spans=window_spans,
                         window_spans_by_channel=window_spans_by_channel,
+                        time_zero_frame=time_zero_frame,
                         filtered_group_fields=filtered_group_fields,
                         color_by_fields=mode_cfg.get("color_by") if signal_group in ("emg", "cop", "com") else None,
                     )
@@ -3891,6 +3964,13 @@ class AggregatedSignalVisualizer:
 
                 filename = self._render_filename(filename_pattern, file_key, signal_group, file_fields)
                 output_path = output_dir / filename
+                time_zero_frame = self._resolve_time_zero_frame(
+                    meta_df=meta_df,
+                    indices=file_indices,
+                    mode_name=mode_name,
+                    signal_group=signal_group,
+                    key_label=str(file_key),
+                )
 
                 tasks.append(
                     self._task_overlay(
@@ -3907,6 +3987,7 @@ class AggregatedSignalVisualizer:
                         sorted_keys=sorted_keys,
                         window_spans=window_spans,
                         window_spans_by_channel=window_spans_by_channel,
+                        time_zero_frame=time_zero_frame,
                         filtered_group_fields=filtered_group_fields,
                         color_by_fields=mode_cfg.get("color_by") if signal_group in ("emg", "cop", "com") else None,
                     )
@@ -3923,6 +4004,13 @@ class AggregatedSignalVisualizer:
             markers = self._collect_markers(signal_group, key, group_fields, mode_cfg.get("filter"))
             event_vlines = self._collect_event_vlines(meta_df, idx)
             window_spans = self._compute_window_spans(meta_df, idx)
+            time_zero_frame = self._resolve_time_zero_frame(
+                meta_df=meta_df,
+                indices=idx,
+                mode_name=mode_name,
+                signal_group=signal_group,
+                key_label=str(key),
+            )
 
             if signal_group == "emg":
                 event_vlines_by_channel = self._collect_emg_event_vlines_by_channel(meta_df, idx)
@@ -3939,6 +4027,7 @@ class AggregatedSignalVisualizer:
                         event_vlines_by_channel=event_vlines_by_channel,
                         window_spans=window_spans,
                         window_spans_by_channel=window_spans_by_channel,
+                        time_zero_frame=time_zero_frame,
                     )
                 )
             elif signal_group == "forceplate":
@@ -3952,6 +4041,7 @@ class AggregatedSignalVisualizer:
                         markers=markers,
                         event_vlines=event_vlines,
                         window_spans=window_spans,
+                        time_zero_frame=time_zero_frame,
                     )
                 )
             elif signal_group == "cop":
@@ -3965,6 +4055,7 @@ class AggregatedSignalVisualizer:
                         markers=markers,
                         event_vlines=event_vlines,
                         window_spans=window_spans,
+                        time_zero_frame=time_zero_frame,
                     )
                 )
             elif signal_group == "com":
@@ -3978,6 +4069,7 @@ class AggregatedSignalVisualizer:
                         markers=markers,
                         event_vlines=event_vlines,
                         window_spans=window_spans,
+                        time_zero_frame=time_zero_frame,
                     )
                 )
 
@@ -4079,6 +4171,43 @@ class AggregatedSignalVisualizer:
                 }
             )
         return spans
+
+    def _resolve_time_zero_frame(
+        self,
+        *,
+        meta_df: pl.DataFrame,
+        indices: np.ndarray,
+        mode_name: str,
+        signal_group: str,
+        key_label: str,
+    ) -> float:
+        if not self.x_axis_zeroing_enabled:
+            return 0.0
+        if indices.size == 0:
+            raise ValueError(
+                f"[x_axis_zeroing] empty trial set for mode='{mode_name}', signal_group='{signal_group}', key='{key_label}'"
+            )
+
+        onset_col = str(self.id_cfg.get("onset") or "").strip()
+        ref_col = str(self.x_axis_zeroing_reference_event or "").strip()
+        if not ref_col or ref_col == onset_col:
+            return 0.0
+
+        ms_col = _event_ms_col(ref_col)
+        if ms_col not in meta_df.columns:
+            raise ValueError(
+                "[x_axis_zeroing] reference_event column is not available in this plot context: "
+                f"reference_event='{ref_col}', mode='{mode_name}', signal_group='{signal_group}', key='{key_label}'"
+            )
+
+        vals = meta_df[ms_col].to_numpy()
+        mean_ms = _nanmean_ignore_nan(vals[indices])
+        if mean_ms is None:
+            raise ValueError(
+                "[x_axis_zeroing] reference_event has no valid values in this plot context: "
+                f"reference_event='{ref_col}', mode='{mode_name}', signal_group='{signal_group}', key='{key_label}'"
+            )
+        return self._ms_to_frame(float(mean_ms))
 
     def _resolve_window_boundary_ms_from_means(
         self,
@@ -4386,6 +4515,7 @@ class AggregatedSignalVisualizer:
         window_spans: List[Dict[str, Any]],
         window_spans_by_channel: Optional[Dict[str, List[Dict[str, Any]]]] = None,
         filtered_group_fields: List[str],
+        time_zero_frame: float = 0.0,
         color_by_fields: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         task: Dict[str, Any] = {
@@ -4407,6 +4537,7 @@ class AggregatedSignalVisualizer:
             "x": self.x_norm,
             "window_spans": window_spans,
             "window_spans_by_channel": window_spans_by_channel,
+            "time_zero_frame": float(time_zero_frame),
             "common_style": self.common_style,
             "filtered_group_fields": filtered_group_fields,
             "color_by_fields": color_by_fields,
@@ -4475,6 +4606,7 @@ class AggregatedSignalVisualizer:
         event_vlines_by_channel: Optional[Dict[str, List[Dict[str, Any]]]] = None,
         window_spans: List[Dict[str, Any]],
         window_spans_by_channel: Optional[Dict[str, List[Dict[str, Any]]]] = None,
+        time_zero_frame: float = 0.0,
     ) -> Dict[str, Any]:
         task: Dict[str, Any] = {
             "kind": "emg",
@@ -4493,6 +4625,7 @@ class AggregatedSignalVisualizer:
             "grid_layout": self.config["signal_groups"]["emg"]["grid_layout"],
             "window_spans": window_spans,
             "window_spans_by_channel": window_spans_by_channel,
+            "time_zero_frame": float(time_zero_frame),
             "window_span_alpha": self.emg_style["window_span_alpha"],
             "emg_style": self.emg_style,
             "common_style": self.common_style,
@@ -4514,6 +4647,7 @@ class AggregatedSignalVisualizer:
         markers: Dict[str, Any],
         event_vlines: List[Dict[str, Any]],
         window_spans: List[Dict[str, Any]],
+        time_zero_frame: float = 0.0,
     ) -> Dict[str, Any]:
         return {
             "kind": "forceplate",
@@ -4530,6 +4664,7 @@ class AggregatedSignalVisualizer:
             "channels": self.config["signal_groups"]["forceplate"]["columns"],
             "grid_layout": self.config["signal_groups"]["forceplate"]["grid_layout"],
             "window_spans": window_spans,
+            "time_zero_frame": float(time_zero_frame),
             "window_span_alpha": self.forceplate_style["window_span_alpha"],
             "forceplate_style": self.forceplate_style,
             "common_style": self.common_style,
@@ -4550,6 +4685,7 @@ class AggregatedSignalVisualizer:
         markers: Dict[str, Any],
         event_vlines: List[Dict[str, Any]],
         window_spans: List[Dict[str, Any]],
+        time_zero_frame: float = 0.0,
     ) -> Dict[str, Any]:
         return {
             "kind": "cop",
@@ -4564,6 +4700,7 @@ class AggregatedSignalVisualizer:
             "event_vline_order": self.event_vline_columns,
             "x_axis": self.x_norm,
             "target_axis": self.target_axis,
+            "time_zero_frame": float(time_zero_frame),
             "time_start_ms": self.time_start_ms,
             "time_end_ms": self.time_end_ms,
             "time_start_frame": self.time_start_frame,
@@ -4587,6 +4724,7 @@ class AggregatedSignalVisualizer:
         markers: Dict[str, Any],
         event_vlines: List[Dict[str, Any]],
         window_spans: List[Dict[str, Any]],
+        time_zero_frame: float = 0.0,
     ) -> Dict[str, Any]:
         return {
             "kind": "com",
@@ -4600,6 +4738,7 @@ class AggregatedSignalVisualizer:
             "event_vline_style": self.event_vline_style,
             "event_vline_order": self.event_vline_columns,
             "x_axis": self.x_norm,
+            "time_zero_frame": float(time_zero_frame),
             "time_start_ms": self.time_start_ms,
             "time_end_ms": self.time_end_ms,
             "time_start_frame": self.time_start_frame,

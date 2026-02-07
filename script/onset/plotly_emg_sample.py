@@ -156,6 +156,19 @@ def _is_reference_event_zero(value: Any) -> bool:
     return abs(f) <= 1e-9
 
 
+def _coerce_bool(value: Any, default: bool = False) -> bool:
+    if value is None:
+        return bool(default)
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in ("1", "true", "yes", "y", "on"):
+        return True
+    if text in ("0", "false", "no", "n", "off"):
+        return False
+    return bool(default)
+
+
 def _safe_filename(text: str) -> str:
     out = str(text)
     for ch in ("/", "\\", ":", "\n", "\r", "\t"):
@@ -489,6 +502,8 @@ def _collect_required_event_columns(
     *,
     windows_cfg: Dict[str, Any],
     event_cfg: Dict[str, Any],
+    x_axis_zeroing_enabled: bool = False,
+    x_axis_zeroing_reference_event: Optional[str] = None,
 ) -> List[str]:
     needed: List[str] = []
 
@@ -528,6 +543,11 @@ def _collect_required_event_columns(
                     continue
                 if name and name not in needed and name != "TKEO_AGLR_emg_onset_timing":
                     needed.append(name)
+
+    if x_axis_zeroing_enabled:
+        ref_name = str(x_axis_zeroing_reference_event or "").strip()
+        if ref_name and ref_name not in needed and ref_name != "TKEO_AGLR_emg_onset_timing":
+            needed.append(ref_name)
 
     return needed
 
@@ -654,6 +674,8 @@ def _emit_emg_figure(
     event_cfg: Dict[str, Any],
     windows_cfg: Dict[str, Any],
     window_colors: Dict[str, str],
+    x_axis_zeroing_enabled: bool,
+    x_axis_zeroing_reference_event: str,
 ) -> None:
     import plotly.graph_objects as go
     from plotly.subplots import make_subplots
@@ -676,6 +698,51 @@ def _emit_emg_figure(
     vline_alpha = float((style or {}).get("alpha", 0.9)) if (style or {}).get("alpha") is not None else 0.9
 
     ref_event = str((windows_cfg or {}).get("reference_event") or "platform_onset").strip() or "platform_onset"
+    zero_abs_x = 0.0
+    if x_axis_zeroing_enabled:
+        zero_ref_event = str(x_axis_zeroing_reference_event or "").strip() or "platform_onset"
+        zero_values: List[float] = []
+        for trial in trials:
+            onset_device_raw = trial.get("onset_device")
+            platform_onset_raw = trial.get("platform_onset")
+            if onset_device_raw is None or platform_onset_raw is None:
+                continue
+            onset_device_abs = float(onset_device_raw)
+            platform_onset_mocap = float(platform_onset_raw)
+            trial_key = tuple(trial.get(c) for c in key_cols)
+
+            if zero_ref_event == "TKEO_AGLR_emg_onset_timing":
+                for ch_name in channels:
+                    tkeo_ms = tkeo_by_trial_channel.get(trial_key, {}).get(str(ch_name))
+                    event_abs = _event_abs_x_from_trial(
+                        event_name=zero_ref_event,
+                        platform_onset_mocap=platform_onset_mocap,
+                        mocap_rate=mocap_rate,
+                        trial_row=trial,
+                        tkeo_ms=tkeo_ms,
+                        onset_device_abs=onset_device_abs,
+                        device_rate=device_rate,
+                    )
+                    if event_abs is not None and np.isfinite(float(event_abs)):
+                        zero_values.append(float(event_abs))
+            else:
+                event_abs = _event_abs_x_from_trial(
+                    event_name=zero_ref_event,
+                    platform_onset_mocap=platform_onset_mocap,
+                    mocap_rate=mocap_rate,
+                    trial_row=trial,
+                    tkeo_ms=None,
+                    onset_device_abs=onset_device_abs,
+                    device_rate=device_rate,
+                )
+                if event_abs is not None and np.isfinite(float(event_abs)):
+                    zero_values.append(float(event_abs))
+
+        if not zero_values:
+            raise ValueError(
+                f"[x_axis_zeroing] reference_event '{zero_ref_event}' has no valid values in this file."
+            )
+        zero_abs_x = float(np.mean(np.asarray(zero_values, dtype=float)))
 
     # Keep legend content stable: derive window/event labels from the first trial.
     legend_trial = trials[0] if trials else None
@@ -740,7 +807,7 @@ def _emit_emg_figure(
         axis_max_x: Optional[float] = None
 
         for t_idx, trial in enumerate(trials):
-            x = np.asarray(trial["__x_abs"], dtype=float)
+            x = np.asarray(trial["__x_abs"], dtype=float) - float(zero_abs_x)
             y = np.asarray(trial[str(ch)], dtype=float)
             finite_x = x[np.isfinite(x)]
             if finite_x.size > 0:
@@ -793,8 +860,8 @@ def _emit_emg_figure(
                     type="rect",
                     xref=xref,
                     yref=yref_domain,
-                    x0=span.start_x,
-                    x1=span.end_x,
+                    x0=float(span.start_x) - float(zero_abs_x),
+                    x1=float(span.end_x) - float(zero_abs_x),
                     y0=0,
                     y1=1,
                     fillcolor=span.color,
@@ -808,8 +875,8 @@ def _emit_emg_figure(
                     type="line",
                     xref=xref,
                     yref=yref_domain,
-                    x0=float(xval),
-                    x1=float(xval),
+                    x0=float(xval) - float(zero_abs_x),
+                    x1=float(xval) - float(zero_abs_x),
                     y0=0,
                     y1=1,
                     line=dict(
@@ -931,6 +998,10 @@ def main() -> None:
     event_cfg = cfg.get("event_vlines", {}) if isinstance(cfg.get("event_vlines"), dict) else {}
     windows_cfg = cfg.get("windows", {}) if isinstance(cfg.get("windows"), dict) else {}
     window_colors = _window_colors_from_config(cfg)
+    x_zero_cfg = cfg.get("x_axis_zeroing", {}) if isinstance(cfg.get("x_axis_zeroing"), dict) else {}
+    onset_col = str(id_cfg.get("onset") or "platform_onset").strip() or "platform_onset"
+    x_axis_zeroing_enabled = _coerce_bool(x_zero_cfg.get("enabled"), False)
+    x_axis_zeroing_reference_event = str(x_zero_cfg.get("reference_event") or onset_col).strip() or onset_col
 
     mode_cfgs = _mode_cfgs(cfg)
     if not mode_cfgs:
@@ -979,7 +1050,14 @@ def main() -> None:
         meta_cols = set(groupby)
         meta_cols |= set(_normalize_field(c, id_cfg=id_cfg) for c in (mode_cfg.get("color_by") or []) if c)
         meta_cols |= set(mode_filter.keys())
-        meta_cols |= set(_collect_required_event_columns(windows_cfg=windows_cfg, event_cfg=event_cfg))
+        meta_cols |= set(
+            _collect_required_event_columns(
+                windows_cfg=windows_cfg,
+                event_cfg=event_cfg,
+                x_axis_zeroing_enabled=x_axis_zeroing_enabled,
+                x_axis_zeroing_reference_event=x_axis_zeroing_reference_event,
+            )
+        )
         reserved = set(key_cols) | {x_abs_col, "onset_device", "platform_onset", "step_onset", "__x_abs"}
         meta_cols = {c for c in meta_cols if c in available and c not in reserved and c not in channels}
         needed_cols |= meta_cols
@@ -1086,8 +1164,11 @@ def main() -> None:
             out_png = (out_dir / png_name) if export_png else None
             out_html = (out_dir / html_name) if export_html else None
 
+            axis_desc = f"absolute frames ({x_abs_col})"
+            if x_axis_zeroing_enabled:
+                axis_desc = f"zeroed by {x_axis_zeroing_reference_event} (mean)"
             title = (
-                f"{mode_name} | emg | absolute frames ({x_abs_col}) | "
+                f"{mode_name} | emg | {axis_desc} | "
                 f"{format_values.get('subject')} | v={format_values.get('velocity')} | trial={format_values.get('trial')}"
             )
             _emit_emg_figure(
@@ -1106,6 +1187,8 @@ def main() -> None:
                 event_cfg=event_cfg,
                 windows_cfg=windows_cfg,
                 window_colors=window_colors,
+                x_axis_zeroing_enabled=x_axis_zeroing_enabled,
+                x_axis_zeroing_reference_event=x_axis_zeroing_reference_event,
             )
 
 

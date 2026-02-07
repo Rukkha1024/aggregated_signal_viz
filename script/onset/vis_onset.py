@@ -236,6 +236,19 @@ def _coerce_value_for_dtype(value: Any, dtype: pl.DataType) -> Any:
     return value
 
 
+def _coerce_bool(value: Any, default: bool = False) -> bool:
+    if value is None:
+        return bool(default)
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in ("true", "1", "yes", "y", "on"):
+        return True
+    if text in ("false", "0", "no", "n", "off"):
+        return False
+    return bool(default)
+
+
 def _apply_filters(df: pl.DataFrame, filters: Dict[str, Any]) -> pl.DataFrame:
     if not filters:
         return df
@@ -255,6 +268,21 @@ def _apply_filters(df: pl.DataFrame, filters: Dict[str, Any]) -> pl.DataFrame:
         df = df.filter(pl.all_horizontal(filter_exprs))
         print(f"Data shape after filtering: {df.shape}")
     return df
+
+
+def _parse_x_axis_zeroing_config(
+    config: Dict[str, Any],
+) -> Tuple[bool, str, str]:
+    id_cfg = (config.get("data") or {}).get("id_columns") or {}
+    onset_col = str(id_cfg.get("onset") or "platform_onset").strip() or "platform_onset"
+
+    zero_cfg = config.get("x_axis_zeroing", {})
+    if not isinstance(zero_cfg, dict):
+        return False, onset_col, onset_col
+
+    enabled = _coerce_bool(zero_cfg.get("enabled"), False)
+    ref_event = str(zero_cfg.get("reference_event") or onset_col).strip() or onset_col
+    return enabled, ref_event, onset_col
 
 
 def _combo_key_expr(cols: List[str]) -> pl.Expr:
@@ -352,7 +380,11 @@ def _format_mode_filename(
     return filename
 
 
-def load_and_merge_data(config: Dict[str, Any], base_dir: Path) -> pl.DataFrame:
+def load_and_merge_data(
+    config: Dict[str, Any],
+    base_dir: Path,
+    extra_input_columns: Optional[List[str]] = None,
+) -> pl.DataFrame:
     """Load input (parquet) + features (csv) and join by trial keys."""
     input_path_str = config["data"]["input_file"]
     input_path = resolve_path(base_dir, input_path_str)
@@ -360,12 +392,26 @@ def load_and_merge_data(config: Dict[str, Any], base_dir: Path) -> pl.DataFrame:
     print(f"Loading input file: {input_path}")
     lf_input = pl.scan_parquet(str(input_path))
     
-    id_cols = list(config["data"]["id_columns"].values())
-    key_cols = [config["data"]["id_columns"]["subject"], 
-                config["data"]["id_columns"]["trial"], 
-                config["data"]["id_columns"]["velocity"]]
-    
-    df_trials = lf_input.select(key_cols).unique().collect()
+    key_cols = [
+        config["data"]["id_columns"]["subject"],
+        config["data"]["id_columns"]["trial"],
+        config["data"]["id_columns"]["velocity"],
+    ]
+    extra_cols: List[str] = []
+    for col in (extra_input_columns or []):
+        name = str(col).strip()
+        if not name or name in key_cols or name in extra_cols:
+            continue
+        extra_cols.append(name)
+
+    input_schema = lf_input.collect_schema()
+    available_input_cols = set(input_schema.keys())
+    agg_exprs: List[pl.Expr] = []
+    for col in extra_cols:
+        if col not in available_input_cols:
+            continue
+        agg_exprs.append(pl.col(col).max().alias(col))
+    df_trials = lf_input.group_by(key_cols, maintain_order=False).agg(agg_exprs).collect()
 
     feature_path_str = config["data"]["features_file"]
     feature_path = resolve_path(base_dir, feature_path_str)
@@ -374,11 +420,6 @@ def load_and_merge_data(config: Dict[str, Any], base_dir: Path) -> pl.DataFrame:
     df_features = pl.read_csv(str(feature_path))
 
     df_features = strip_bom_columns(df_features)
-
-    # Inner join keeps only trials present in both files.
-    for col in key_cols:
-        if col in df_features.columns and col in df_trials.columns:
-            pass
 
     merged = df_trials.join(df_features, on=key_cols, how="inner")
     
@@ -391,6 +432,7 @@ def process_stats(
     facet_col: Optional[str], 
     hue_col: Optional[str],
     trial_key_cols: List[str],
+    target_col: Optional[str] = None,
 ) -> pl.DataFrame:
     """Group by (facet, hue, muscle) and compute mean/std/count (+ total_count).
 
@@ -399,7 +441,7 @@ def process_stats(
     - `count`: number of unique trials with valid (non-null, non-NaN) values for the target column.
     - `total_count`: number of unique trials in the (facet, hue) group (same denominator across muscles).
     """
-    target_col = VIZ_CFG.target_column
+    target_col = str(target_col or VIZ_CFG.target_column)
     muscle_col = VIZ_CFG.muscle_column_in_feature
     
     print(f"\n[Process Stats] Target Column: {target_col}")
@@ -730,8 +772,13 @@ def main():
     config = load_config(config_path)
     _apply_onset_show_options_from_config(config)
     base_dir = config_path.parent
-    
-    df = load_and_merge_data(config, base_dir)
+
+    x_axis_zeroing_enabled, x_axis_zeroing_reference_event, onset_col = _parse_x_axis_zeroing_config(config)
+    extra_input_cols: List[str] = []
+    if x_axis_zeroing_enabled:
+        extra_input_cols.extend([onset_col, x_axis_zeroing_reference_event])
+
+    df = load_and_merge_data(config, base_dir, extra_input_columns=extra_input_cols)
 
     try:
         muscle_order = config["signal_groups"]["emg"]["columns"]
@@ -747,6 +794,10 @@ def main():
         id_cols_cfg.get("velocity", "velocity"),
         id_cols_cfg.get("trial", "trial_num"),
     ]
+    input_path = resolve_path(base_dir, config["data"]["input_file"])
+    input_schema = pl.scan_parquet(str(input_path)).collect_schema()
+    input_columns = set(input_schema.keys())
+    zero_ref_from_input = x_axis_zeroing_reference_event in input_columns
 
     modes_cfg = config.get("aggregation_modes", {})
     if not isinstance(modes_cfg, dict) or not modes_cfg:
@@ -781,6 +832,50 @@ def main():
                 df_mode = df_mode.filter(pl.col("velocity") == args.velocity)
                 print(f"Data shape after velocity filtering: {df_mode.shape}")
 
+        target_col_for_mode = VIZ_CFG.target_column
+        if x_axis_zeroing_enabled:
+            if VIZ_CFG.target_column not in df_mode.columns:
+                raise KeyError(
+                    f"[x_axis_zeroing] target column '{VIZ_CFG.target_column}' not found for mode '{mode_name}'."
+                )
+            df_mode = df_mode.with_columns(
+                pl.col(VIZ_CFG.target_column).cast(pl.Float64, strict=False).fill_nan(None).alias("__target_base")
+            )
+
+            if x_axis_zeroing_reference_event == onset_col:
+                df_mode = df_mode.with_columns(pl.col("__target_base").alias("__target_zeroed"))
+            else:
+                if x_axis_zeroing_reference_event not in df_mode.columns:
+                    raise KeyError(
+                        "[x_axis_zeroing] reference_event column not found in vis_onset data: "
+                        f"'{x_axis_zeroing_reference_event}' (mode='{mode_name}')"
+                    )
+                if zero_ref_from_input:
+                    if onset_col not in df_mode.columns:
+                        raise KeyError(
+                            f"[x_axis_zeroing] onset column '{onset_col}' is required but missing (mode='{mode_name}')."
+                        )
+                    ref_ms_expr = (
+                        (
+                            pl.col(x_axis_zeroing_reference_event).cast(pl.Float64, strict=False)
+                            - pl.col(onset_col).cast(pl.Float64, strict=False)
+                        )
+                        * (1000.0 / float(config["data"].get("mocap_sample_rate", 100)))
+                    )
+                else:
+                    ref_ms_expr = pl.col(x_axis_zeroing_reference_event).cast(pl.Float64, strict=False)
+
+                df_mode = df_mode.with_columns(ref_ms_expr.fill_nan(None).alias("__xzero_ref_ms"))
+                valid_ref = df_mode.filter(pl.col("__xzero_ref_ms").is_not_null() & ~pl.col("__xzero_ref_ms").is_nan())
+                if valid_ref.is_empty():
+                    raise ValueError(
+                        "[x_axis_zeroing] reference_event has no valid values in vis_onset: "
+                        f"'{x_axis_zeroing_reference_event}' (mode='{mode_name}')"
+                    )
+                df_mode = df_mode.with_columns((pl.col("__target_base") - pl.col("__xzero_ref_ms")).alias("__target_zeroed"))
+
+            target_col_for_mode = "__target_zeroed"
+
         facet_col, hue_col, facet_fields, hue_fields = _infer_facet_and_hue_columns(
             mode_cfg=mode_cfg,
             df_columns=df_mode.columns,
@@ -796,6 +891,7 @@ def main():
             facet_col=facet_col,
             hue_col=hue_col,
             trial_key_cols=trial_key_cols,
+            target_col=target_col_for_mode,
         )
 
         if stats.is_empty():
