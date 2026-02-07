@@ -1215,10 +1215,13 @@ def _emit_emg_trial_grid_single_channel(
     ref_event = str((windows_cfg or {}).get("reference_event") or "platform_onset").strip() or "platform_onset"
 
     # Compute x-axis zeroing (single channel).
+    # - Keep a global mean as fallback (matches the channel-grid implementation).
+    # - For trial-grid, we still zero per-trial to keep subplot scales comparable
+    #   and prevent a single global range from exploding.
     zero_abs_x = 0.0
+    zero_ref_event = str(x_axis_zeroing_reference_event or "").strip() or "platform_onset"
+    channel_specific_zero = _is_emg_channel_specific_event(zero_ref_event)
     if x_axis_zeroing_enabled:
-        zero_ref_event = str(x_axis_zeroing_reference_event or "").strip() or "platform_onset"
-        channel_specific_zero = _is_emg_channel_specific_event(zero_ref_event)
         zero_values: List[float] = []
         for trial in trials:
             onset_device_raw = trial.get("onset_device")
@@ -1303,27 +1306,48 @@ def _emit_emg_trial_grid_single_channel(
 
     legend_text = _legend_html(window_spans=legend_spans, event_items=legend_event_items)
 
-    # Keep x-axis range consistent across all trial subplots.
-    axis_min_x: Optional[float] = None
-    axis_max_x: Optional[float] = None
-    for trial in trials:
-        x = np.asarray(trial["__x_abs"], dtype=float) - float(zero_abs_x)
-        finite_x = x[np.isfinite(x)]
-        if finite_x.size == 0:
-            continue
-        cur_min = float(finite_x.min())
-        cur_max = float(finite_x.max())
-        axis_min_x = cur_min if axis_min_x is None else min(axis_min_x, cur_min)
-        axis_max_x = cur_max if axis_max_x is None else max(axis_max_x, cur_max)
-
     for idx_trial, trial in enumerate(trials):
         r = idx_trial // cols + 1
         c = idx_trial % cols + 1
         axis_idx = idx_trial + 1
         xref = "x" if axis_idx == 1 else f"x{axis_idx}"
         yref_domain = "y domain" if axis_idx == 1 else f"y{axis_idx} domain"
+        trial_zero_abs_x = float(zero_abs_x)
 
-        x = np.asarray(trial["__x_abs"], dtype=float) - float(zero_abs_x)
+        onset_device_raw = trial.get("onset_device")
+        platform_onset_raw = trial.get("platform_onset")
+        onset_device_abs: Optional[float] = None
+        platform_onset_mocap: Optional[float] = None
+        crop_start_x: Optional[float] = None
+        crop_end_x: Optional[float] = None
+        trial_key = tuple(trial.get(k) for k in key_cols)
+        tkeo_ms = tkeo_by_trial_channel.get(trial_key, {}).get(ch)
+        if onset_device_raw is not None and platform_onset_raw is not None:
+            onset_device_abs = float(onset_device_raw)
+            platform_onset_mocap = float(platform_onset_raw)
+            crop_start_x = onset_device_abs + float(time_start_ms) * float(device_rate) / 1000.0
+            crop_end_x = onset_device_abs + float(time_end_ms) * float(device_rate) / 1000.0
+
+            if x_axis_zeroing_enabled:
+                tkeo_ms_for_zero = tkeo_ms if channel_specific_zero else None
+                event_abs = _event_abs_x_from_trial(
+                    event_name=zero_ref_event,
+                    platform_onset_mocap=platform_onset_mocap,
+                    mocap_rate=mocap_rate,
+                    trial_row=trial,
+                    tkeo_ms=tkeo_ms_for_zero,
+                    onset_device_abs=onset_device_abs,
+                    device_rate=device_rate,
+                )
+                if event_abs is not None:
+                    try:
+                        f = float(event_abs)
+                    except Exception:
+                        f = None
+                    if f is not None and np.isfinite(f):
+                        trial_zero_abs_x = float(f)
+
+        x = np.asarray(trial["__x_abs"], dtype=float) - float(trial_zero_abs_x)
         y = np.asarray(trial.get(ch), dtype=float)
 
         fig.add_trace(
@@ -1340,17 +1364,12 @@ def _emit_emg_trial_grid_single_channel(
             col=c,
         )
 
-        onset_device_raw = trial.get("onset_device")
-        platform_onset_raw = trial.get("platform_onset")
-        if onset_device_raw is None or platform_onset_raw is None:
-            continue
-        onset_device_abs = float(onset_device_raw)
-        platform_onset_mocap = float(platform_onset_raw)
-        crop_start_x = onset_device_abs + float(time_start_ms) * float(device_rate) / 1000.0
-        crop_end_x = onset_device_abs + float(time_end_ms) * float(device_rate) / 1000.0
+        finite_x = x[np.isfinite(x)]
+        if finite_x.size > 0:
+            fig.update_xaxes(range=[float(finite_x.min()), float(finite_x.max())], row=r, col=c)
 
-        trial_key = tuple(trial.get(k) for k in key_cols)
-        tkeo_ms = tkeo_by_trial_channel.get(trial_key, {}).get(ch)
+        if onset_device_abs is None or platform_onset_mocap is None or crop_start_x is None or crop_end_x is None:
+            continue
 
         spans = _compute_window_spans(
             windows_cfg=windows_cfg,
@@ -1370,8 +1389,8 @@ def _emit_emg_trial_grid_single_channel(
                 type="rect",
                 xref=xref,
                 yref=yref_domain,
-                x0=float(span.start_x) - float(zero_abs_x),
-                x1=float(span.end_x) - float(zero_abs_x),
+                x0=float(span.start_x) - float(trial_zero_abs_x),
+                x1=float(span.end_x) - float(trial_zero_abs_x),
                 y0=0,
                 y1=1,
                 fillcolor=span.color,
@@ -1385,8 +1404,8 @@ def _emit_emg_trial_grid_single_channel(
                 type="line",
                 xref=xref,
                 yref=yref_domain,
-                x0=float(xval) - float(zero_abs_x),
-                x1=float(xval) - float(zero_abs_x),
+                x0=float(xval) - float(trial_zero_abs_x),
+                x1=float(xval) - float(trial_zero_abs_x),
                 y0=0,
                 y1=1,
                 line=dict(
@@ -1458,9 +1477,6 @@ def _emit_emg_trial_grid_single_channel(
 
     fig.update_xaxes(**xaxes_kwargs)
     fig.update_yaxes(showgrid=True, gridcolor=grid_color)
-
-    if axis_min_x is not None and axis_max_x is not None and axis_max_x > axis_min_x:
-        fig.update_xaxes(range=[axis_min_x, axis_max_x])
 
     if out_html is not None:
         out_html.parent.mkdir(parents=True, exist_ok=True)
