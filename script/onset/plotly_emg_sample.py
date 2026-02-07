@@ -35,6 +35,9 @@ RULES: Dict[str, Any] = {
 }
 
 
+_EMG_CHANNEL_SPECIFIC_EVENTS = {"TKEO_AGLR_emg_onset_timing"}
+
+
 def _repo_root() -> Path:
     here = Path(__file__).resolve()
     for candidate in (here.parent, *here.parents):
@@ -223,6 +226,11 @@ def _window_colors_from_config(cfg: Dict[str, Any]) -> Dict[str, str]:
     return {"p1": "#4E79A7", "p2": "#F28E2B", "p3": "#E15759", "p4": "#59A14F"}
 
 
+def _is_emg_channel_specific_event(value: Any) -> bool:
+    name = str(value or "").strip()
+    return bool(name) and name in _EMG_CHANNEL_SPECIFIC_EVENTS
+
+
 def _parse_window_boundary_spec(value: Any) -> Optional[Tuple[str, Any]]:
     """
     Returns one of:
@@ -306,7 +314,7 @@ def _event_ms_from_trial(
         if raw is None:
             return None
         return (float(raw) - float(platform_onset_mocap)) * 1000.0 / float(mocap_rate)
-    if name == "TKEO_AGLR_emg_onset_timing":
+    if _is_emg_channel_specific_event(name):
         return None if tkeo_ms is None else float(tkeo_ms)
 
     raw = trial_row.get(name)
@@ -513,13 +521,13 @@ def _collect_required_event_columns(
             if c is None:
                 continue
             name = str(c).strip()
-            if name and name not in needed and name != "TKEO_AGLR_emg_onset_timing":
+            if name and name not in needed and not _is_emg_channel_specific_event(name):
                 needed.append(name)
 
     ref = (windows_cfg or {}).get("reference_event")
     if ref is not None and not _is_reference_event_zero(ref):
         name = str(ref).strip()
-        if name and name not in needed and name != "TKEO_AGLR_emg_onset_timing":
+        if name and name not in needed and not _is_emg_channel_specific_event(name):
             needed.append(name)
 
     defs = (windows_cfg or {}).get("definitions")
@@ -541,12 +549,12 @@ def _collect_required_event_columns(
                         continue
                 else:
                     continue
-                if name and name not in needed and name != "TKEO_AGLR_emg_onset_timing":
+                if name and name not in needed and not _is_emg_channel_specific_event(name):
                     needed.append(name)
 
     if x_axis_zeroing_enabled:
         ref_name = str(x_axis_zeroing_reference_event or "").strip()
-        if ref_name and ref_name not in needed and ref_name != "TKEO_AGLR_emg_onset_timing":
+        if ref_name and ref_name not in needed and not _is_emg_channel_specific_event(ref_name):
             needed.append(ref_name)
 
     return needed
@@ -699,9 +707,12 @@ def _emit_emg_figure(
 
     ref_event = str((windows_cfg or {}).get("reference_event") or "platform_onset").strip() or "platform_onset"
     zero_abs_x = 0.0
+    zero_abs_x_by_channel: Dict[str, float] = {}
     if x_axis_zeroing_enabled:
         zero_ref_event = str(x_axis_zeroing_reference_event or "").strip() or "platform_onset"
-        zero_values: List[float] = []
+        channel_specific_zero = _is_emg_channel_specific_event(zero_ref_event)
+        zero_values_global: List[float] = []
+        zero_values_by_channel: Dict[str, List[float]] = {str(ch): [] for ch in channels}
         for trial in trials:
             onset_device_raw = trial.get("onset_device")
             platform_onset_raw = trial.get("platform_onset")
@@ -711,7 +722,7 @@ def _emit_emg_figure(
             platform_onset_mocap = float(platform_onset_raw)
             trial_key = tuple(trial.get(c) for c in key_cols)
 
-            if zero_ref_event == "TKEO_AGLR_emg_onset_timing":
+            if channel_specific_zero:
                 for ch_name in channels:
                     tkeo_ms = tkeo_by_trial_channel.get(trial_key, {}).get(str(ch_name))
                     event_abs = _event_abs_x_from_trial(
@@ -724,7 +735,9 @@ def _emit_emg_figure(
                         device_rate=device_rate,
                     )
                     if event_abs is not None and np.isfinite(float(event_abs)):
-                        zero_values.append(float(event_abs))
+                        event_abs_f = float(event_abs)
+                        zero_values_global.append(event_abs_f)
+                        zero_values_by_channel.setdefault(str(ch_name), []).append(event_abs_f)
             else:
                 event_abs = _event_abs_x_from_trial(
                     event_name=zero_ref_event,
@@ -736,13 +749,18 @@ def _emit_emg_figure(
                     device_rate=device_rate,
                 )
                 if event_abs is not None and np.isfinite(float(event_abs)):
-                    zero_values.append(float(event_abs))
+                    zero_values_global.append(float(event_abs))
 
-        if not zero_values:
+        if not zero_values_global:
             raise ValueError(
                 f"[x_axis_zeroing] reference_event '{zero_ref_event}' has no valid values in this file."
             )
-        zero_abs_x = float(np.mean(np.asarray(zero_values, dtype=float)))
+        zero_abs_x = float(np.mean(np.asarray(zero_values_global, dtype=float)))
+        if channel_specific_zero:
+            for ch_name, values in zero_values_by_channel.items():
+                if not values:
+                    continue
+                zero_abs_x_by_channel[str(ch_name)] = float(np.mean(np.asarray(values, dtype=float)))
 
     # Keep legend content stable: derive window/event labels from the first trial.
     legend_trial = trials[0] if trials else None
@@ -805,9 +823,10 @@ def _emit_emg_figure(
         yref_domain = "y domain" if axis_idx == 1 else f"y{axis_idx} domain"
         axis_min_x: Optional[float] = None
         axis_max_x: Optional[float] = None
+        ch_zero_abs_x = float(zero_abs_x_by_channel.get(str(ch), zero_abs_x))
 
         for t_idx, trial in enumerate(trials):
-            x = np.asarray(trial["__x_abs"], dtype=float) - float(zero_abs_x)
+            x = np.asarray(trial["__x_abs"], dtype=float) - ch_zero_abs_x
             y = np.asarray(trial[str(ch)], dtype=float)
             finite_x = x[np.isfinite(x)]
             if finite_x.size > 0:
@@ -860,8 +879,8 @@ def _emit_emg_figure(
                     type="rect",
                     xref=xref,
                     yref=yref_domain,
-                    x0=float(span.start_x) - float(zero_abs_x),
-                    x1=float(span.end_x) - float(zero_abs_x),
+                    x0=float(span.start_x) - ch_zero_abs_x,
+                    x1=float(span.end_x) - ch_zero_abs_x,
                     y0=0,
                     y1=1,
                     fillcolor=span.color,
@@ -875,8 +894,8 @@ def _emit_emg_figure(
                     type="line",
                     xref=xref,
                     yref=yref_domain,
-                    x0=float(xval) - float(zero_abs_x),
-                    x1=float(xval) - float(zero_abs_x),
+                    x0=float(xval) - ch_zero_abs_x,
+                    x1=float(xval) - ch_zero_abs_x,
                     y0=0,
                     y1=1,
                     line=dict(
@@ -1166,7 +1185,13 @@ def main() -> None:
 
             axis_desc = f"absolute frames ({x_abs_col})"
             if x_axis_zeroing_enabled:
-                axis_desc = f"zeroed by {x_axis_zeroing_reference_event} (mean)"
+                if _is_emg_channel_specific_event(x_axis_zeroing_reference_event):
+                    axis_desc = (
+                        f"zeroed by {x_axis_zeroing_reference_event} "
+                        "(channel mean; fallback=global mean)"
+                    )
+                else:
+                    axis_desc = f"zeroed by {x_axis_zeroing_reference_event} (mean)"
             title = (
                 f"{mode_name} | emg | {axis_desc} | "
                 f"{format_values.get('subject')} | v={format_values.get('velocity')} | trial={format_values.get('trial')}"
