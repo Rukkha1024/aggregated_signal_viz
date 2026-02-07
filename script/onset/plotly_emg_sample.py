@@ -1,5 +1,21 @@
+"""Plotly EMG onset sample visualizer.
+
+CLI modes:
+1. Default mode (no flags)
+   - Runs with current RULES/config behavior and writes all configured outputs.
+2. `--sample` mode
+   - Writes exactly one output pair (`.html` + `.png`) for quick validation.
+   - Saves into a `sample` subfolder under the mode output directory.
+   - Intended for fast AI/code-change verification to avoid full-batch runtime.
+
+Examples:
+- `conda run -n module python script/onset/plotly_emg_sample.py`
+- `conda run -n module python script/onset/plotly_emg_sample.py --sample`
+"""
+
 from __future__ import annotations
 
+import argparse
 from dataclasses import dataclass
 from pathlib import Path
 from string import Formatter
@@ -32,7 +48,7 @@ RULES: Dict[str, Any] = {
     # x-axis tick interval (None -> Plotly auto). e.g. 25 for 25-frame steps.
     "x_tick_dtick": 25,
     # grid transparency (0~1). None -> use config.yaml plot_style.common.grid_alpha.
-    "grid_alpha": None,
+    "grid_alpha": 0.5,
     # safety limits
     "max_files_per_mode": None,  # None -> all
     "max_trials_per_file": None,  # e.g. 5 (when groupby groups multiple trials)
@@ -980,7 +996,7 @@ def _emit_emg_figure(
 
     if out_html is not None:
         out_html.parent.mkdir(parents=True, exist_ok=True)
-        fig.write_html(out_html, include_plotlyjs="cdn")
+        fig.write_html(out_html, include_plotlyjs="cdn", div_id="emg-onset-figure")
         print(f"Wrote: {out_html}")
     if out_png is not None:
         out_png.parent.mkdir(parents=True, exist_ok=True)
@@ -988,7 +1004,22 @@ def _emit_emg_figure(
         print(f"Wrote: {out_png}")
 
 
-def main() -> None:
+def _parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Render Plotly EMG onset figures from merged parquet/config."
+    )
+    parser.add_argument(
+        "--sample",
+        action="store_true",
+        help="Generate exactly one HTML+PNG pair under a 'sample' output subfolder.",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: Optional[Sequence[str]] = None) -> None:
+    args = _parse_args(argv)
+    sample_mode = bool(args.sample)
+
     load_config, resolve_path, _ = _import_repo_utils()
 
     cfg_path = RULES.get("config_path")
@@ -1066,7 +1097,12 @@ def main() -> None:
     max_trials_per_file = RULES.get("max_trials_per_file")
     export_html = bool(RULES.get("export_html", True))
     export_png = bool(RULES.get("export_png", True))
+    if sample_mode:
+        # Sample validation should always emit one comparable output pair.
+        export_html = True
+        export_png = True
 
+    emitted_outputs = 0
     for mode_name, mode_cfg in mode_cfgs.items():
         mode_filter = mode_cfg.get("filter") if isinstance(mode_cfg.get("filter"), dict) else {}
         raw_groupby = list(mode_cfg.get("groupby") or [])
@@ -1157,7 +1193,9 @@ def main() -> None:
         if not file_fields:
             file_groups = [("all",)]
         else:
-            file_groups = [tuple(row) for row in df_trials.select(file_fields).unique().iter_rows()]
+            file_groups = [
+                tuple(row) for row in df_trials.select(file_fields).unique().sort(file_fields).iter_rows()
+            ]
 
         file_count = 0
         for file_key in file_groups:
@@ -1175,7 +1213,7 @@ def main() -> None:
             # - overlay=False: subset should represent one group key; still guard for duplicates.
             if overlay and groupby:
                 # one representative per groupby key
-                keys_df = subset.select(groupby).unique()
+                keys_df = subset.select(groupby).unique().sort(groupby)
                 chosen_rows: List[Dict[str, Any]] = []
                 for key_vals in keys_df.iter_rows():
                     part = subset
@@ -1208,6 +1246,8 @@ def main() -> None:
             png_name = f"{stem}.png"
             html_name = f"{stem}.html"
             out_dir = out_base / output_dir_name
+            if sample_mode:
+                out_dir = out_dir / "sample"
             out_png = (out_dir / png_name) if export_png else None
             out_html = (out_dir / html_name) if export_html else None
 
@@ -1244,6 +1284,18 @@ def main() -> None:
                 x_axis_zeroing_enabled=x_axis_zeroing_enabled,
                 x_axis_zeroing_reference_event=x_axis_zeroing_reference_event,
             )
+            emitted_outputs += 1
+            if sample_mode and emitted_outputs >= 1:
+                break
+
+        if sample_mode and emitted_outputs >= 1:
+            break
+
+    if sample_mode:
+        if emitted_outputs == 0:
+            print("[sample] No output was generated (check filters/input data).")
+        else:
+            print("[sample] Completed: wrote exactly one HTML+PNG pair in a 'sample' subfolder.")
 
 
 if __name__ == "__main__":
