@@ -27,8 +27,8 @@ RULES: Dict[str, Any] = {
     # export options
     "export_html": True,
     "export_png": True,
-    "figure_width": 3600,
-    "figure_height": 1800,
+    "figure_width": 3000,
+    "figure_height": 1500,
     # safety limits
     "max_files_per_mode": None,  # None -> all
     "max_trials_per_file": None,  # e.g. 5 (when groupby groups multiple trials)
@@ -304,6 +304,28 @@ def _event_ms_from_trial(
         return (float(raw) - float(platform_onset_mocap)) * 1000.0 / float(mocap_rate)
     except Exception:
         return None
+
+
+def _event_abs_x_from_trial(
+    *,
+    event_name: str,
+    platform_onset_mocap: float,
+    mocap_rate: float,
+    trial_row: Dict[str, Any],
+    tkeo_ms: Optional[float],
+    onset_device_abs: float,
+    device_rate: float,
+) -> Optional[float]:
+    event_ms = _event_ms_from_trial(
+        event_name=event_name,
+        platform_onset_mocap=platform_onset_mocap,
+        mocap_rate=mocap_rate,
+        trial_row=trial_row,
+        tkeo_ms=tkeo_ms,
+    )
+    if event_ms is None:
+        return None
+    return float(onset_device_abs) + float(event_ms) * float(device_rate) / 1000.0
 
 
 def _compute_window_spans(
@@ -627,7 +649,6 @@ def _emit_emg_figure(
     tkeo_by_trial_channel: Dict[Tuple[Any, ...], Dict[str, float]],
     device_rate: float,
     mocap_rate: float,
-    frame_ratio: int,
     time_start_ms: float,
     time_end_ms: float,
     event_cfg: Dict[str, Any],
@@ -640,9 +661,12 @@ def _emit_emg_figure(
     rows, cols = int(grid_layout[0]), int(grid_layout[1])
     fig = make_subplots(rows=rows, cols=cols, subplot_titles=list(channels), horizontal_spacing=0.03, vertical_spacing=0.07)
 
-    event_cols = list((event_cfg or {}).get("columns") or [])
-    if not event_cols:
-        event_cols = ["platform_onset", "step_onset", "TKEO_AGLR_emg_onset_timing"]
+    raw_event_cols = list((event_cfg or {}).get("columns") or [])
+    event_cols: List[str] = []
+    for raw_name in raw_event_cols:
+        name = str(raw_name).strip()
+        if name and name not in event_cols:
+            event_cols.append(name)
     event_color_map = _build_event_color_map(event_cfg, event_cols)
     event_labels = (event_cfg or {}).get("event_labels") if isinstance(event_cfg, dict) else {}
 
@@ -656,17 +680,16 @@ def _emit_emg_figure(
     # Keep legend content stable: derive window/event labels from the first trial.
     legend_trial = trials[0] if trials else None
     legend_spans_by_channel: Dict[str, List[WindowSpan]] = {}
-    legend_event_items: List[Tuple[str, str]] = []
+    legend_event_items_by_channel: Dict[str, List[Tuple[str, str]]] = {}
+    warned_missing_events: set[str] = set()
 
     if legend_trial is not None:
         onset_device_raw = legend_trial.get("onset_device")
         platform_onset_raw = legend_trial.get("platform_onset")
-        step_onset_raw = legend_trial.get("step_onset")
 
         if onset_device_raw is not None and platform_onset_raw is not None:
             onset_device_abs = float(onset_device_raw)
             platform_onset_mocap = float(platform_onset_raw)
-            step_onset_mocap = None if step_onset_raw is None else float(step_onset_raw)
 
             crop_start_x = onset_device_abs + float(time_start_ms) * float(device_rate) / 1000.0
             crop_end_x = onset_device_abs + float(time_end_ms) * float(device_rate) / 1000.0
@@ -687,27 +710,25 @@ def _emit_emg_figure(
                     crop_end_x=crop_end_x,
                 )
                 legend_spans_by_channel[str(ch)] = spans
-
-            legend_event_items = [
-                (
-                    str((event_labels or {}).get("platform_onset", "platform_onset")),
-                    event_color_map.get("platform_onset", "#1f77b4"),
-                ),
-            ]
-            if step_onset_mocap is not None:
-                legend_event_items.append(
-                    (
-                        str((event_labels or {}).get("step_onset", "step_onset")),
-                        event_color_map.get("step_onset", "#ff7f0e"),
+                event_items: List[Tuple[str, str]] = []
+                for event_name in event_cols:
+                    event_abs = _event_abs_x_from_trial(
+                        event_name=event_name,
+                        platform_onset_mocap=platform_onset_mocap,
+                        mocap_rate=mocap_rate,
+                        trial_row=legend_trial,
+                        tkeo_ms=tkeo_ms,
+                        onset_device_abs=onset_device_abs,
+                        device_rate=device_rate,
                     )
-                )
-            if "TKEO_AGLR_emg_onset_timing" in event_cols:
-                legend_event_items.append(
-                    (
-                        str((event_labels or {}).get("TKEO_AGLR_emg_onset_timing", "TKEO")),
-                        event_color_map.get("TKEO_AGLR_emg_onset_timing", "#2ca02c"),
-                    )
-                )
+                    if event_abs is None:
+                        continue
+                    if float(event_abs) < float(crop_start_x) or float(event_abs) > float(crop_end_x):
+                        continue
+                    label = str((event_labels or {}).get(event_name, event_name))
+                    color = event_color_map.get(event_name, "#000000")
+                    event_items.append((label, color))
+                legend_event_items_by_channel[str(ch)] = event_items
 
     for idx_ch, ch in enumerate(channels):
         r = idx_ch // cols + 1
@@ -748,19 +769,10 @@ def _emit_emg_figure(
                 continue
             onset_device_abs = float(onset_device_raw)
             platform_onset_mocap = float(platform_onset_raw)
-            step_onset_raw = trial.get("step_onset")
-            step_onset_mocap = None if step_onset_raw is None else float(step_onset_raw)
-
             crop_start_x = onset_device_abs + float(time_start_ms) * float(device_rate) / 1000.0
             crop_end_x = onset_device_abs + float(time_end_ms) * float(device_rate) / 1000.0
-            step_onset_abs = (
-                None
-                if step_onset_mocap is None
-                else onset_device_abs + (step_onset_mocap - platform_onset_mocap) * float(frame_ratio)
-            )
 
             tkeo_ms = tkeo_by_trial_channel.get(tuple(trial.get(k) for k in key_cols), {}).get(str(ch))
-            tkeo_abs = None if tkeo_ms is None else onset_device_abs + float(tkeo_ms) * float(device_rate) / 1000.0
 
             spans = _compute_window_spans(
                 windows_cfg=windows_cfg,
@@ -809,18 +821,32 @@ def _emit_emg_figure(
                     layer="above",
                 )
 
-            if "platform_onset" in event_cols:
-                _add_vline("platform_onset", onset_device_abs)
-            if "step_onset" in event_cols and step_onset_abs is not None:
-                _add_vline("step_onset", float(step_onset_abs))
-            if "TKEO_AGLR_emg_onset_timing" in event_cols and tkeo_abs is not None:
-                _add_vline("TKEO_AGLR_emg_onset_timing", float(tkeo_abs))
+            for event_name in event_cols:
+                event_abs = _event_abs_x_from_trial(
+                    event_name=event_name,
+                    platform_onset_mocap=platform_onset_mocap,
+                    mocap_rate=mocap_rate,
+                    trial_row=trial,
+                    tkeo_ms=tkeo_ms,
+                    onset_device_abs=onset_device_abs,
+                    device_rate=device_rate,
+                )
+                if event_abs is None:
+                    if event_name not in warned_missing_events:
+                        print(
+                            f"[event_vlines] Warning: event '{event_name}' is missing/invalid in some trials or channels; "
+                            "skipping unavailable vlines"
+                        )
+                        warned_missing_events.add(event_name)
+                    continue
+                _add_vline(event_name, float(event_abs))
 
         if axis_min_x is not None and axis_max_x is not None and axis_max_x > axis_min_x:
             fig.update_xaxes(range=[axis_min_x, axis_max_x], row=r, col=c)
 
         # per-subplot legend (annotation): show stable window/event labels (from first trial)
         spans_for_legend = legend_spans_by_channel.get(str(ch), [])
+        legend_event_items = legend_event_items_by_channel.get(str(ch), [])
         legend_text = _legend_html(window_spans=spans_for_legend, event_items=legend_event_items)
         fig.add_annotation(
             x=0.98,
@@ -860,7 +886,7 @@ def _emit_emg_figure(
 
 
 def main() -> None:
-    load_config, resolve_path, get_frame_ratio = _import_repo_utils()
+    load_config, resolve_path, _ = _import_repo_utils()
 
     cfg_path = RULES.get("config_path")
     config_path = Path(cfg_path) if cfg_path else (_repo_root() / "config.yaml")
@@ -871,7 +897,6 @@ def main() -> None:
     id_cfg = data_cfg.get("id_columns", {})
     device_rate = float(data_cfg.get("device_sample_rate", 1000))
     mocap_rate = float(data_cfg.get("mocap_sample_rate", 100))
-    frame_ratio = int(get_frame_ratio(data_cfg))
 
     input_path = resolve_path(base_dir, data_cfg.get("input_file", "data/merged.parquet"))
     features_path_raw = data_cfg.get("features_file")
@@ -1076,7 +1101,6 @@ def main() -> None:
                 tkeo_by_trial_channel=tkeo_by_trial_channel,
                 device_rate=device_rate,
                 mocap_rate=mocap_rate,
-                frame_ratio=frame_ratio,
                 time_start_ms=time_start_ms,
                 time_end_ms=time_end_ms,
                 event_cfg=event_cfg,
