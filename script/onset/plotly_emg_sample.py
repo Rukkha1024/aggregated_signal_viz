@@ -52,6 +52,53 @@ RULES: Dict[str, Any] = {
     # safety limits
     "max_files_per_mode": None,  # None -> all
     "max_trials_per_file": None,  # e.g. 5 (when groupby groups multiple trials)
+    # ------------------------------------------------------------
+    # New output variant: trial-grid per single EMG channel
+    #
+    # 목적:
+    # - "한 근육(채널)만" 한 번에 보기 위해, 채널(16개) 그리드를 뒤집어서
+    #   "trial 그리드"를 만들어 파일을 저장합니다.
+    # - 예: subject=가윤호, emg_channel=TA -> 해당 subject의 모든 trial이 subplot으로 배치된 1개 파일
+    #
+    # 설계 원칙:
+    # - config.yaml과 연결될 필요 없음 (옵션은 RULES로만 제어)
+    # - 기본값(enabled=false)에서는 기존 출력이 1도 바뀌지 않아야 함
+    # - --sample 모드에서는 항상 output 1쌍(.html+.png)만 생성
+    # ------------------------------------------------------------
+    "trial_grid_by_channel": {
+        # 활성화 여부 (False면 기존 channel-grid(16채널) 출력만 수행)
+        "enabled": False,
+        # True면 trial-grid 출력 후에도 기존 channel-grid 출력도 같이 생성합니다.
+        # 보통은 False(=trial-grid만)로 두는 것이 파일 폭증을 막습니다.
+        "also_emit_channel_grid": False,
+        # 출력 대상 subject 제한 (None이면 mode filter를 통과한 모든 subject)
+        # - 문자열 1개: 단일 subject
+        # - 리스트: 여러 subject
+        "subjects": None,
+        # 출력 대상 EMG 채널 제한 (None이면 config.yaml signal_groups.emg.columns 순서대로 전부)
+        # - 문자열 1개: 단일 채널(예: "TA")
+        # - 리스트: 여러 채널
+        "channels": None,
+        # trial subplot 배치 최대 열 수 (행 수는 trial 개수에 맞춰 자동 계산)
+        "max_cols": 4,
+        # trial 개수 상한 (None이면 전부). trial이 너무 많을 때만 사용.
+        "max_trials": None,
+        # PNG export timeout (seconds). Plotly+kaleido 기본값(약 30s)으로는
+        # subplot/shape가 많은 figure에서 TimeoutError가 날 수 있어 여유 있게 둡니다.
+        "png_timeout_s": 180,
+        # subplot title 템플릿 (trial별로 표시).
+        # 사용 가능한 placeholder: {velocity}, {trial_num}, {trial}, {step_TF}
+        "subplot_title_template": "v={velocity} | trial={trial_num} | {step_TF}",
+        # 파일명 템플릿 (확장자 제외). 최소 {subject}, {emg_channel} 포함 권장.
+        # 사용 가능한 placeholder: {mode}, {subject}, {emg_channel}, {signal_group}, {velocity}
+        # - velocity: 파일 내 trial들이 여러 velocity면 'mix'로 기록됩니다.
+        "filename_pattern": "{mode}_{subject}_{emg_channel}_trial_grid_{signal_group}",
+        # mode별 output_dir 아래에 추가로 들어갈 폴더명
+        "output_dir": "trial_grid_by_channel",
+        # trial 정렬 방식 (디자인/해석 안정성)
+        # - "velocity_then_trial": (velocity asc) -> (trial_num asc) -> (step_TF)
+        "trial_sort": "velocity_then_trial",
+    },
 }
 
 
@@ -212,6 +259,24 @@ def _format_pattern(pattern: str, values: Dict[str, Any]) -> str:
         return pattern
 
 
+def _format_template(template: str, values: Dict[str, Any], *, missing: str = "") -> str:
+    """
+    Safe `str.format()` for labels/titles.
+    - Missing keys are filled with `missing` (default: empty string).
+    - On any formatting error, returns the raw template.
+    """
+    fmt = Formatter()
+    needed = [field for _, field, _, _ in fmt.parse(template) if field]
+    mapping = dict(values)
+    for field in needed:
+        if field not in mapping:
+            mapping[field] = missing
+    try:
+        return template.format(**mapping)
+    except Exception:
+        return template
+
+
 def _build_event_color_map(event_cfg: Any, event_cols: Sequence[str]) -> Dict[str, str]:
     cfg = event_cfg if isinstance(event_cfg, dict) else {}
     overrides = cfg.get("colors") if isinstance(cfg.get("colors"), dict) else {}
@@ -226,6 +291,78 @@ def _build_event_color_map(event_cfg: Any, event_cols: Sequence[str]) -> Dict[st
         else:
             out[col] = _mpl_color_to_hex(palette[idx % len(palette)])
     return out
+
+
+def _as_float(value: Any, *, default: float) -> float:
+    if value is None:
+        return float(default)
+    try:
+        return float(value)
+    except Exception:
+        return float(default)
+
+
+def _as_int(value: Any, *, default: int) -> int:
+    if value is None:
+        return int(default)
+    try:
+        return int(value)
+    except Exception:
+        try:
+            return int(float(value))
+        except Exception:
+            return int(default)
+
+
+def _write_png_via_kaleido(
+    fig: Any,
+    out_png: Path,
+    *,
+    timeout_s: Optional[float] = None,
+) -> None:
+    """
+    Write PNG using kaleido directly (instead of fig.write_image).
+
+    Why:
+    - With kaleido v1+, the timeout is configured via `kopts={"timeout": ...}`.
+    - Plotly's high-level API doesn't expose this knob directly.
+    """
+    import plotly.io as pio
+
+    import kaleido
+
+    fig_dict = fig.to_dict() if hasattr(fig, "to_dict") else fig
+    width = (
+        getattr(getattr(fig, "layout", None), "width", None)
+        if hasattr(fig, "layout")
+        else None
+    )
+    height = (
+        getattr(getattr(fig, "layout", None), "height", None)
+        if hasattr(fig, "layout")
+        else None
+    )
+
+    kopts: Dict[str, Any] = {}
+    if getattr(pio.defaults, "plotlyjs", None):
+        kopts["plotlyjs"] = pio.defaults.plotlyjs
+    if getattr(pio.defaults, "mathjax", None):
+        kopts["mathjax"] = pio.defaults.mathjax
+    if timeout_s is not None:
+        kopts["timeout"] = float(timeout_s)
+
+    img_bytes = kaleido.calc_fig_sync(
+        fig_dict,
+        opts=dict(
+            format="png",
+            width=int(width) if width is not None else None,
+            height=int(height) if height is not None else None,
+            scale=pio.defaults.default_scale,
+        ),
+        topojson=pio.defaults.topojson,
+        kopts=kopts,
+    )
+    out_png.write_bytes(img_bytes)
 
 
 def _window_colors_from_config(cfg: Dict[str, Any]) -> Dict[str, str]:
@@ -1004,6 +1141,344 @@ def _emit_emg_figure(
         print(f"Wrote: {out_png}")
 
 
+def _emit_emg_trial_grid_single_channel(
+    *,
+    out_html: Optional[Path],
+    out_png: Optional[Path],
+    title: str,
+    emg_channel: str,
+    trials: Sequence[Dict[str, Any]],
+    key_cols: Sequence[str],
+    tkeo_by_trial_channel: Dict[Tuple[Any, ...], Dict[str, float]],
+    device_rate: float,
+    mocap_rate: float,
+    time_start_ms: float,
+    time_end_ms: float,
+    event_cfg: Dict[str, Any],
+    windows_cfg: Dict[str, Any],
+    window_colors: Dict[str, str],
+    grid_alpha: float,
+    x_axis_zeroing_enabled: bool,
+    x_axis_zeroing_reference_event: str,
+    max_cols: int,
+    subplot_title_template: str,
+) -> None:
+    import math
+
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+
+    ch = str(emg_channel).strip()
+    if not ch:
+        raise ValueError("emg_channel is empty")
+    if not trials:
+        raise ValueError("No trials provided for trial-grid rendering.")
+
+    n_trials = len(trials)
+    cols = int(max(1, min(int(max_cols), n_trials)))
+    rows = int(math.ceil(float(n_trials) / float(cols)))
+
+    subplot_titles: List[str] = []
+    for t in trials:
+        values = {
+            "velocity": t.get("velocity"),
+            "trial_num": t.get("trial_num"),
+            "trial": t.get("trial_num"),
+            "step_TF": t.get("step_TF") or "",
+        }
+        subplot_titles.append(_format_template(str(subplot_title_template), values, missing=""))
+
+    fig = make_subplots(
+        rows=rows,
+        cols=cols,
+        subplot_titles=subplot_titles,
+        horizontal_spacing=0.03,
+        vertical_spacing=0.07,
+    )
+
+    raw_event_cols = list((event_cfg or {}).get("columns") or [])
+    event_cols: List[str] = []
+    for raw_name in raw_event_cols:
+        name = str(raw_name).strip()
+        if name and name not in event_cols:
+            event_cols.append(name)
+    event_color_map = _build_event_color_map(event_cfg, event_cols)
+    event_labels = (event_cfg or {}).get("event_labels") if isinstance(event_cfg, dict) else {}
+
+    style = (event_cfg or {}).get("style") if isinstance(event_cfg, dict) else {}
+    vline_dash = _mpl_linestyle_to_plotly_dash((style or {}).get("linestyle", "--"))
+    vline_width = float((style or {}).get("linewidth", 1.5)) if (style or {}).get("linewidth") is not None else 1.5
+    vline_alpha = float((style or {}).get("alpha", 0.9)) if (style or {}).get("alpha") is not None else 0.9
+
+    ref_event = str((windows_cfg or {}).get("reference_event") or "platform_onset").strip() or "platform_onset"
+
+    # Compute x-axis zeroing (single channel).
+    zero_abs_x = 0.0
+    if x_axis_zeroing_enabled:
+        zero_ref_event = str(x_axis_zeroing_reference_event or "").strip() or "platform_onset"
+        channel_specific_zero = _is_emg_channel_specific_event(zero_ref_event)
+        zero_values: List[float] = []
+        for trial in trials:
+            onset_device_raw = trial.get("onset_device")
+            platform_onset_raw = trial.get("platform_onset")
+            if onset_device_raw is None or platform_onset_raw is None:
+                continue
+            onset_device_abs = float(onset_device_raw)
+            platform_onset_mocap = float(platform_onset_raw)
+            trial_key = tuple(trial.get(c) for c in key_cols)
+
+            tkeo_ms = tkeo_by_trial_channel.get(trial_key, {}).get(ch) if channel_specific_zero else None
+            event_abs = _event_abs_x_from_trial(
+                event_name=zero_ref_event,
+                platform_onset_mocap=platform_onset_mocap,
+                mocap_rate=mocap_rate,
+                trial_row=trial,
+                tkeo_ms=tkeo_ms,
+                onset_device_abs=onset_device_abs,
+                device_rate=device_rate,
+            )
+            if event_abs is None:
+                continue
+            try:
+                f = float(event_abs)
+            except Exception:
+                continue
+            if np.isfinite(f):
+                zero_values.append(f)
+
+        if not zero_values:
+            raise ValueError(
+                f"[x_axis_zeroing] reference_event '{zero_ref_event}' has no valid values for emg_channel={ch}."
+            )
+        zero_abs_x = float(np.mean(np.asarray(zero_values, dtype=float)))
+
+    # Stable legend content: use the first trial in the file.
+    legend_trial = trials[0]
+    legend_spans: List[WindowSpan] = []
+    legend_event_items: List[Tuple[str, str]] = []
+    warned_missing_events: set[str] = set()
+
+    onset_device_raw = legend_trial.get("onset_device")
+    platform_onset_raw = legend_trial.get("platform_onset")
+    if onset_device_raw is not None and platform_onset_raw is not None:
+        onset_device_abs = float(onset_device_raw)
+        platform_onset_mocap = float(platform_onset_raw)
+        crop_start_x = onset_device_abs + float(time_start_ms) * float(device_rate) / 1000.0
+        crop_end_x = onset_device_abs + float(time_end_ms) * float(device_rate) / 1000.0
+        trial_key = tuple(legend_trial.get(c) for c in key_cols)
+        tkeo_ms = tkeo_by_trial_channel.get(trial_key, {}).get(ch)
+
+        legend_spans = _compute_window_spans(
+            windows_cfg=windows_cfg,
+            reference_event=ref_event,
+            window_colors=window_colors,
+            device_rate=device_rate,
+            mocap_rate=mocap_rate,
+            platform_onset_mocap=platform_onset_mocap,
+            onset_device_abs=onset_device_abs,
+            trial_row=legend_trial,
+            tkeo_ms=tkeo_ms,
+            crop_start_x=crop_start_x,
+            crop_end_x=crop_end_x,
+        )
+        for event_name in event_cols:
+            event_abs = _event_abs_x_from_trial(
+                event_name=event_name,
+                platform_onset_mocap=platform_onset_mocap,
+                mocap_rate=mocap_rate,
+                trial_row=legend_trial,
+                tkeo_ms=tkeo_ms,
+                onset_device_abs=onset_device_abs,
+                device_rate=device_rate,
+            )
+            if event_abs is None:
+                continue
+            if float(event_abs) < float(crop_start_x) or float(event_abs) > float(crop_end_x):
+                continue
+            label = str((event_labels or {}).get(event_name, event_name))
+            color = event_color_map.get(event_name, "#000000")
+            legend_event_items.append((label, color))
+
+    legend_text = _legend_html(window_spans=legend_spans, event_items=legend_event_items)
+
+    # Keep x-axis range consistent across all trial subplots.
+    axis_min_x: Optional[float] = None
+    axis_max_x: Optional[float] = None
+    for trial in trials:
+        x = np.asarray(trial["__x_abs"], dtype=float) - float(zero_abs_x)
+        finite_x = x[np.isfinite(x)]
+        if finite_x.size == 0:
+            continue
+        cur_min = float(finite_x.min())
+        cur_max = float(finite_x.max())
+        axis_min_x = cur_min if axis_min_x is None else min(axis_min_x, cur_min)
+        axis_max_x = cur_max if axis_max_x is None else max(axis_max_x, cur_max)
+
+    for idx_trial, trial in enumerate(trials):
+        r = idx_trial // cols + 1
+        c = idx_trial % cols + 1
+        axis_idx = idx_trial + 1
+        xref = "x" if axis_idx == 1 else f"x{axis_idx}"
+        yref_domain = "y domain" if axis_idx == 1 else f"y{axis_idx} domain"
+
+        x = np.asarray(trial["__x_abs"], dtype=float) - float(zero_abs_x)
+        y = np.asarray(trial.get(ch), dtype=float)
+
+        fig.add_trace(
+            go.Scatter(
+                x=x,
+                y=y,
+                mode="lines",
+                name=str(ch),
+                line=dict(color="gray", width=1.2, dash="solid"),
+                opacity=0.85,
+                showlegend=False,
+            ),
+            row=r,
+            col=c,
+        )
+
+        onset_device_raw = trial.get("onset_device")
+        platform_onset_raw = trial.get("platform_onset")
+        if onset_device_raw is None or platform_onset_raw is None:
+            continue
+        onset_device_abs = float(onset_device_raw)
+        platform_onset_mocap = float(platform_onset_raw)
+        crop_start_x = onset_device_abs + float(time_start_ms) * float(device_rate) / 1000.0
+        crop_end_x = onset_device_abs + float(time_end_ms) * float(device_rate) / 1000.0
+
+        trial_key = tuple(trial.get(k) for k in key_cols)
+        tkeo_ms = tkeo_by_trial_channel.get(trial_key, {}).get(ch)
+
+        spans = _compute_window_spans(
+            windows_cfg=windows_cfg,
+            reference_event=ref_event,
+            window_colors=window_colors,
+            device_rate=device_rate,
+            mocap_rate=mocap_rate,
+            platform_onset_mocap=platform_onset_mocap,
+            onset_device_abs=onset_device_abs,
+            trial_row=trial,
+            tkeo_ms=tkeo_ms,
+            crop_start_x=crop_start_x,
+            crop_end_x=crop_end_x,
+        )
+        for span in spans:
+            fig.add_shape(
+                type="rect",
+                xref=xref,
+                yref=yref_domain,
+                x0=float(span.start_x) - float(zero_abs_x),
+                x1=float(span.end_x) - float(zero_abs_x),
+                y0=0,
+                y1=1,
+                fillcolor=span.color,
+                opacity=0.12,
+                line=dict(width=0),
+                layer="below",
+            )
+
+        def _add_vline(name: str, xval: float, *, dash: Optional[str] = None) -> None:
+            fig.add_shape(
+                type="line",
+                xref=xref,
+                yref=yref_domain,
+                x0=float(xval) - float(zero_abs_x),
+                x1=float(xval) - float(zero_abs_x),
+                y0=0,
+                y1=1,
+                line=dict(
+                    color=event_color_map.get(name, "#000000"),
+                    width=vline_width,
+                    dash=(dash or vline_dash),
+                ),
+                opacity=vline_alpha,
+                layer="above",
+            )
+
+        for event_name in event_cols:
+            event_abs = _event_abs_x_from_trial(
+                event_name=event_name,
+                platform_onset_mocap=platform_onset_mocap,
+                mocap_rate=mocap_rate,
+                trial_row=trial,
+                tkeo_ms=tkeo_ms,
+                onset_device_abs=onset_device_abs,
+                device_rate=device_rate,
+            )
+            if event_abs is None:
+                if event_name not in warned_missing_events:
+                    print(
+                        f"[event_vlines] Warning: event '{event_name}' is missing/invalid in some trials or channels; "
+                        "skipping unavailable vlines"
+                    )
+                    warned_missing_events.add(event_name)
+                continue
+            _add_vline(event_name, float(event_abs))
+
+        # Repeat the legend annotation in each subplot for parity with the existing channel-grid output.
+        fig.add_annotation(
+            x=0.98,
+            y=0.98,
+            xref=xref + " domain",
+            yref=yref_domain,
+            xanchor="right",
+            yanchor="top",
+            text=legend_text,
+            showarrow=False,
+            align="left",
+            font=dict(size=10, color="#222222"),
+            bgcolor="rgba(255,255,255,0.75)",
+            bordercolor="rgba(0,0,0,0.2)",
+            borderwidth=1,
+        )
+
+    fig.update_layout(
+        title=title,
+        width=int(RULES.get("figure_width", 1800)),
+        height=int(RULES.get("figure_height", 900)),
+        margin=dict(l=40, r=20, t=60, b=40),
+        template="plotly_white",
+        showlegend=False,
+    )
+
+    grid_color = f"rgba(0,0,0,{float(grid_alpha):.3f})"
+    xaxes_kwargs: Dict[str, Any] = {"showgrid": True, "gridcolor": grid_color}
+    x_tick_dtick = RULES.get("x_tick_dtick")
+    if x_tick_dtick is not None:
+        try:
+            dtick_value = float(x_tick_dtick)
+        except Exception as exc:
+            raise ValueError("RULES['x_tick_dtick'] must be numeric or None") from exc
+        if dtick_value <= 0:
+            raise ValueError("RULES['x_tick_dtick'] must be > 0 when provided")
+        xaxes_kwargs.update({"tickmode": "linear", "dtick": dtick_value})
+
+    fig.update_xaxes(**xaxes_kwargs)
+    fig.update_yaxes(showgrid=True, gridcolor=grid_color)
+
+    if axis_min_x is not None and axis_max_x is not None and axis_max_x > axis_min_x:
+        fig.update_xaxes(range=[axis_min_x, axis_max_x])
+
+    if out_html is not None:
+        out_html.parent.mkdir(parents=True, exist_ok=True)
+        fig.write_html(out_html, include_plotlyjs="cdn", div_id="emg-onset-trial-grid")
+        print(f"Wrote: {out_html}")
+    if out_png is not None:
+        out_png.parent.mkdir(parents=True, exist_ok=True)
+        trial_grid_cfg = (
+            RULES.get("trial_grid_by_channel")
+            if isinstance(RULES.get("trial_grid_by_channel"), dict)
+            else {}
+        )
+        timeout_raw = trial_grid_cfg.get("png_timeout_s")
+        timeout_s = None if timeout_raw is None else _as_float(timeout_raw, default=0.0)
+        if timeout_s is not None and timeout_s <= 0:
+            timeout_s = None
+        _write_png_via_kaleido(fig, out_png, timeout_s=timeout_s)
+        print(f"Wrote: {out_png}")
+
+
 def _parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Render Plotly EMG onset figures from merged parquet/config."
@@ -1179,6 +1654,155 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                 channels=channels,
                 trials_df=df_trials.select(list(key_cols)),
             )
+
+        trial_grid_cfg = RULES.get("trial_grid_by_channel") if isinstance(RULES.get("trial_grid_by_channel"), dict) else {}
+        trial_grid_enabled = bool(trial_grid_cfg.get("enabled", False))
+        also_emit_channel_grid = bool(trial_grid_cfg.get("also_emit_channel_grid", False))
+
+        if trial_grid_enabled:
+            # Render "one muscle at a time": one file per (subject x emg_channel),
+            # with a subplot grid over trials.
+            raw_subjects = trial_grid_cfg.get("subjects")
+            if isinstance(raw_subjects, str) and raw_subjects.strip():
+                selected_subjects = [raw_subjects.strip()]
+            elif isinstance(raw_subjects, list):
+                selected_subjects = [str(s).strip() for s in raw_subjects if s is not None and str(s).strip()]
+            else:
+                selected_subjects = []
+
+            raw_channels = trial_grid_cfg.get("channels")
+            if isinstance(raw_channels, str) and raw_channels.strip():
+                selected_channels = [raw_channels.strip()]
+            elif isinstance(raw_channels, list):
+                selected_channels = [str(c).strip() for c in raw_channels if c is not None and str(c).strip()]
+            else:
+                selected_channels = []
+
+            if not selected_subjects:
+                selected_subjects = (
+                    df_trials.select(pl.col(subject_col).unique().sort())
+                    .get_column(subject_col)
+                    .to_list()
+                )
+            if not selected_channels:
+                selected_channels = [str(c) for c in channels]
+
+            # Sample mode contract: emit exactly one HTML+PNG pair.
+            if sample_mode:
+                selected_subjects = selected_subjects[:1]
+                selected_channels = selected_channels[:1]
+
+            max_cols = _as_int(trial_grid_cfg.get("max_cols"), default=4)
+            if max_cols <= 0:
+                raise ValueError("RULES['trial_grid_by_channel']['max_cols'] must be > 0")
+            max_trials = trial_grid_cfg.get("max_trials")
+            max_trials_int = None if max_trials is None else _as_int(max_trials, default=0)
+            if max_trials_int is not None and max_trials_int <= 0:
+                raise ValueError("RULES['trial_grid_by_channel']['max_trials'] must be > 0 or None")
+
+            out_dir_name = str(trial_grid_cfg.get("output_dir") or "trial_grid_by_channel").strip() or "trial_grid_by_channel"
+            file_pattern = str(trial_grid_cfg.get("filename_pattern") or "{mode}_{subject}_{emg_channel}_trial_grid_{signal_group}").strip()
+            subplot_title_template = str(trial_grid_cfg.get("subplot_title_template") or "v={velocity} | trial={trial_num}").strip()
+            trial_sort = str(trial_grid_cfg.get("trial_sort") or "velocity_then_trial").strip() or "velocity_then_trial"
+
+            stop_now = False
+            file_count = 0
+            for subject in selected_subjects:
+                if stop_now:
+                    break
+
+                subset_sub = df_trials.filter(pl.col(subject_col) == subject)
+                if subset_sub.is_empty():
+                    continue
+
+                # Collect + sort trials for stable grid layout.
+                trials_rows = subset_sub.to_dicts()
+                if trial_sort == "velocity_then_trial":
+                    trials_rows.sort(
+                        key=lambda r: (
+                            _as_float(r.get(velocity_col), default=float("inf")),
+                            _as_int(r.get(trial_col), default=10**9),
+                            str(r.get("step_TF") or ""),
+                        )
+                    )
+                if max_trials_int is not None:
+                    trials_rows = trials_rows[:max_trials_int]
+
+                velocities = (
+                    subset_sub.select(pl.col(velocity_col).unique().sort()).get_column(velocity_col).to_list()
+                )
+                velocity_label = velocities[0] if len(velocities) == 1 else "mix"
+
+                for emg_channel in selected_channels:
+                    if max_files is not None and file_count >= int(max_files):
+                        stop_now = True
+                        break
+                    file_count += 1
+
+                    format_values: Dict[str, Any] = {
+                        "signal_group": "emg",
+                        "mode": mode_name,
+                        "subject": subject,
+                        "emg_channel": emg_channel,
+                        "velocity": velocity_label,
+                    }
+                    filename_raw = _safe_filename(_format_pattern(file_pattern, format_values))
+                    filename_path = Path(filename_raw)
+                    stem = filename_path.stem if filename_path.suffix else filename_raw
+                    png_name = f"{stem}.png"
+                    html_name = f"{stem}.html"
+
+                    out_dir = out_base / out_dir_name
+                    if sample_mode:
+                        out_dir = out_dir / "sample"
+
+                    out_png = (out_dir / png_name) if export_png else None
+                    out_html = (out_dir / html_name) if export_html else None
+
+                    axis_desc = f"absolute frames ({x_abs_col})"
+                    if x_axis_zeroing_enabled:
+                        if _is_emg_channel_specific_event(x_axis_zeroing_reference_event):
+                            axis_desc = (
+                                f"zeroed by {x_axis_zeroing_reference_event} "
+                                "(channel mean; fallback=global mean)"
+                            )
+                        else:
+                            axis_desc = f"zeroed by {x_axis_zeroing_reference_event} (mean)"
+
+                    title = f"{mode_name} | emg:{emg_channel} | trial-grid | {axis_desc} | {subject}"
+                    _emit_emg_trial_grid_single_channel(
+                        out_html=out_html,
+                        out_png=out_png,
+                        title=title,
+                        emg_channel=emg_channel,
+                        trials=trials_rows,
+                        key_cols=key_cols,
+                        tkeo_by_trial_channel=tkeo_by_trial_channel,
+                        device_rate=device_rate,
+                        mocap_rate=mocap_rate,
+                        time_start_ms=time_start_ms,
+                        time_end_ms=time_end_ms,
+                        event_cfg=event_cfg,
+                        windows_cfg=windows_cfg,
+                        window_colors=window_colors,
+                        grid_alpha=grid_alpha,
+                        x_axis_zeroing_enabled=x_axis_zeroing_enabled,
+                        x_axis_zeroing_reference_event=x_axis_zeroing_reference_event,
+                        max_cols=max_cols,
+                        subplot_title_template=subplot_title_template,
+                    )
+                    emitted_outputs += 1
+                    if sample_mode and emitted_outputs >= 1:
+                        stop_now = True
+                        break
+
+                if stop_now:
+                    break
+
+            if not also_emit_channel_grid:
+                if sample_mode and emitted_outputs >= 1:
+                    break
+                continue
 
         # Determine file grouping (mimic aggregation_modes overlay semantics).
         file_fields: List[str]
