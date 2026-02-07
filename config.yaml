@@ -120,12 +120,10 @@ windows:
       end_ms: "600"
 
 # === X-axis Zeroing ===
-# 참고:
-# - `enabled: true`면 x축 0점을 onset(기존) 대신 `reference_event`로 재정의합니다.
-# - 기준값은 각 플롯(또는 파일)에 포함된 trial들의 `reference_event` 평균 시점입니다.
+# 기준값은 각 플롯(또는 파일)에 포함된 trial들의 `reference_event` 평균 시점입니다.
 x_axis_zeroing:
-  enabled: false
-  reference_event: "platform_onset"
+  enabled: true
+  reference_event: "TKEO_AGLR_emg_onset_timing"
 
 # === 플롯 스타일 ===
 plot_style:
