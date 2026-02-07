@@ -1,8 +1,14 @@
-plot의 x axis ticks에 정규화된 값이 아니라 frame 값을 보여주면 좋겟어. 
-이게 0-1로 정규화되는건 아는데, 그래도 대충 frame 값을 구할 수는 있잖아. 지금은 좀 알아보기 어렵네. 
-config.yaml - windows.definitions의 time point를 표시했으면 한다. 
+## 수정 계획
 
-x축 tick을 aligned frame(onset=0)로 표시 + windows.definitions에 대한 tick value 표시. 
--> 이게 유저가 원한 것이다. 
+`plotly_emg_sample.py`를 수정하여 `interpolation.start_ms` / `end_ms`가 null일 때 데이터의 실제 범위를 자동 계산하도록 변경하겠습니다.
 
-근데 tick number 간에 서로 겹치는데? 그리고 platform_onset의 tick value는 왜 안보여?
+### 변경 내용:
+
+1. **null 체크 로직 추가** (line 680-683 부근)
+   - `start_ms`가 null이면 → 데이터에서 onset 대비 최소 시간을 계산
+   - `end_ms`가 null이면 → 데이터에서 onset 대비 최대 시간을 계산
+
+2. **구현 방식**:
+   - `interp_cfg.get("start_ms")`가 `None`인지 체크
+   - `None`이면 LazyFrame에서 `(original_DeviceFrame - onset_device)`의 min/max를 계산하여 ms로 변환
+   - 그렇지 않으면 config 값 사용
