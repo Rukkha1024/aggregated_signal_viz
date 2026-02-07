@@ -43,26 +43,11 @@ RULES: Dict[str, Any] = {
     # export options
     "export_html": True,
     "export_png": True,
-    "figure_width": 3000,
-    "figure_height": 1500,
-    # subplot figure sizing policy
-    # - fixed_cell: rows/cols에 맞춰 figure width/height를 자동 계산 (subplot 셀 크기 고정)
-    # - legacy_figure: 기존처럼 figure_width/figure_height를 그대로 사용
-    "subplot_size_mode": "fixed_cell",
-    # fixed_cell mode: per-subplot pixel size (사용자 조정 권장)
+    # subplot size control:
+    # - 사용자 조정 항목은 아래 2개만 유지
+    # - spacing/margin/figure size는 자동으로 계산
     "subplot_cell_width_px": 750,
     "subplot_cell_height_px": 375,
-    # fixed_cell mode: gaps between subplot panels (pixel)
-    "subplot_gap_h_px": 24,
-    "subplot_gap_v_px": 28,
-    # shared margins for both fixed_cell/legacy_figure
-    "subplot_margin_l_px": 40,
-    "subplot_margin_r_px": 20,
-    "subplot_margin_t_px": 60,
-    "subplot_margin_b_px": 40,
-    # When provided, these override auto spacing derived from pixel gaps.
-    "subplot_horizontal_spacing": None,
-    "subplot_vertical_spacing": None,
     # x-axis tick interval (None -> Plotly auto). e.g. 25 for 25-frame steps.
     "x_tick_dtick": 25,
     # grid transparency (0~1). None -> use config.yaml plot_style.common.grid_alpha.
@@ -339,45 +324,39 @@ def _resolve_subplot_layout(rows: int, cols: int) -> SubplotLayoutSpec:
     rows_i = max(1, int(rows))
     cols_i = max(1, int(cols))
 
-    margin_l = max(0, _as_int(RULES.get("subplot_margin_l_px"), default=40))
-    margin_r = max(0, _as_int(RULES.get("subplot_margin_r_px"), default=20))
-    margin_t = max(0, _as_int(RULES.get("subplot_margin_t_px"), default=60))
-    margin_b = max(0, _as_int(RULES.get("subplot_margin_b_px"), default=40))
+    # User-controlled size (only these two RULES knobs).
+    # Keep a minimum to protect readability when values are set too small.
+    cell_w_raw = _as_int(RULES.get("subplot_cell_width_px"), default=750)
+    cell_h_raw = _as_int(RULES.get("subplot_cell_height_px"), default=375)
+    cell_w = max(320, int(cell_w_raw))
+    cell_h = max(220, int(cell_h_raw))
 
-    # Optional direct override for Plotly spacing values.
-    h_override = RULES.get("subplot_horizontal_spacing")
-    v_override = RULES.get("subplot_vertical_spacing")
+    # Auto text-safe gaps:
+    # - horizontal: reserve room for adjacent y-tick labels.
+    # - vertical: reserve room for subplot title + x-tick labels.
+    gap_h = max(36, int(round(float(cell_w) * 0.08)))
+    gap_v = max(72, int(round(float(cell_h) * 0.22)))
 
-    mode = str(RULES.get("subplot_size_mode") or "fixed_cell").strip().lower()
-    if mode != "legacy_figure":
-        cell_w = max(1, _as_int(RULES.get("subplot_cell_width_px"), default=750))
-        cell_h = max(1, _as_int(RULES.get("subplot_cell_height_px"), default=375))
-        gap_h = max(0, _as_int(RULES.get("subplot_gap_h_px"), default=24))
-        gap_v = max(0, _as_int(RULES.get("subplot_gap_v_px"), default=28))
+    panel_w = cols_i * cell_w + max(0, cols_i - 1) * gap_h
+    panel_h = rows_i * cell_h + max(0, rows_i - 1) * gap_v
 
-        panel_w = cols_i * cell_w + max(0, cols_i - 1) * gap_h
-        panel_h = rows_i * cell_h + max(0, rows_i - 1) * gap_v
-        width_px = margin_l + margin_r + panel_w
-        height_px = margin_t + margin_b + panel_h
+    # Auto outer margins for figure title and edge tick labels.
+    margin_l = max(64, int(round(float(cell_w) * 0.11)))
+    margin_r = max(24, int(round(float(cell_w) * 0.03)))
+    margin_t = max(72, int(round(float(cell_h) * 0.18)))
+    margin_b = max(64, int(round(float(cell_h) * 0.18)))
 
-        if cols_i > 1:
-            horizontal_spacing = float(gap_h) / float(panel_w) if panel_w > 0 else 0.0
-        else:
-            horizontal_spacing = 0.0
-        if rows_i > 1:
-            vertical_spacing = float(gap_v) / float(panel_h) if panel_h > 0 else 0.0
-        else:
-            vertical_spacing = 0.0
+    width_px = margin_l + margin_r + panel_w
+    height_px = margin_t + margin_b + panel_h
+
+    if cols_i > 1:
+        horizontal_spacing = float(gap_h) / float(panel_w) if panel_w > 0 else 0.0
     else:
-        width_px = max(1, _as_int(RULES.get("figure_width"), default=1800))
-        height_px = max(1, _as_int(RULES.get("figure_height"), default=900))
-        horizontal_spacing = 0.03
-        vertical_spacing = 0.07
-
-    if h_override is not None:
-        horizontal_spacing = max(0.0, float(h_override))
-    if v_override is not None:
-        vertical_spacing = max(0.0, float(v_override))
+        horizontal_spacing = 0.0
+    if rows_i > 1:
+        vertical_spacing = float(gap_v) / float(panel_h) if panel_h > 0 else 0.0
+    else:
+        vertical_spacing = 0.0
 
     # Plotly requires spacing < 1/(n-1) when n > 1.
     if cols_i > 1:
@@ -946,6 +925,9 @@ def _emit_emg_figure(
         horizontal_spacing=layout_spec.horizontal_spacing,
         vertical_spacing=layout_spec.vertical_spacing,
     )
+    # Keep subplot titles compact to reduce overlap risk in dense grids.
+    for ann in fig.layout.annotations:
+        ann.font = dict(size=11)
 
     raw_event_cols = list((event_cfg or {}).get("columns") or [])
     event_cols: List[str] = []
@@ -1231,8 +1213,8 @@ def _emit_emg_figure(
             raise ValueError("RULES['x_tick_dtick'] must be > 0 when provided")
         xaxes_kwargs.update({"tickmode": "linear", "dtick": dtick_value})
 
-    fig.update_xaxes(**xaxes_kwargs)
-    fig.update_yaxes(showgrid=True, gridcolor=grid_color)
+    fig.update_xaxes(automargin=True, **xaxes_kwargs)
+    fig.update_yaxes(showgrid=True, gridcolor=grid_color, automargin=True)
 
     if out_html is not None:
         out_html.parent.mkdir(parents=True, exist_ok=True)
@@ -1301,6 +1283,9 @@ def _emit_emg_trial_grid_single_channel(
         horizontal_spacing=layout_spec.horizontal_spacing,
         vertical_spacing=layout_spec.vertical_spacing,
     )
+    # Keep subplot titles compact to reduce overlap risk in dense grids.
+    for ann in fig.layout.annotations:
+        ann.font = dict(size=11)
 
     raw_event_cols = list((event_cfg or {}).get("columns") or [])
     event_cols: List[str] = []
@@ -1593,8 +1578,8 @@ def _emit_emg_trial_grid_single_channel(
             raise ValueError("RULES['x_tick_dtick'] must be > 0 when provided")
         xaxes_kwargs.update({"tickmode": "linear", "dtick": dtick_value})
 
-    fig.update_xaxes(**xaxes_kwargs)
-    fig.update_yaxes(showgrid=True, gridcolor=grid_color)
+    fig.update_xaxes(automargin=True, **xaxes_kwargs)
+    fig.update_yaxes(showgrid=True, gridcolor=grid_color, automargin=True)
 
     if out_html is not None:
         out_html.parent.mkdir(parents=True, exist_ok=True)
