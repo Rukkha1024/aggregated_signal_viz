@@ -45,6 +45,24 @@ RULES: Dict[str, Any] = {
     "export_png": True,
     "figure_width": 3000,
     "figure_height": 1500,
+    # subplot figure sizing policy
+    # - fixed_cell: rows/cols에 맞춰 figure width/height를 자동 계산 (subplot 셀 크기 고정)
+    # - legacy_figure: 기존처럼 figure_width/figure_height를 그대로 사용
+    "subplot_size_mode": "fixed_cell",
+    # fixed_cell mode: per-subplot pixel size (사용자 조정 권장)
+    "subplot_cell_width_px": 750,
+    "subplot_cell_height_px": 375,
+    # fixed_cell mode: gaps between subplot panels (pixel)
+    "subplot_gap_h_px": 24,
+    "subplot_gap_v_px": 28,
+    # shared margins for both fixed_cell/legacy_figure
+    "subplot_margin_l_px": 40,
+    "subplot_margin_r_px": 20,
+    "subplot_margin_t_px": 60,
+    "subplot_margin_b_px": 40,
+    # When provided, these override auto spacing derived from pixel gaps.
+    "subplot_horizontal_spacing": None,
+    "subplot_vertical_spacing": None,
     # x-axis tick interval (None -> Plotly auto). e.g. 25 for 25-frame steps.
     "x_tick_dtick": 25,
     # grid transparency (0~1). None -> use config.yaml plot_style.common.grid_alpha.
@@ -66,11 +84,8 @@ RULES: Dict[str, Any] = {
     # - --sample 모드에서는 항상 output 1쌍(.html+.png)만 생성
     # ------------------------------------------------------------
     "trial_grid_by_channel": {
-        # 활성화 여부 (False면 기존 channel-grid(16채널) 출력만 수행)
-        "enabled": False,
-        # True면 trial-grid 출력 후에도 기존 channel-grid 출력도 같이 생성합니다.
-        # 보통은 False(=trial-grid만)로 두는 것이 파일 폭증을 막습니다.
-        "also_emit_channel_grid": False,
+        "enabled": True,   # 활성화 여부 (False면 기존 channel-grid(16채널) 출력만 수행)
+        "also_emit_channel_grid": False,    # True면 trial-grid 출력 후에도 기존 channel-grid 출력도 같이 생성합니다.
         # 출력 대상 subject 제한 (None이면 mode filter를 통과한 모든 subject)
         # - 문자열 1개: 단일 subject
         # - 리스트: 여러 subject
@@ -79,13 +94,8 @@ RULES: Dict[str, Any] = {
         # - 문자열 1개: 단일 채널(예: "TA")
         # - 리스트: 여러 채널
         "channels": None,
-        # trial subplot 배치 최대 열 수 (행 수는 trial 개수에 맞춰 자동 계산)
-        "max_cols": 4,
-        # trial 개수 상한 (None이면 전부). trial이 너무 많을 때만 사용.
-        "max_trials": None,
-        # PNG export timeout (seconds). Plotly+kaleido 기본값(약 30s)으로는
-        # subplot/shape가 많은 figure에서 TimeoutError가 날 수 있어 여유 있게 둡니다.
-        "png_timeout_s": 180,
+        "max_cols": 4,  # trial subplot 배치 최대 열 수 (행 수는 trial 개수에 맞춰 자동 계산)
+        "max_trials": None,  # trial 개수 상한 (None이면 전부). trial이 너무 많을 때만 사용.
         # subplot title 템플릿 (trial별로 표시).
         # 사용 가능한 placeholder: {velocity}, {trial_num}, {trial}, {step_TF}
         "subplot_title_template": "v={velocity} | trial={trial_num} | {step_TF}",
@@ -95,9 +105,6 @@ RULES: Dict[str, Any] = {
         "filename_pattern": "{mode}_{subject}_{emg_channel}_trial_grid_{signal_group}",
         # mode별 output_dir 아래에 추가로 들어갈 폴더명
         "output_dir": "trial_grid_by_channel",
-        # trial 정렬 방식 (디자인/해석 안정성)
-        # - "velocity_then_trial": (velocity asc) -> (trial_num asc) -> (step_TF)
-        "trial_sort": "velocity_then_trial",
     },
 }
 
@@ -312,6 +319,90 @@ def _as_int(value: Any, *, default: int) -> int:
             return int(float(value))
         except Exception:
             return int(default)
+
+
+@dataclass(frozen=True)
+class SubplotLayoutSpec:
+    rows: int
+    cols: int
+    width_px: int
+    height_px: int
+    margin_l: int
+    margin_r: int
+    margin_t: int
+    margin_b: int
+    horizontal_spacing: float
+    vertical_spacing: float
+
+
+def _resolve_subplot_layout(rows: int, cols: int) -> SubplotLayoutSpec:
+    rows_i = max(1, int(rows))
+    cols_i = max(1, int(cols))
+
+    margin_l = max(0, _as_int(RULES.get("subplot_margin_l_px"), default=40))
+    margin_r = max(0, _as_int(RULES.get("subplot_margin_r_px"), default=20))
+    margin_t = max(0, _as_int(RULES.get("subplot_margin_t_px"), default=60))
+    margin_b = max(0, _as_int(RULES.get("subplot_margin_b_px"), default=40))
+
+    # Optional direct override for Plotly spacing values.
+    h_override = RULES.get("subplot_horizontal_spacing")
+    v_override = RULES.get("subplot_vertical_spacing")
+
+    mode = str(RULES.get("subplot_size_mode") or "fixed_cell").strip().lower()
+    if mode != "legacy_figure":
+        cell_w = max(1, _as_int(RULES.get("subplot_cell_width_px"), default=750))
+        cell_h = max(1, _as_int(RULES.get("subplot_cell_height_px"), default=375))
+        gap_h = max(0, _as_int(RULES.get("subplot_gap_h_px"), default=24))
+        gap_v = max(0, _as_int(RULES.get("subplot_gap_v_px"), default=28))
+
+        panel_w = cols_i * cell_w + max(0, cols_i - 1) * gap_h
+        panel_h = rows_i * cell_h + max(0, rows_i - 1) * gap_v
+        width_px = margin_l + margin_r + panel_w
+        height_px = margin_t + margin_b + panel_h
+
+        if cols_i > 1:
+            horizontal_spacing = float(gap_h) / float(panel_w) if panel_w > 0 else 0.0
+        else:
+            horizontal_spacing = 0.0
+        if rows_i > 1:
+            vertical_spacing = float(gap_v) / float(panel_h) if panel_h > 0 else 0.0
+        else:
+            vertical_spacing = 0.0
+    else:
+        width_px = max(1, _as_int(RULES.get("figure_width"), default=1800))
+        height_px = max(1, _as_int(RULES.get("figure_height"), default=900))
+        horizontal_spacing = 0.03
+        vertical_spacing = 0.07
+
+    if h_override is not None:
+        horizontal_spacing = max(0.0, float(h_override))
+    if v_override is not None:
+        vertical_spacing = max(0.0, float(v_override))
+
+    # Plotly requires spacing < 1/(n-1) when n > 1.
+    if cols_i > 1:
+        max_h = max(0.0, (1.0 / float(cols_i - 1)) - 1e-6)
+        horizontal_spacing = min(horizontal_spacing, max_h)
+    else:
+        horizontal_spacing = 0.0
+    if rows_i > 1:
+        max_v = max(0.0, (1.0 / float(rows_i - 1)) - 1e-6)
+        vertical_spacing = min(vertical_spacing, max_v)
+    else:
+        vertical_spacing = 0.0
+
+    return SubplotLayoutSpec(
+        rows=rows_i,
+        cols=cols_i,
+        width_px=int(width_px),
+        height_px=int(height_px),
+        margin_l=int(margin_l),
+        margin_r=int(margin_r),
+        margin_t=int(margin_t),
+        margin_b=int(margin_b),
+        horizontal_spacing=float(horizontal_spacing),
+        vertical_spacing=float(vertical_spacing),
+    )
 
 
 def _write_png_via_kaleido(
@@ -847,7 +938,14 @@ def _emit_emg_figure(
     from plotly.subplots import make_subplots
 
     rows, cols = int(grid_layout[0]), int(grid_layout[1])
-    fig = make_subplots(rows=rows, cols=cols, subplot_titles=list(channels), horizontal_spacing=0.03, vertical_spacing=0.07)
+    layout_spec = _resolve_subplot_layout(rows=rows, cols=cols)
+    fig = make_subplots(
+        rows=rows,
+        cols=cols,
+        subplot_titles=list(channels),
+        horizontal_spacing=layout_spec.horizontal_spacing,
+        vertical_spacing=layout_spec.vertical_spacing,
+    )
 
     raw_event_cols = list((event_cfg or {}).get("columns") or [])
     event_cols: List[str] = []
@@ -1110,9 +1208,14 @@ def _emit_emg_figure(
 
     fig.update_layout(
         title=title,
-        width=int(RULES.get("figure_width", 1800)),
-        height=int(RULES.get("figure_height", 900)),
-        margin=dict(l=40, r=20, t=60, b=40),
+        width=layout_spec.width_px,
+        height=layout_spec.height_px,
+        margin=dict(
+            l=layout_spec.margin_l,
+            r=layout_spec.margin_r,
+            t=layout_spec.margin_t,
+            b=layout_spec.margin_b,
+        ),
         template="plotly_white",
         showlegend=False,
     )
@@ -1179,6 +1282,7 @@ def _emit_emg_trial_grid_single_channel(
     n_trials = len(trials)
     cols = int(max(1, min(int(max_cols), n_trials)))
     rows = int(math.ceil(float(n_trials) / float(cols)))
+    layout_spec = _resolve_subplot_layout(rows=rows, cols=cols)
 
     subplot_titles: List[str] = []
     for t in trials:
@@ -1194,8 +1298,8 @@ def _emit_emg_trial_grid_single_channel(
         rows=rows,
         cols=cols,
         subplot_titles=subplot_titles,
-        horizontal_spacing=0.03,
-        vertical_spacing=0.07,
+        horizontal_spacing=layout_spec.horizontal_spacing,
+        vertical_spacing=layout_spec.vertical_spacing,
     )
 
     raw_event_cols = list((event_cfg or {}).get("columns") or [])
@@ -1215,12 +1319,13 @@ def _emit_emg_trial_grid_single_channel(
     ref_event = str((windows_cfg or {}).get("reference_event") or "platform_onset").strip() or "platform_onset"
 
     # Compute x-axis zeroing (single channel).
-    # - Keep a global mean as fallback (matches the channel-grid implementation).
-    # - For trial-grid, we still zero per-trial to keep subplot scales comparable
-    #   and prevent a single global range from exploding.
+    # - Trial-grid uses per-channel mean and per-trial values.
+    # - If a channel has no valid zeroing-event value in all filtered trials,
+    #   do not fail; keep original x-axis (unzeroed) and mark it in title/log.
     zero_abs_x = 0.0
     zero_ref_event = str(x_axis_zeroing_reference_event or "").strip() or "platform_onset"
     channel_specific_zero = _is_emg_channel_specific_event(zero_ref_event)
+    zeroing_note = ""
     if x_axis_zeroing_enabled:
         zero_values: List[float] = []
         for trial in trials:
@@ -1252,10 +1357,18 @@ def _emit_emg_trial_grid_single_channel(
                 zero_values.append(f)
 
         if not zero_values:
-            raise ValueError(
-                f"[x_axis_zeroing] reference_event '{zero_ref_event}' has no valid values for emg_channel={ch}."
-            )
-        zero_abs_x = float(np.mean(np.asarray(zero_values, dtype=float)))
+            if channel_specific_zero:
+                print(
+                    f"[x_axis_zeroing] Warning: reference_event '{zero_ref_event}' has no valid values "
+                    f"for emg_channel={ch}; zeroing skipped for this channel."
+                )
+                zeroing_note = f" | {zero_ref_event}=N/A for {ch} (zeroing skipped)"
+            else:
+                raise ValueError(
+                    f"[x_axis_zeroing] reference_event '{zero_ref_event}' has no valid values for emg_channel={ch}."
+                )
+        else:
+            zero_abs_x = float(np.mean(np.asarray(zero_values, dtype=float)))
 
     # Stable legend content: use the first trial in the file.
     legend_trial = trials[0]
@@ -1455,10 +1568,15 @@ def _emit_emg_trial_grid_single_channel(
         )
 
     fig.update_layout(
-        title=title,
-        width=int(RULES.get("figure_width", 1800)),
-        height=int(RULES.get("figure_height", 900)),
-        margin=dict(l=40, r=20, t=60, b=40),
+        title=f"{title}{zeroing_note}",
+        width=layout_spec.width_px,
+        height=layout_spec.height_px,
+        margin=dict(
+            l=layout_spec.margin_l,
+            r=layout_spec.margin_r,
+            t=layout_spec.margin_t,
+            b=layout_spec.margin_b,
+        ),
         template="plotly_white",
         showlegend=False,
     )
@@ -1484,16 +1602,8 @@ def _emit_emg_trial_grid_single_channel(
         print(f"Wrote: {out_html}")
     if out_png is not None:
         out_png.parent.mkdir(parents=True, exist_ok=True)
-        trial_grid_cfg = (
-            RULES.get("trial_grid_by_channel")
-            if isinstance(RULES.get("trial_grid_by_channel"), dict)
-            else {}
-        )
-        timeout_raw = trial_grid_cfg.get("png_timeout_s")
-        timeout_s = None if timeout_raw is None else _as_float(timeout_raw, default=0.0)
-        if timeout_s is not None and timeout_s <= 0:
-            timeout_s = None
-        _write_png_via_kaleido(fig, out_png, timeout_s=timeout_s)
+        # hardcoded timeout for dense trial-grid export (kaleido default can timeout)
+        _write_png_via_kaleido(fig, out_png, timeout_s=180.0)
         print(f"Wrote: {out_png}")
 
 
@@ -1721,7 +1831,6 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             out_dir_name = str(trial_grid_cfg.get("output_dir") or "trial_grid_by_channel").strip() or "trial_grid_by_channel"
             file_pattern = str(trial_grid_cfg.get("filename_pattern") or "{mode}_{subject}_{emg_channel}_trial_grid_{signal_group}").strip()
             subplot_title_template = str(trial_grid_cfg.get("subplot_title_template") or "v={velocity} | trial={trial_num}").strip()
-            trial_sort = str(trial_grid_cfg.get("trial_sort") or "velocity_then_trial").strip() or "velocity_then_trial"
 
             stop_now = False
             file_count = 0
@@ -1735,14 +1844,13 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
 
                 # Collect + sort trials for stable grid layout.
                 trials_rows = subset_sub.to_dicts()
-                if trial_sort == "velocity_then_trial":
-                    trials_rows.sort(
-                        key=lambda r: (
-                            _as_float(r.get(velocity_col), default=float("inf")),
-                            _as_int(r.get(trial_col), default=10**9),
-                            str(r.get("step_TF") or ""),
-                        )
+                trials_rows.sort(
+                    key=lambda r: (
+                        _as_float(r.get(velocity_col), default=float("inf")),
+                        _as_int(r.get(trial_col), default=10**9),
+                        str(r.get("step_TF") or ""),
                     )
+                )
                 if max_trials_int is not None:
                     trials_rows = trials_rows[:max_trials_int]
 
@@ -1782,7 +1890,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                         if _is_emg_channel_specific_event(x_axis_zeroing_reference_event):
                             axis_desc = (
                                 f"zeroed by {x_axis_zeroing_reference_event} "
-                                "(channel mean; fallback=global mean)"
+                                "(channel mean)"
                             )
                         else:
                             axis_desc = f"zeroed by {x_axis_zeroing_reference_event} (mean)"
