@@ -1149,6 +1149,8 @@ def _emit_emg_trial_grid_single_channel(
     emg_channel: str,
     trials: Sequence[Dict[str, Any]],
     key_cols: Sequence[str],
+    velocity_col: str,
+    trial_col: str,
     tkeo_by_trial_channel: Dict[Tuple[Any, ...], Dict[str, float]],
     device_rate: float,
     mocap_rate: float,
@@ -1181,9 +1183,9 @@ def _emit_emg_trial_grid_single_channel(
     subplot_titles: List[str] = []
     for t in trials:
         values = {
-            "velocity": t.get("velocity"),
-            "trial_num": t.get("trial_num"),
-            "trial": t.get("trial_num"),
+            "velocity": t.get(velocity_col),
+            "trial_num": t.get(trial_col),
+            "trial": t.get(trial_col),
             "step_TF": t.get("step_TF") or "",
         }
         subplot_titles.append(_format_template(str(subplot_title_template), values, missing=""))
@@ -1777,6 +1779,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                         emg_channel=emg_channel,
                         trials=trials_rows,
                         key_cols=key_cols,
+                        velocity_col=velocity_col,
+                        trial_col=trial_col,
                         tkeo_by_trial_channel=tkeo_by_trial_channel,
                         device_rate=device_rate,
                         mocap_rate=mocap_rate,
