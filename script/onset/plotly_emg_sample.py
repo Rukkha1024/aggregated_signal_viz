@@ -29,6 +29,8 @@ RULES: Dict[str, Any] = {
     "export_png": True,
     "figure_width": 3000,
     "figure_height": 1500,
+    # x-axis tick interval (None -> Plotly auto). e.g. 25 for 25-frame steps.
+    "x_tick_dtick": 25,
     # safety limits
     "max_files_per_mode": None,  # None -> all
     "max_trials_per_file": None,  # e.g. 5 (when groupby groups multiple trials)
@@ -958,7 +960,18 @@ def _emit_emg_figure(
         template="plotly_white",
         showlegend=False,
     )
-    fig.update_xaxes(showgrid=True, gridcolor="rgba(0,0,0,0.08)")
+    xaxes_kwargs: Dict[str, Any] = {"showgrid": True, "gridcolor": "rgba(0,0,0,0.08)"}
+    x_tick_dtick = RULES.get("x_tick_dtick")
+    if x_tick_dtick is not None:
+        try:
+            dtick_value = float(x_tick_dtick)
+        except Exception as exc:
+            raise ValueError("RULES['x_tick_dtick'] must be numeric or None") from exc
+        if dtick_value <= 0:
+            raise ValueError("RULES['x_tick_dtick'] must be > 0 when provided")
+        xaxes_kwargs.update({"tickmode": "linear", "dtick": dtick_value})
+
+    fig.update_xaxes(**xaxes_kwargs)
     fig.update_yaxes(showgrid=True, gridcolor="rgba(0,0,0,0.08)")
 
     if out_html is not None:
