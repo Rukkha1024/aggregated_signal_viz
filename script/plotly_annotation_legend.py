@@ -3,6 +3,11 @@ from __future__ import annotations
 import html as _html
 from typing import Any, Dict, Sequence, Tuple
 
+try:
+    from script.plotly_color import normalize_plotly_color
+except ModuleNotFoundError:  # Allows running as `python script/plotly_annotation_legend.py`
+    from plotly_color import normalize_plotly_color
+
 
 def build_legend_html(
     *,
@@ -25,14 +30,13 @@ def build_legend_html(
         label = str(raw_label or "").strip()
         if not label or label in seen_labels:
             continue
-        color = span.get("color")
-        color_str = str(color).strip() if color is not None else ""
-        if not color_str:
+        color_css = normalize_plotly_color(span.get("color"), default="")
+        if not color_css:
             continue
         seen_labels.add(label)
         # Keep source ASCII-only by using HTML entities.
         lines.append(
-            f"<span style='color:{_html.escape(color_str)}'>&#9608;</span> {_html.escape(label)}"
+            f"<span style='color:{_html.escape(color_css)}'>&#9608;</span> {_html.escape(label)}"
         )
 
     for v in event_vlines or []:
@@ -40,11 +44,10 @@ def build_legend_html(
         label = str(raw_label or "").strip()
         if not label or label in seen_labels:
             continue
-        color = v.get("color")
-        color_str = str(color).strip() if color is not None and str(color).strip() else "#000000"
+        color_css = normalize_plotly_color(v.get("color"), default="#000000")
         seen_labels.add(label)
         lines.append(
-            f"<span style='color:{_html.escape(color_str)}'>&#9474;</span> {_html.escape(label)}"
+            f"<span style='color:{_html.escape(color_css)}'>&#9474;</span> {_html.escape(label)}"
         )
 
     return "<br>".join(lines)
@@ -94,4 +97,3 @@ def add_subplot_legend_annotation(
         bordercolor="rgba(0,0,0,0.2)",
         borderwidth=1,
     )
-
