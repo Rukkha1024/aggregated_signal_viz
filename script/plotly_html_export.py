@@ -8,9 +8,21 @@ import numpy as np
 try:
     from script.plotly_color import normalize_plotly_color
     from script.plotly_annotation_legend import add_subplot_legend_annotation, build_legend_html
+    from script.plotly_legacy_style import (
+        apply_legacy_layout,
+        apply_subplot_title_font,
+        apply_time_axes_style,
+        resolve_subplot_layout,
+    )
 except ModuleNotFoundError:  # Allows running as `python script/plotly_html_export.py`
     from plotly_color import normalize_plotly_color
     from plotly_annotation_legend import add_subplot_legend_annotation, build_legend_html
+    from plotly_legacy_style import (
+        apply_legacy_layout,
+        apply_subplot_title_font,
+        apply_time_axes_style,
+        resolve_subplot_layout,
+    )
 
 
 def _coerce_float(value: Any) -> Optional[float]:
@@ -53,6 +65,22 @@ def _mpl_linestyle_to_plotly_dash(style: Any) -> str:
             return "dashdot"
         return "solid"
     return "solid"
+
+
+def _resolve_forceplate_line_color(channel: str, line_colors: Any) -> str:
+    if not isinstance(line_colors, dict) or not line_colors:
+        return "gray"
+
+    direct = line_colors.get(channel)
+    if direct is not None and str(direct).strip():
+        return str(direct).strip()
+
+    base = channel[:-5] if channel.endswith("_zero") else channel
+    base_color = line_colors.get(base)
+    if base_color is not None and str(base_color).strip():
+        return str(base_color).strip()
+
+    return "gray"
 
 
 def _x_norm_to_frames(
@@ -196,6 +224,7 @@ def _add_windows_and_events(
     event_vlines: Sequence[Dict[str, Any]],
     vline_dash: str,
     vline_width: float,
+    vline_alpha: float,
     time_start_frame: Optional[float],
     time_end_frame: Optional[float],
     time_zero_frame: float,
@@ -224,6 +253,7 @@ def _add_windows_and_events(
             fillcolor=color,
             opacity=float(window_alpha),
             line_width=0,
+            layer="below",
             row=row,
             col=col,
         )
@@ -244,6 +274,8 @@ def _add_windows_and_events(
             line_color=color,
             line_dash=vline_dash,
             line_width=float(vline_width),
+            opacity=float(vline_alpha),
+            layer="above",
             row=row,
             col=col,
         )
@@ -279,13 +311,19 @@ def export_task_html(task: Dict[str, Any], *, output_path: Path) -> Optional[Pat
     show_windows = bool(common_style.get("show_windows", True))
     show_event_vlines = bool(common_style.get("show_event_vlines", True))
     show_legend = bool(common_style.get("show_legend", True))
+    show_grid = bool(common_style.get("show_grid", True))
+    grid_alpha = common_style.get("grid_alpha", 0.5)
 
     event_vline_style = task.get("event_vline_style", {}) if isinstance(task.get("event_vline_style"), dict) else {}
     vline_dash = _mpl_linestyle_to_plotly_dash(event_vline_style.get("linestyle", "--"))
     vline_width = float(_coerce_float(event_vline_style.get("linewidth")) or 1.5)
+    vline_alpha = float(_coerce_float(event_vline_style.get("alpha")) or 0.9)
 
     palette = _plotly_palette()
     key_dashes = ("solid", "dash", "dot", "dashdot")
+    x_tick_dtick = task.get("x_tick_dtick")
+    if _coerce_float(x_tick_dtick) is None:
+        x_tick_dtick = 25
 
     def _base_layout_title() -> str:
         mode_name = str(task.get("mode_name") or "").strip()
@@ -297,6 +335,7 @@ def export_task_html(task: Dict[str, Any], *, output_path: Path) -> Optional[Pat
         grid_layout = list(task.get("grid_layout") or [])
         rows = int(grid_layout[0]) if len(grid_layout) == 2 else 1
         cols = int(grid_layout[1]) if len(grid_layout) == 2 else max(1, len(channels))
+        layout_spec = resolve_subplot_layout(rows=rows, cols=cols)
 
         aggregated = task.get("aggregated") or {}
         x_val = task.get("x")
@@ -325,11 +364,19 @@ def export_task_html(task: Dict[str, Any], *, output_path: Path) -> Optional[Pat
 
         window_alpha = float(_coerce_float(task.get("window_span_alpha")) or 0.15)
 
+        style = task.get("style", {}) if isinstance(task.get("style"), dict) else {}
+        line_width = float(_coerce_float(style.get("line_width")) or 1.2)
+        line_alpha = float(_coerce_float(style.get("line_alpha")) or 0.85)
+        line_colors = style.get("line_colors")
+
         fig = make_subplots(
             rows=rows,
             cols=cols,
             subplot_titles=[str(ch) for ch in channels] + [""] * max(0, rows * cols - len(channels)),
+            horizontal_spacing=layout_spec.horizontal_spacing,
+            vertical_spacing=layout_spec.vertical_spacing,
         )
+        apply_subplot_title_font(fig, size=11)
 
         for idx, ch in enumerate(channels):
             y = aggregated.get(ch)
@@ -358,7 +405,14 @@ def export_task_html(task: Dict[str, Any], *, output_path: Path) -> Optional[Pat
                     mode="lines",
                     name=str(ch),
                     showlegend=False,
-                    line=dict(width=1.2),
+                    opacity=float(line_alpha),
+                    line=dict(
+                        color=normalize_plotly_color(
+                            style.get("line_color", "gray") if kind == "emg" else _resolve_forceplate_line_color(str(ch), line_colors),
+                            default="#7f7f7f",
+                        ),
+                        width=float(line_width),
+                    ),
                 ),
                 row=r,
                 col=c,
@@ -381,6 +435,7 @@ def export_task_html(task: Dict[str, Any], *, output_path: Path) -> Optional[Pat
                 event_vlines=vlines,
                 vline_dash=vline_dash,
                 vline_width=vline_width,
+                vline_alpha=vline_alpha,
                 time_start_frame=time_start_frame,
                 time_end_frame=time_end_frame,
                 time_zero_frame=ch_zero,
@@ -390,11 +445,8 @@ def export_task_html(task: Dict[str, Any], *, output_path: Path) -> Optional[Pat
                 legend_text = build_legend_html(window_spans=spans if show_windows else (), event_vlines=vlines if show_event_vlines else ())
                 add_subplot_legend_annotation(fig, axis_idx=axis_idx, legend_text=legend_text)
 
-        fig.update_layout(
-            title=_base_layout_title(),
-            template="plotly_white",
-            margin=dict(l=30, r=30, t=60, b=30),
-        )
+        apply_legacy_layout(fig, title=_base_layout_title(), layout_spec=layout_spec, showlegend=False)
+        apply_time_axes_style(fig, show_grid=show_grid, grid_alpha=grid_alpha, x_tick_dtick=x_tick_dtick)
         fig.write_html(html_path, include_plotlyjs="cdn")
         return html_path
 
@@ -456,6 +508,7 @@ def export_task_html(task: Dict[str, Any], *, output_path: Path) -> Optional[Pat
                         event_vlines=[],
                         vline_dash=vline_dash,
                         vline_width=vline_width,
+                        vline_alpha=vline_alpha,
                         time_start_frame=time_start_frame,
                         time_end_frame=time_end_frame,
                         time_zero_frame=time_zero_frame,
@@ -471,6 +524,7 @@ def export_task_html(task: Dict[str, Any], *, output_path: Path) -> Optional[Pat
                         event_vlines=event_vlines,
                         vline_dash=vline_dash,
                         vline_width=vline_width,
+                        vline_alpha=vline_alpha,
                         time_start_frame=time_start_frame,
                         time_end_frame=time_end_frame,
                         time_zero_frame=time_zero_frame,
@@ -551,6 +605,7 @@ def export_task_html(task: Dict[str, Any], *, output_path: Path) -> Optional[Pat
                     event_vlines=[],
                     vline_dash=vline_dash,
                     vline_width=vline_width,
+                    vline_alpha=vline_alpha,
                     time_start_frame=time_start_frame,
                     time_end_frame=time_end_frame,
                     time_zero_frame=time_zero_frame,
@@ -566,6 +621,7 @@ def export_task_html(task: Dict[str, Any], *, output_path: Path) -> Optional[Pat
                     event_vlines=event_vlines,
                     vline_dash=vline_dash,
                     vline_width=vline_width,
+                    vline_alpha=vline_alpha,
                     time_start_frame=time_start_frame,
                     time_end_frame=time_end_frame,
                     time_zero_frame=time_zero_frame,
@@ -657,12 +713,23 @@ def export_task_html(task: Dict[str, Any], *, output_path: Path) -> Optional[Pat
             grid_layout = list(task.get("grid_layout") or [])
             rows = int(grid_layout[0]) if len(grid_layout) == 2 else 1
             cols = int(grid_layout[1]) if len(grid_layout) == 2 else max(1, len(channels))
+            layout_spec = resolve_subplot_layout(rows=rows, cols=cols)
+
+            style = task.get("style") if isinstance(task.get("style"), dict) else {}
+            use_group_colors = bool(common_style.get("use_group_colors", False))
+            base_line_width = float(_coerce_float(style.get("line_width")) or 1.2)
+            base_line_alpha = float(_coerce_float(style.get("line_alpha")) or 0.85)
+            line_colors = style.get("line_colors")
+            base_emg_color = normalize_plotly_color(style.get("line_color", "gray"), default="#7f7f7f")
 
             fig = make_subplots(
                 rows=rows,
                 cols=cols,
                 subplot_titles=[str(ch) for ch in channels] + [""] * max(0, rows * cols - len(channels)),
+                horizontal_spacing=layout_spec.horizontal_spacing,
+                vertical_spacing=layout_spec.vertical_spacing,
             )
+            apply_subplot_title_font(fig, size=11)
 
             for ch_idx, ch in enumerate(channels):
                 r = (ch_idx // cols) + 1
@@ -689,6 +756,13 @@ def export_task_html(task: Dict[str, Any], *, output_path: Path) -> Optional[Pat
                     label = _format_overlay_label(tuple(key), group_fields, filtered_group_fields)
                     showlegend = show_legend and bool(label) and (ch_idx == 0)
 
+                    if use_group_colors:
+                        color = palette[key_idx % len(palette)]
+                    elif signal_group == "forceplate":
+                        color = _resolve_forceplate_line_color(str(ch), line_colors)
+                    else:
+                        color = base_emg_color
+
                     fig.add_trace(
                         go.Scatter(
                             x=x,
@@ -696,10 +770,11 @@ def export_task_html(task: Dict[str, Any], *, output_path: Path) -> Optional[Pat
                             mode="lines",
                             name=str(label) if label is not None else "",
                             showlegend=showlegend,
+                            opacity=float(base_line_alpha),
                             line=dict(
-                                color=palette[key_idx % len(palette)],
+                                color=normalize_plotly_color(color, default="#7f7f7f"),
                                 dash=key_dashes[key_idx % len(key_dashes)],
-                                width=1.2,
+                                width=float(base_line_width),
                             ),
                         ),
                         row=r,
@@ -724,6 +799,7 @@ def export_task_html(task: Dict[str, Any], *, output_path: Path) -> Optional[Pat
                     event_vlines=vlines,
                     vline_dash=vline_dash,
                     vline_width=vline_width,
+                    vline_alpha=vline_alpha,
                     time_start_frame=time_start_frame,
                     time_end_frame=time_end_frame,
                     time_zero_frame=ch_zero,
@@ -757,6 +833,8 @@ def export_task_html(task: Dict[str, Any], *, output_path: Path) -> Optional[Pat
                                     line_color=normalize_plotly_color(v.get("color"), default="#d62728"),
                                     line_dash=key_dashes[key_idx % len(key_dashes)],
                                     line_width=float(vline_width),
+                                    opacity=float(vline_alpha),
+                                    layer="above",
                                     row=r,
                                     col=c,
                                 )
@@ -769,11 +847,13 @@ def export_task_html(task: Dict[str, Any], *, output_path: Path) -> Optional[Pat
                     add_subplot_legend_annotation(fig, axis_idx=(r - 1) * cols + c, legend_text=legend_text)
 
             overlay_by = ", ".join(group_fields) if group_fields else "all"
-            fig.update_layout(
+            apply_legacy_layout(
+                fig,
                 title=f"{_base_layout_title()} | overlay by {overlay_by}",
-                template="plotly_white",
-                margin=dict(l=30, r=30, t=60, b=30),
+                layout_spec=layout_spec,
+                showlegend=show_legend,
             )
+            apply_time_axes_style(fig, show_grid=show_grid, grid_alpha=grid_alpha, x_tick_dtick=x_tick_dtick)
             fig.write_html(html_path, include_plotlyjs="cdn")
             return html_path
 
@@ -856,6 +936,7 @@ def export_task_html(task: Dict[str, Any], *, output_path: Path) -> Optional[Pat
                         event_vlines=[],
                         vline_dash=vline_dash,
                         vline_width=vline_width,
+                        vline_alpha=vline_alpha,
                         time_start_frame=time_start_frame,
                         time_end_frame=time_end_frame,
                         time_zero_frame=time_zero_frame,
@@ -870,6 +951,7 @@ def export_task_html(task: Dict[str, Any], *, output_path: Path) -> Optional[Pat
                     event_vlines=pooled_event_vlines,
                     vline_dash=vline_dash,
                     vline_width=vline_width,
+                    vline_alpha=vline_alpha,
                     time_start_frame=time_start_frame,
                     time_end_frame=time_end_frame,
                     time_zero_frame=time_zero_frame,
@@ -883,6 +965,7 @@ def export_task_html(task: Dict[str, Any], *, output_path: Path) -> Optional[Pat
                     event_vlines=pooled_event_vlines,
                     vline_dash=vline_dash,
                     vline_width=vline_width,
+                    vline_alpha=vline_alpha,
                     time_start_frame=time_start_frame,
                     time_end_frame=time_end_frame,
                     time_zero_frame=time_zero_frame,
@@ -913,6 +996,8 @@ def export_task_html(task: Dict[str, Any], *, output_path: Path) -> Optional[Pat
                                     line_color=normalize_plotly_color(v.get("color"), default="#d62728"),
                                     line_dash=dash,
                                     line_width=float(vline_width),
+                                    opacity=float(vline_alpha),
+                                    layer="above",
                                     row=1,
                                     col=col,
                                 )
@@ -1020,6 +1105,7 @@ def export_task_html(task: Dict[str, Any], *, output_path: Path) -> Optional[Pat
                         event_vlines=[],
                         vline_dash=vline_dash,
                         vline_width=vline_width,
+                        vline_alpha=vline_alpha,
                         time_start_frame=time_start_frame,
                         time_end_frame=time_end_frame,
                         time_zero_frame=time_zero_frame,
@@ -1035,6 +1121,7 @@ def export_task_html(task: Dict[str, Any], *, output_path: Path) -> Optional[Pat
                         event_vlines=pooled_event_vlines,
                         vline_dash=vline_dash,
                         vline_width=vline_width,
+                        vline_alpha=vline_alpha,
                         time_start_frame=time_start_frame,
                         time_end_frame=time_end_frame,
                         time_zero_frame=time_zero_frame,
@@ -1065,6 +1152,8 @@ def export_task_html(task: Dict[str, Any], *, output_path: Path) -> Optional[Pat
                                     line_color=normalize_plotly_color(v.get("color"), default="#d62728"),
                                     line_dash=dash,
                                     line_width=float(vline_width),
+                                    opacity=float(vline_alpha),
+                                    layer="above",
                                     row=1,
                                     col=col,
                                 )

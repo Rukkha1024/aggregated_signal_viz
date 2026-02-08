@@ -3700,6 +3700,13 @@ class AggregatedSignalVisualizer:
             raise RuntimeError("[emg_trial_grid_by_channel] invalid time axis span (start==end).")
 
         x_norm = np.asarray(self.x_norm, dtype=float)
+        x_tick_dtick: Optional[float] = None
+        try:
+            x_tick_dtick = float(self.device_rate) * 25.0 / 1000.0  # 25 ms ticks (frames at device_rate)
+        except Exception:
+            x_tick_dtick = None
+        if x_tick_dtick is not None and (not np.isfinite(x_tick_dtick) or x_tick_dtick <= 0):
+            x_tick_dtick = None
 
         def _safe(text: Any) -> str:
             out = str(text)
@@ -3833,6 +3840,12 @@ class AggregatedSignalVisualizer:
                             ],
                             window_span_alpha=float(self.emg_style.get("window_span_alpha", 0.15)),
                             event_vline_style=self.event_vline_style,
+                            line_color=self.emg_style.get("line_color", "gray"),
+                            line_width=float(self.emg_style.get("line_width", 1.2)),
+                            line_alpha=float(self.emg_style.get("line_alpha", 0.85)),
+                            show_grid=bool(self.common_style.get("show_grid", True)),
+                            grid_alpha=self.common_style.get("grid_alpha", 0.5),
+                            x_tick_dtick=x_tick_dtick,
                         )
                     )
 
