@@ -6,6 +6,11 @@ from typing import Any, Dict, Optional, Sequence
 
 import numpy as np
 
+try:
+    from script.plotly_color import normalize_plotly_color
+except ModuleNotFoundError:  # Allows running as `python script/emg_trial_grid_by_channel.py`
+    from plotly_color import normalize_plotly_color
+
 
 def _safe_filename(text: Any) -> str:
     out = str(text)
@@ -112,7 +117,7 @@ def write_emg_trial_grid_html(
             fig.add_vrect(
                 x0=float(x0),
                 x1=float(x1),
-                fillcolor=str(span.get("color") or "#cccccc"),
+                fillcolor=normalize_plotly_color(span.get("color"), default="#cccccc"),
                 opacity=float(window_span_alpha),
                 line_width=0,
                 row=r,
@@ -128,7 +133,7 @@ def write_emg_trial_grid_html(
                 continue
             fig.add_vline(
                 x=float(x_raw),
-                line_color=str(v.get("color") or "#d62728"),
+                line_color=normalize_plotly_color(v.get("color"), default="#d62728"),
                 line_dash=vline_dash,
                 line_width=vline_width,
                 row=r,
@@ -142,4 +147,3 @@ def write_emg_trial_grid_html(
     )
     fig.write_html(html_path, include_plotlyjs="cdn")
     return html_path
-

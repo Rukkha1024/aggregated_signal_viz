@@ -5,6 +5,11 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 
+try:
+    from script.plotly_color import normalize_plotly_color
+except ModuleNotFoundError:  # Allows running as `python script/plotly_html_export.py`
+    from plotly_color import normalize_plotly_color
+
 
 def _coerce_float(value: Any) -> Optional[float]:
     if value is None:
@@ -210,7 +215,7 @@ def _add_windows_and_events(
             time_end_frame=time_end_frame,
             time_zero_frame=time_zero_frame,
         )
-        color = str(span.get("color") or "#cccccc")
+        color = normalize_plotly_color(span.get("color"), default="#cccccc")
         fig.add_vrect(
             x0=x0,
             x1=x1,
@@ -231,7 +236,7 @@ def _add_windows_and_events(
             time_end_frame=time_end_frame,
             time_zero_frame=time_zero_frame,
         )
-        color = str(v.get("color") or "#d62728")
+        color = normalize_plotly_color(v.get("color"), default="#d62728")
         fig.add_vline(
             x=x,
             line_color=color,
@@ -471,7 +476,7 @@ def export_task_html(task: Dict[str, Any], *, output_path: Path) -> Optional[Pat
                             x=ml_vals[mask],
                             y=ap_vals[mask],
                             mode="markers",
-                            marker=dict(color=str(span.get("color") or "#cccccc"), size=4),
+                            marker=dict(color=normalize_plotly_color(span.get("color"), default="#cccccc"), size=4),
                             name=str(span.get("label") or span.get("name") or "window"),
                             showlegend=False,
                         ),
@@ -561,7 +566,7 @@ def export_task_html(task: Dict[str, Any], *, output_path: Path) -> Optional[Pat
                         x=ml_vals[mask],
                         y=ap_vals[mask],
                         mode="markers",
-                        marker=dict(color=str(span.get("color") or "#cccccc"), size=4),
+                        marker=dict(color=normalize_plotly_color(span.get("color"), default="#cccccc"), size=4),
                         name=str(span.get("label") or span.get("name") or "window"),
                         showlegend=False,
                     ),
@@ -726,7 +731,7 @@ def export_task_html(task: Dict[str, Any], *, output_path: Path) -> Optional[Pat
                                 )
                                 fig.add_vline(
                                     x=x_ev,
-                                    line_color=str(v.get("color") or "#d62728"),
+                                    line_color=normalize_plotly_color(v.get("color"), default="#d62728"),
                                     line_dash=key_dashes[key_idx % len(key_dashes)],
                                     line_width=float(vline_width),
                                     row=r,
@@ -795,7 +800,7 @@ def export_task_html(task: Dict[str, Any], *, output_path: Path) -> Optional[Pat
                                 x=ml_vals[mask],
                                 y=ap_vals[mask],
                                 mode="lines",
-                                line=dict(color=str(span.get("color") or "#cccccc"), dash=dash, width=1.2),
+                                line=dict(color=normalize_plotly_color(span.get("color"), default="#cccccc"), dash=dash, width=1.2),
                                 name="",
                                 showlegend=False,
                             ),
@@ -868,7 +873,7 @@ def export_task_html(task: Dict[str, Any], *, output_path: Path) -> Optional[Pat
                             for col in (1, 2):
                                 fig.add_vline(
                                     x=x_ev,
-                                    line_color=str(v.get("color") or "#d62728"),
+                                    line_color=normalize_plotly_color(v.get("color"), default="#d62728"),
                                     line_dash=dash,
                                     line_width=float(vline_width),
                                     row=1,
@@ -952,7 +957,7 @@ def export_task_html(task: Dict[str, Any], *, output_path: Path) -> Optional[Pat
                                 x=ml_vals[mask],
                                 y=ap_vals[mask],
                                 mode="lines",
-                                line=dict(color=str(span.get("color") or "#cccccc"), dash=dash, width=1.2),
+                                line=dict(color=normalize_plotly_color(span.get("color"), default="#cccccc"), dash=dash, width=1.2),
                                 name="",
                                 showlegend=False,
                             ),
@@ -1013,7 +1018,7 @@ def export_task_html(task: Dict[str, Any], *, output_path: Path) -> Optional[Pat
                             for col in range(1, time_panels + 1):
                                 fig.add_vline(
                                     x=x_ev,
-                                    line_color=str(v.get("color") or "#d62728"),
+                                    line_color=normalize_plotly_color(v.get("color"), default="#d62728"),
                                     line_dash=dash,
                                     line_width=float(vline_width),
                                     row=1,
