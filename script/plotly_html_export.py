@@ -7,8 +7,10 @@ import numpy as np
 
 try:
     from script.plotly_color import normalize_plotly_color
+    from script.plotly_annotation_legend import add_subplot_legend_annotation, build_legend_html
 except ModuleNotFoundError:  # Allows running as `python script/plotly_html_export.py`
     from plotly_color import normalize_plotly_color
+    from plotly_annotation_legend import add_subplot_legend_annotation, build_legend_html
 
 
 def _coerce_float(value: Any) -> Optional[float]:
@@ -276,6 +278,7 @@ def export_task_html(task: Dict[str, Any], *, output_path: Path) -> Optional[Pat
     common_style = task.get("common_style", {}) if isinstance(task.get("common_style"), dict) else {}
     show_windows = bool(common_style.get("show_windows", True))
     show_event_vlines = bool(common_style.get("show_event_vlines", True))
+    show_legend = bool(common_style.get("show_legend", True))
 
     event_vline_style = task.get("event_vline_style", {}) if isinstance(task.get("event_vline_style"), dict) else {}
     vline_dash = _mpl_linestyle_to_plotly_dash(event_vline_style.get("linestyle", "--"))
@@ -334,6 +337,7 @@ def export_task_html(task: Dict[str, Any], *, output_path: Path) -> Optional[Pat
                 continue
             r = (idx // cols) + 1
             c = (idx % cols) + 1
+            axis_idx = (r - 1) * cols + c
             ch_zero = time_zero_frame
             if time_zero_frame_by_channel is not None and ch in time_zero_frame_by_channel:
                 try:
@@ -382,6 +386,10 @@ def export_task_html(task: Dict[str, Any], *, output_path: Path) -> Optional[Pat
                 time_zero_frame=ch_zero,
             )
 
+            if show_legend:
+                legend_text = build_legend_html(window_spans=spans if show_windows else (), event_vlines=vlines if show_event_vlines else ())
+                add_subplot_legend_annotation(fig, axis_idx=axis_idx, legend_text=legend_text)
+
         fig.update_layout(
             title=_base_layout_title(),
             template="plotly_white",
@@ -410,6 +418,13 @@ def export_task_html(task: Dict[str, Any], *, output_path: Path) -> Optional[Pat
         aggregated = task.get("aggregated") or {}
         window_spans = task.get("window_spans") or []
         event_vlines = task.get("event_vlines") or []
+
+        legend_text = ""
+        if show_legend:
+            legend_text = build_legend_html(
+                window_spans=window_spans if show_windows else (),
+                event_vlines=event_vlines if show_event_vlines else (),
+            )
 
         if kind == "cop":
             cop_channels = list(task.get("cop_channels") or [])
@@ -483,6 +498,10 @@ def export_task_html(task: Dict[str, Any], *, output_path: Path) -> Optional[Pat
                         row=1,
                         col=3,
                     )
+
+            # Use an annotation legend (legacy pattern) for window/event labels.
+            if legend_text:
+                add_subplot_legend_annotation(fig, axis_idx=1, legend_text=legend_text)
 
             fig.update_layout(
                 title=_base_layout_title(),
@@ -574,6 +593,10 @@ def export_task_html(task: Dict[str, Any], *, output_path: Path) -> Optional[Pat
                     col=time_panels + 1,
                 )
 
+        # Use an annotation legend (legacy pattern) for window/event labels.
+        if legend_text:
+            add_subplot_legend_annotation(fig, axis_idx=1, legend_text=legend_text)
+
         fig.update_layout(
             title=_base_layout_title(),
             template="plotly_white",
@@ -664,7 +687,7 @@ def export_task_html(task: Dict[str, Any], *, output_path: Path) -> Optional[Pat
                     if series is None:
                         continue
                     label = _format_overlay_label(tuple(key), group_fields, filtered_group_fields)
-                    showlegend = bool(label) and (ch_idx == 0)
+                    showlegend = show_legend and bool(label) and (ch_idx == 0)
 
                     fig.add_trace(
                         go.Scatter(
@@ -738,6 +761,13 @@ def export_task_html(task: Dict[str, Any], *, output_path: Path) -> Optional[Pat
                                     col=c,
                                 )
 
+                if show_legend:
+                    legend_text = build_legend_html(
+                        window_spans=spans if show_windows else (),
+                        event_vlines=vlines if show_event_vlines else (),
+                    )
+                    add_subplot_legend_annotation(fig, axis_idx=(r - 1) * cols + c, legend_text=legend_text)
+
             overlay_by = ", ".join(group_fields) if group_fields else "all"
             fig.update_layout(
                 title=f"{_base_layout_title()} | overlay by {overlay_by}",
@@ -771,7 +801,7 @@ def export_task_html(task: Dict[str, Any], *, output_path: Path) -> Optional[Pat
                 ml_vals = -np.asarray(cy, dtype=float) if y_invert else np.asarray(cy, dtype=float)
                 ap_vals = np.asarray(cx, dtype=float)
                 label = _format_overlay_label(tuple(key), group_fields, filtered_group_fields)
-                showlegend = bool(label)
+                showlegend = show_legend and bool(label)
                 dash = key_dashes[key_idx % len(key_dashes)]
                 color = palette[key_idx % len(palette)]
                 fig.add_trace(
@@ -807,6 +837,13 @@ def export_task_html(task: Dict[str, Any], *, output_path: Path) -> Optional[Pat
                             row=1,
                             col=3,
                         )
+
+            if show_legend:
+                legend_text = build_legend_html(
+                    window_spans=window_spans if show_windows else (),
+                    event_vlines=pooled_event_vlines if show_event_vlines else (),
+                )
+                add_subplot_legend_annotation(fig, axis_idx=1, legend_text=legend_text)
 
             if show_windows:
                 for col in (1, 2):
@@ -923,7 +960,7 @@ def export_task_html(task: Dict[str, Any], *, output_path: Path) -> Optional[Pat
                 dash = key_dashes[key_idx % len(key_dashes)]
                 color = palette[key_idx % len(palette)]
                 label = _format_overlay_label(tuple(key), group_fields, filtered_group_fields)
-                showlegend = bool(label)
+                showlegend = show_legend and bool(label)
                 fig.add_trace(
                     go.Scatter(x=x_frames, y=ap_vals, mode="lines", name=str(label) if label else "", showlegend=showlegend, line=dict(color=color, dash=dash)),
                     row=1,
@@ -964,6 +1001,13 @@ def export_task_html(task: Dict[str, Any], *, output_path: Path) -> Optional[Pat
                             row=1,
                             col=time_panels + 1,
                         )
+
+            if show_legend:
+                legend_text = build_legend_html(
+                    window_spans=window_spans if show_windows else (),
+                    event_vlines=pooled_event_vlines if show_event_vlines else (),
+                )
+                add_subplot_legend_annotation(fig, axis_idx=1, legend_text=legend_text)
 
             if show_windows:
                 for col in range(1, time_panels + 1):

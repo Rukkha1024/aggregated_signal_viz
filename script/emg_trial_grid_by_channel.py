@@ -8,8 +8,10 @@ import numpy as np
 
 try:
     from script.plotly_color import normalize_plotly_color
+    from script.plotly_annotation_legend import add_subplot_legend_annotation, build_legend_html
 except ModuleNotFoundError:  # Allows running as `python script/emg_trial_grid_by_channel.py`
     from plotly_color import normalize_plotly_color
+    from plotly_annotation_legend import add_subplot_legend_annotation, build_legend_html
 
 
 def _safe_filename(text: Any) -> str:
@@ -94,9 +96,11 @@ def write_emg_trial_grid_html(
         titles = titles + [""] * (n - len(titles))
 
     fig = make_subplots(rows=rows, cols=cols, subplot_titles=titles)
+    legend_text = build_legend_html(window_spans=window_spans or (), event_vlines=event_vlines or ())
     for i, y in enumerate(series_by_trial):
         r = (i // cols) + 1
         c = (i % cols) + 1
+        axis_idx = i + 1
         fig.add_trace(
             go.Scatter(
                 x=x,
@@ -139,6 +143,9 @@ def write_emg_trial_grid_html(
                 row=r,
                 col=c,
             )
+
+        if legend_text:
+            add_subplot_legend_annotation(fig, axis_idx=axis_idx, legend_text=legend_text)
 
     fig.update_layout(
         title=_safe_filename(title),
