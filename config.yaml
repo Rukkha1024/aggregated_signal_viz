@@ -19,6 +19,12 @@ data:
 # === Output Settings ===
 output:
   base_dir: "output"
+  # When true, write Plotly HTML alongside each generated PNG (same filename stem).
+  # This is a functional output toggle (not a visualization styling config).
+  plotly_html: false
+  # When true, additionally write EMG "trial grid by channel" Plotly HTML outputs.
+  # Strict policy: enabled modes must be trial-level (groupby includes subject/velocity/trial) or the run aborts.
+  emg_trial_grid_by_channel: false
 
 # === Signal Groups ===
 signal_groups:

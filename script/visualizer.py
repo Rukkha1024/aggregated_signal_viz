@@ -1529,6 +1529,20 @@ def _savefig_and_close(fig: Any, output_path: Path, common_style: Dict[str, Any]
     plt.close(fig)
 
 
+def _maybe_export_plotly_html(task: Dict[str, Any], output_path: Path) -> None:
+    if not bool(task.get("plotly_html", False)):
+        return
+
+    try:
+        from script.plotly_html_export import export_task_html
+    except ModuleNotFoundError:  # Allows running as `python script/visualizer.py`
+        from plotly_html_export import export_task_html
+
+    html_path = export_task_html(task, output_path=output_path)
+    if html_path is not None:
+        print(f"Wrote: {html_path}")
+
+
 def _plot_task(task: Dict[str, Any]) -> None:
     import matplotlib.pyplot as plt
 
@@ -1572,6 +1586,7 @@ def _plot_task(task: Dict[str, Any]) -> None:
             filtered_group_fields=task["filtered_group_fields"],
             color_by_fields=task.get("color_by_fields"),
         )
+        _maybe_export_plotly_html(task, output_path)
         return
 
     if kind == "emg":
@@ -1601,6 +1616,7 @@ def _plot_task(task: Dict[str, Any]) -> None:
             time_zero_frame=float(task.get("time_zero_frame", 0.0)),
             time_zero_frame_by_channel=task.get("time_zero_frame_by_channel"),
         )
+        _maybe_export_plotly_html(task, output_path)
         return
 
     if kind == "forceplate":
@@ -1627,6 +1643,7 @@ def _plot_task(task: Dict[str, Any]) -> None:
             time_end_frame=task.get("time_end_frame"),
             time_zero_frame=float(task.get("time_zero_frame", 0.0)),
         )
+        _maybe_export_plotly_html(task, output_path)
         return
 
     if kind == "cop":
@@ -1654,6 +1671,7 @@ def _plot_task(task: Dict[str, Any]) -> None:
             common_style=common_style,
             window_spans=task["window_spans"],
         )
+        _maybe_export_plotly_html(task, output_path)
         return
 
     if kind == "com":
@@ -1680,6 +1698,7 @@ def _plot_task(task: Dict[str, Any]) -> None:
             common_style=common_style,
             window_spans=task["window_spans"],
         )
+        _maybe_export_plotly_html(task, output_path)
         return
 
     plt.close("all")
@@ -3345,6 +3364,12 @@ class AggregatedSignalVisualizer:
         self.frame_ratio = get_frame_ratio(self.config["data"])
         self._input_columns: Optional[set[str]] = None
 
+        output_cfg = self.config.get("output", {})
+        if not isinstance(output_cfg, dict):
+            output_cfg = {}
+        self.plotly_html_enabled = _coerce_bool(output_cfg.get("plotly_html"), False)
+        self.emg_trial_grid_by_channel_enabled = _coerce_bool(output_cfg.get("emg_trial_grid_by_channel"), False)
+
         event_vlines_cfg = self.config.get("event_vlines")
         self.event_vline_columns = _parse_event_vlines_config(event_vlines_cfg)  # tick 라벨 우선순위는 이 순서를 따름
         self.event_vline_meta_cols = [_event_ms_col(col) for col in self.event_vline_columns]
@@ -3461,6 +3486,9 @@ class AggregatedSignalVisualizer:
                 continue
             enabled_modes.append((mode_name, mode_cfg))
 
+        if self.emg_trial_grid_by_channel_enabled:
+            self._validate_emg_trial_grid_by_channel_modes(enabled_modes)
+
         lf = self._load_and_align_lazy()
         if sample:
             lf = self._filter_first_group(lf)
@@ -3477,11 +3505,21 @@ class AggregatedSignalVisualizer:
         group_names = self._signal_group_names(selected_groups)
         for group_name in group_names:
             resampled = self._resample_signal_group(lf, group_name, meta_cols_needed)
+            if group_name == "emg" and self.emg_trial_grid_by_channel_enabled:
+                generated_outputs.extend(
+                    self._emit_emg_trial_grid_by_channel(
+                        resampled=resampled,
+                        enabled_modes=enabled_modes,
+                        sample=sample,
+                    )
+                )
             tasks: List[Dict[str, Any]] = []
             for mode_name, mode_cfg in enabled_modes:
                 tasks.extend(self._build_plot_tasks(resampled, group_name, mode_name, mode_cfg))
             self._run_plot_tasks(tasks)
             generated_outputs.extend(self._collect_existing_outputs(tasks))
+            if self.plotly_html_enabled:
+                generated_outputs.extend(self._collect_existing_plotly_html_outputs(tasks))
         self._log_generated_outputs(generated_outputs)
 
     def _run_plot_tasks(self, tasks: List[Dict[str, Any]]) -> None:
@@ -3513,6 +3551,25 @@ class AggregatedSignalVisualizer:
 
     def _collect_existing_outputs(self, tasks: List[Dict[str, Any]]) -> List[Path]:
         return [path for path in self._collect_task_output_paths(tasks) if path.exists()]
+
+    @staticmethod
+    def _plotly_html_path_for_output_path(output_path: Path) -> Path:
+        if output_path.suffix:
+            return output_path.with_suffix(".html")
+        return output_path.parent / f"{output_path.name}.html"
+
+    def _collect_existing_plotly_html_outputs(self, tasks: List[Dict[str, Any]]) -> List[Path]:
+        html_paths: List[Path] = []
+        for task in tasks:
+            if not bool(task.get("plotly_html", False)):
+                continue
+            output_path = task.get("output_path")
+            if not output_path:
+                continue
+            html_path = self._plotly_html_path_for_output_path(Path(output_path))
+            if html_path.exists():
+                html_paths.append(html_path)
+        return html_paths
 
     def _log_generated_outputs(self, output_paths: Iterable[Path]) -> None:
         seen: set[str] = set()
@@ -3558,6 +3615,231 @@ class AggregatedSignalVisualizer:
         if selected_groups is None:
             return names
         return [n for n in names if n in selected_groups]
+
+    def _validate_emg_trial_grid_by_channel_modes(
+        self,
+        enabled_modes: Sequence[Tuple[str, Dict[str, Any]]],
+    ) -> None:
+        """
+        Strict policy (requested):
+        - If `output.emg_trial_grid_by_channel` is enabled, the run must abort unless
+          every selected mode is "trial-level" (groupby includes subject/velocity/trial).
+        """
+        subject_col = str(self.id_cfg.get("subject") or "subject")
+        velocity_col = str(self.id_cfg.get("velocity") or "velocity")
+        trial_col = str(self.id_cfg.get("trial") or "trial_num")
+        required = [subject_col, velocity_col, trial_col]
+
+        for mode_name, mode_cfg in enabled_modes:
+            groupby = mode_cfg.get("groupby") or []
+            if not isinstance(groupby, list):
+                raise TypeError(f"[emg_trial_grid_by_channel] aggregation_modes.{mode_name}.groupby must be a list.")
+            missing = [col for col in required if col not in groupby]
+            if missing:
+                missing_str = ", ".join(missing)
+                required_str = ", ".join(required)
+                raise ValueError(
+                    "[emg_trial_grid_by_channel] enabled but mode is not trial-level: "
+                    f"aggregation_modes.{mode_name}.groupby missing [{missing_str}]. "
+                    f"Required groupby includes [{required_str}]."
+                )
+
+    def _emit_emg_trial_grid_by_channel(
+        self,
+        *,
+        resampled: _ResampledGroup,
+        enabled_modes: Sequence[Tuple[str, Dict[str, Any]]],
+        sample: bool,
+    ) -> List[Path]:
+        """
+        Emit Plotly HTML trial-grid outputs for EMG (one file per subject x emg_channel).
+        """
+        if self.x_norm is None:
+            raise RuntimeError("x_norm is not initialized.")
+
+        try:
+            from script.emg_trial_grid_by_channel import write_emg_trial_grid_html
+        except ModuleNotFoundError:  # Allows running as `python script/visualizer.py`
+            from emg_trial_grid_by_channel import write_emg_trial_grid_html
+
+        subject_col = str(self.id_cfg.get("subject") or "subject")
+        velocity_col = str(self.id_cfg.get("velocity") or "velocity")
+        trial_col = str(self.id_cfg.get("trial") or "trial_num")
+
+        if subject_col not in resampled.meta_df.columns:
+            raise ValueError(f"[emg_trial_grid_by_channel] missing metadata column: {subject_col!r}")
+        if velocity_col not in resampled.meta_df.columns:
+            raise ValueError(f"[emg_trial_grid_by_channel] missing metadata column: {velocity_col!r}")
+        if trial_col not in resampled.meta_df.columns:
+            raise ValueError(f"[emg_trial_grid_by_channel] missing metadata column: {trial_col!r}")
+
+        emg_cfg = (self.config.get("signal_groups") or {}).get("emg") if isinstance(self.config, dict) else None
+        grid_layout = (emg_cfg or {}).get("grid_layout") if isinstance(emg_cfg, dict) else None
+        max_cols = 4
+        if isinstance(grid_layout, (list, tuple)) and len(grid_layout) == 2:
+            try:
+                max_cols = max(1, int(grid_layout[1]))
+            except (TypeError, ValueError):
+                max_cols = 4
+
+        # Stable channel index mapping (resampled tensor axis order).
+        channel_to_idx = {str(ch): i for i, ch in enumerate(resampled.channels)}
+        if not channel_to_idx:
+            return []
+
+        out_paths: List[Path] = []
+        meta_df = resampled.meta_df
+        tensor = resampled.tensor
+
+        if self.time_start_frame is None or self.time_end_frame is None:
+            raise RuntimeError("[emg_trial_grid_by_channel] time_start_frame/time_end_frame must be initialized.")
+        start_frame = float(self.time_start_frame)
+        end_frame = float(self.time_end_frame)
+        span = end_frame - start_frame
+        if span == 0:
+            raise RuntimeError("[emg_trial_grid_by_channel] invalid time axis span (start==end).")
+
+        x_norm = np.asarray(self.x_norm, dtype=float)
+
+        def _safe(text: Any) -> str:
+            out = str(text)
+            for ch in ("/", "\\", ":", "\n", "\r", "\t"):
+                out = out.replace(ch, "_")
+            return out.strip() or "untitled"
+
+        for mode_name, mode_cfg in enabled_modes:
+            mode_filter = mode_cfg.get("filter") if isinstance(mode_cfg.get("filter"), dict) else None
+            filtered_idx = self._apply_filter_indices(meta_df, mode_filter)
+            if filtered_idx.size == 0:
+                continue
+
+            output_dir = resolve_output_dir(self.base_dir, self.config, mode_cfg["output_dir"])
+            out_dir = output_dir / "trial_grid_by_channel"
+            out_dir.mkdir(parents=True, exist_ok=True)
+
+            # Unique subjects for this mode after filtering.
+            subject_vals = meta_df[subject_col].to_numpy()
+            unique_subjects: List[Any] = []
+            for v in subject_vals[filtered_idx].tolist():
+                if v not in unique_subjects:
+                    unique_subjects.append(v)
+
+            if sample and unique_subjects:
+                unique_subjects = unique_subjects[:1]
+
+            for subject in unique_subjects:
+                subj_idx = filtered_idx[subject_vals[filtered_idx] == subject]
+                if subj_idx.size == 0:
+                    continue
+
+                # Sort trials within this subject for deterministic grid layout.
+                sub = (
+                    meta_df.with_row_index("__row_idx")
+                    .filter(pl.col(subject_col) == subject)
+                    .filter(pl.col("__row_idx").is_in([int(i) for i in subj_idx.tolist()]))
+                    .with_columns(
+                        [
+                            pl.col(velocity_col).cast(pl.Float64, strict=False).fill_null(float("inf")).alias("__v"),
+                            pl.col(trial_col).cast(pl.Int64, strict=False).fill_null(10**9).alias("__t"),
+                        ]
+                    )
+                )
+                sort_cols: List[str] = ["__v", "__t"]
+                if "step_TF" in sub.columns:
+                    sort_cols.append("step_TF")
+                sort_cols.append("__row_idx")
+                sub = sub.sort(sort_cols)
+
+                ordered_rows = sub.select(["__row_idx", velocity_col, trial_col] + (["step_TF"] if "step_TF" in sub.columns else [])).to_dicts()
+                ordered_trial_indices = [int(r["__row_idx"]) for r in ordered_rows]
+                if sample and ordered_trial_indices:
+                    ordered_rows = ordered_rows[:1]
+                    ordered_trial_indices = ordered_trial_indices[:1]
+
+                # Use the subject-specific trial set to compute windows/vlines/zeroing.
+                window_spans = self._compute_window_spans(meta_df, subj_idx)
+                window_spans_by_channel = self._compute_window_spans_by_channel(meta_df, subj_idx)
+                event_vlines = self._collect_event_vlines(meta_df, subj_idx)
+                event_vlines_by_channel = self._collect_emg_event_vlines_by_channel(meta_df, subj_idx)
+                time_zero_frame = self._resolve_time_zero_frame(
+                    meta_df=meta_df,
+                    indices=subj_idx,
+                    mode_name=mode_name,
+                    signal_group="emg",
+                    key_label=f"subject={subject}",
+                )
+                time_zero_frame_by_channel = self._resolve_time_zero_frame_by_channel(
+                    meta_df=meta_df,
+                    indices=subj_idx,
+                    mode_name=mode_name,
+                    signal_group="emg",
+                    key_label=f"subject={subject}",
+                )
+
+                for emg_channel in resampled.channels:
+                    ch_name = str(emg_channel)
+                    if ch_name not in channel_to_idx:
+                        continue
+                    ch_idx = int(channel_to_idx[ch_name])
+
+                    ch_zero = float(time_zero_frame_by_channel.get(ch_name, time_zero_frame)) if time_zero_frame_by_channel else float(time_zero_frame)
+                    x_frames = start_frame + x_norm * span - ch_zero
+
+                    series_by_trial = [tensor[i, ch_idx, :] for i in ordered_trial_indices]
+                    subplot_titles: List[str] = []
+                    for row in ordered_rows:
+                        vel = row.get(velocity_col)
+                        tr = row.get(trial_col)
+                        step_tf = row.get("step_TF") if "step_TF" in row else None
+                        parts = [f"v={vel}", f"trial={tr}"]
+                        if step_tf is not None and str(step_tf).strip():
+                            parts.append(str(step_tf))
+                        subplot_titles.append(" | ".join(parts))
+
+                    spans = window_spans_by_channel.get(ch_name, window_spans) if window_spans_by_channel else window_spans
+                    vlines = event_vlines_by_channel.get(ch_name, event_vlines) if event_vlines_by_channel else event_vlines
+
+                    html_name = _safe(f"{mode_name}_{subject}_{ch_name}_trial_grid_emg.html")
+                    html_path = out_dir / html_name
+                    title = f"{mode_name} | emg:{ch_name} | trial-grid | subject={subject}"
+
+                    out_paths.append(
+                        write_emg_trial_grid_html(
+                            html_path=html_path,
+                            title=title,
+                            x=x_frames,
+                            series_by_trial=series_by_trial,
+                            subplot_titles=subplot_titles,
+                            max_cols=max_cols,
+                            window_spans=[
+                                {
+                                    "start": float(start_frame + float(s["start"]) * span - ch_zero),
+                                    "end": float(start_frame + float(s["end"]) * span - ch_zero),
+                                    "color": s.get("color"),
+                                    "label": s.get("label"),
+                                }
+                                for s in spans or []
+                                if s.get("start") is not None and s.get("end") is not None
+                            ],
+                            event_vlines=[
+                                {
+                                    "x": float(start_frame + float(v["x"]) * span - ch_zero),
+                                    "color": v.get("color"),
+                                    "label": v.get("label"),
+                                    "name": v.get("name"),
+                                }
+                                for v in vlines or []
+                                if v.get("x") is not None
+                            ],
+                            window_span_alpha=float(self.emg_style.get("window_span_alpha", 0.15)),
+                            event_vline_style=self.event_vline_style,
+                        )
+                    )
+
+                    if sample:
+                        return out_paths[:1]
+
+        return out_paths
 
     def _collect_needed_meta_columns(self, enabled_modes: List[Tuple[str, Dict[str, Any]]]) -> List[str]:
         needed: List[str] = []
@@ -4612,6 +4894,7 @@ class AggregatedSignalVisualizer:
             "kind": "overlay",
             "signal_group": signal_group,
             "output_path": str(output_path),
+            "plotly_html": bool(self.plotly_html_enabled),
             "mode_name": mode_name,
             "group_fields": group_fields,
             "sorted_keys": sorted_keys,
@@ -4703,6 +4986,7 @@ class AggregatedSignalVisualizer:
         task: Dict[str, Any] = {
             "kind": "emg",
             "output_path": str(output_path),
+            "plotly_html": bool(self.plotly_html_enabled),
             "key": key,
             "mode_name": mode_name,
             "group_fields": group_fields,
@@ -4745,6 +5029,7 @@ class AggregatedSignalVisualizer:
         return {
             "kind": "forceplate",
             "output_path": str(output_path),
+            "plotly_html": bool(self.plotly_html_enabled),
             "key": key,
             "mode_name": mode_name,
             "group_fields": group_fields,
@@ -4783,6 +5068,7 @@ class AggregatedSignalVisualizer:
         return {
             "kind": "cop",
             "output_path": str(output_path),
+            "plotly_html": bool(self.plotly_html_enabled),
             "key": key,
             "mode_name": mode_name,
             "group_fields": group_fields,
@@ -4822,6 +5108,7 @@ class AggregatedSignalVisualizer:
         return {
             "kind": "com",
             "output_path": str(output_path),
+            "plotly_html": bool(self.plotly_html_enabled),
             "key": key,
             "mode_name": mode_name,
             "group_fields": group_fields,

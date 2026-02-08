@@ -1,16 +1,16 @@
-"""Plotly EMG onset sample visualizer.
+"""Legacy Plotly EMG visualizer (DEPRECATED).
 
-CLI modes:
-1. Default mode (no flags)
-   - Runs with current RULES/config behavior and writes all configured outputs.
-2. `--sample` mode
-   - Writes exactly one output pair (`.html` + `.png`) for quick validation.
-   - Saves into a `sample` subfolder under the mode output directory.
-   - Intended for fast AI/code-change verification to avoid full-batch runtime.
+This file pre-dates the config-driven `python main.py` pipeline integration.
+Plotly HTML export and EMG trial-grid outputs are now controlled via `config.yaml`:
 
-Examples:
-- `conda run -n module python script/onset/plotly_emg_sample.py`
-- `conda run -n module python script/onset/plotly_emg_sample.py --sample`
+- `output.plotly_html: true`
+  - Writes a Plotly `.html` alongside each generated `.png` (same filename stem).
+- `output.emg_trial_grid_by_channel: true`
+  - Writes EMG "trial grid by channel" Plotly HTML outputs.
+  - Strict policy: selected `aggregation_modes` must be trial-level
+    (`groupby` includes subject/velocity/trial) or the run aborts.
+
+This script is kept for reference/debugging only.
 """
 
 from __future__ import annotations
