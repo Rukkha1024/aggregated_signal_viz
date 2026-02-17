@@ -83,7 +83,6 @@ from ..plotting.matplotlib.common import (
     _ms_to_norm,
     _nanmean_3d_over_first_axis,
     _nanmean_ignore_nan,
-    _overlay_vline_event_names,
     _parse_event_labels,
     _parse_event_vlines_config,
     _parse_event_vlines_style,
