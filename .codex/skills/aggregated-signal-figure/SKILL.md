@@ -38,6 +38,11 @@ description: >-
   - Create a grid and hide unused axes (same off-policy).
   - Include subplot legend for each panel when labels exist.
 
+## X-axis normalization policy
+
+- The x-axis must always be normalized to **0–100 %** of the minimum analysis unit (window/segment duration).
+- Raw frame or time values must never appear on the x-axis; always display percent-normalized ticks (0, 20, 40, 60, 80, 100).
+
 ## Output policy
 
 - Save under `Path(config["output"]["base_dir"]) / <plot_type> / <filename>.png`.
@@ -78,3 +83,18 @@ description: >-
 
 - Summary plot example: `assets/examples/example_onset_summary.png`
 - Channel-grid example: `assets/examples/example_emg_channel_grid.png`
+
+## Piecewise x-axis normalization
+- The plot x-axis is split into three segments, each independently normalized: [onset − pad, onset], [onset, offset], [offset, offset + pad].
+- Output data is never modified; only the display x-axis is warped for visualization.
+- This aligns onset and offset across subjects/trials even when perturbation durations differ.
+
+## Context: Subject × Variable Category Grid
+
+- Generate one grid-subplot figure per subject × variable category combination
+  (e.g. MOS/BOS, COM family, joint angles lower/upper, ankle torque, GRF/COP).
+- Each category declares its own nrows×ncols layout and subplot mapping
+  (data column → grid position) in a `CATEGORIES` dict; the script iterates
+  over all subjects and emits one PNG per subject-category pair.
+- Reference implementation: `scripts/plot_grid_timeseries.py` — `CATEGORIES`
+  list and `plot_subject_category()` function.
