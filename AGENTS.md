@@ -33,7 +33,6 @@ The primary goal is to centralize shared values across multiple scripts. This en
 
 ### **Exclusion Rule:**
 - **Visualization Settings:** Do not include settings related to the visual appearance of plots (e.g., colors, fonts, line styles). These should be managed within the visualization code itself.
-- **Analysis Notebook Exception:** Under `analysis/`, `.ipynb` files are explicitly allowed to import each other directly for exploratory/statistical workflows.
 
 ---
 

@@ -1,14 +1,8 @@
-## 수정 계획
+src 폴더 내 코드를 refactoring 한다. 
+category 별로 폴더를 나누고, 각 폴더 내에서 관련된 코드들을 모아둔다.
 
-`plotly_emg_sample.py`를 수정하여 `interpolation.start_ms` / `end_ms`가 null일 때 데이터의 실제 범위를 자동 계산하도록 변경하겠습니다.
-
-### 변경 내용:
-
-1. **null 체크 로직 추가** (line 680-683 부근)
-   - `start_ms`가 null이면 → 데이터에서 onset 대비 최소 시간을 계산
-   - `end_ms`가 null이면 → 데이터에서 onset 대비 최대 시간을 계산
-
-2. **구현 방식**:
-   - `interp_cfg.get("start_ms")`가 `None`인지 체크
-   - `None`이면 LazyFrame에서 `(original_DeviceFrame - onset_device)`의 min/max를 계산하여 ms로 변환
-   - 그렇지 않으면 config 값 사용
+유저가 생각하는 현재 있는 category는 다음과 같다. 혹시 빠뜨린게 있는지 확인해보고, 추가로 필요한 category가 있다면 알려주세요.
+- line graph 
+- scatter plot(e.g., cop X,Y) 
+- error bar(for vis_onset.py)
+- plotly 
