@@ -1,0 +1,312 @@
+# NOTE: Verification-only config for refactors.
+# This file mirrors `config.yaml` except:
+#   - output.base_dir is set to "output_refactor_verify" to avoid overwriting reference outputs.
+#
+# === Data Settings ===
+data:
+  input_file: "data/merged.parquet"
+  features_file: "/mnt/c/Users/Alice/OneDrive - 청주대학교/근전도 분석 코드/EMG_analysis/output/meta_merged.csv"
+  id_columns:
+    subject: "subject"
+    velocity: "velocity"
+    trial: "trial_num"
+    frame: "DeviceFrame"
+    mocap_frame: "MocapFrame"
+    onset: "platform_onset"
+    offset: "platform_offset"
+    task: "task"
+  task_filter: "perturb"
+  # Sampling rates (MocapFrame → DeviceFrame)
+  device_sample_rate: 1000
+  mocap_sample_rate: 100
+
+# === Output Settings ===
+output:
+  base_dir: "output_refactor_verify"
+  # When true, write Plotly HTML alongside each generated PNG (same filename stem).
+  # This is a functional output toggle (not a visualization styling config).
+  plotly_html: false
+  # When true, additionally write EMG "trial grid by channel" Plotly HTML outputs.
+  # Strict policy: enabled modes must be trial-level (groupby includes subject/velocity/trial) or the run aborts.
+  emg_trial_grid_by_channel: false
+
+# === Signal Groups ===
+signal_groups:
+  emg:
+    columns: [TA, EHL, MG, SOL, PL, RF, VL, ST, RA, EO, IO, SCM, GM, ESC, EST, ESL]
+    grid_layout: [4, 4]
+  forceplate:
+    columns: [Fx_zero, Fy_zero, Fz_zero, Mx_zero, My_zero, Mz_zero]
+    grid_layout: [2, 3]
+  cop:
+    columns: [Cx_zero, Cy_zero]
+    grid_layout: [1, 3]
+  com:
+    columns: [COMx_zero, COMy_zero, COMz_zero]
+    grid_layout: [1, 4]
+    time_base: mocap
+    optional: true
+
+# === Interpolation ===
+interpolation:
+  target_length: 500  # resampling length (number of time points)
+  start_ms: -100  # null이면 데이터 시작부분부터. default: -100
+  end_ms: 500    # null이면 데이터 끝부분까지. default: 800
+
+# === Aggregation Modes ===
+# Filter 옵션 설명:
+#   - 딕셔너리 형식: filter: { mixed: 1, age_group: "young" }
+#   - 단일 컬럼: filter: { mixed: 1 }
+#   - 다중 컬럼: 모든 조건을 AND로 결합
+aggregation_modes:
+  # nonstep_age_group_mean:
+  #   enabled: true
+  #   filter:
+  #     mixed: 1
+  #     step_TF: "nonstep"
+  #   groupby: ["age_group"]
+  #   color_by: ["age_group"]
+  #   overlay: true
+  #   overlay_within: ["age_group"]
+  #   output_dir: "age_group"
+  #   filename_pattern: "nonstep_●노인 vs. ▲성인_{signal_group}.png"
+  # step_age_group_mean:
+  #   enabled: true
+  #   filter:
+  #     mixed: 1
+  #     step_TF: "step"
+  #   groupby: ["age_group"]
+  #   color_by: ["age_group"]
+  #   overlay: true
+  #   overlay_within: ["age_group"]
+  #   output_dir: "age_group"
+  #   filename_pattern: "step_●노인 vs. ▲성인_{signal_group}.png"
+  # diff_step_TF_subject_mean:
+  #   enabled: true
+  #   filter:
+  #     mixed: 1
+  #     age_group: "young"
+  #   groupby: ["step_TF","subject"]
+  #   color_by: ["step_TF"]
+  #   overlay: true
+  #   overlay_within: ["step_TF"]
+  #   output_dir: "step_TF_subject_mean"
+  #   filename_pattern: "step_TF_{subject}_mean_{signal_group}.png"
+  diff_step_TF_subject:
+    enabled: true
+    filter:
+      mixed: 1
+      age_group: "young"
+    groupby: ["step_TF", "subject", "velocity", "trial_num"]
+    color_by: ["step_TF"]
+    overlay: true
+    overlay_within: ["step_TF"]
+    output_dir: "step_TF_subject"
+    filename_pattern: "step_TF_{subject}_v{velocity}_{trial_num}_{signal_group}.png"
+
+# === Window Definitions (ms) ===
+# 참고:
+# - `windows.reference_event`는 *숫자형* 윈도우 경계(start_ms/end_ms)의 기준(0점)을 정의합니다.
+#   - `data.id_columns.onset`(platform_onset)과 같으면, 숫자값은 platform_onset 기준 ms입니다.
+#   - 그 외의 이벤트이면, 숫자값은 `reference_event` 기준 ms 오프셋으로 해석됩니다(해당 이벤트의 평균 timing만큼 shift 적용).
+# - `windows.definitions.*.start_ms/end_ms`는 아래 형식을 모두 지원합니다.
+#   - 숫자: 오프셋 ms(위 규칙 적용)
+#   - 문자열: 이벤트 컬럼명(platform_onset 기준 ms timing)
+#   - 문자열(표현식): "<event> +/- <ms>" (예: "TKEO_AGLR_emg_onset_timing + 30")
+# - 이벤트 컬럼은 아래 두 곳에서 올 수 있습니다.
+#   1) `data.input_file`: `data.id_columns.onset`과 동일한 도메인(mocap frame)으로 해석 후 ms로 변환
+#   2) `data.features_file`만 존재: platform_onset 기준 ms로 해석
+windows:
+  reference_event: "platform_onset"
+  definitions:
+    p1:
+      start_ms: "TKEO_AGLR_emg_onset_timing"
+      end_ms: "TKEO_AGLR_emg_onset_timing + 125"
+    p2:
+      start_ms: "TKEO_AGLR_emg_onset_timing + 125"
+      end_ms: "step_onset"
+    p3:
+      start_ms: "step_onset"
+      end_ms: "600"
+
+# === X-axis Zeroing ===
+# 기준값은 각 플롯(또는 파일)에 포함된 trial들의 `reference_event` 평균 시점입니다.
+x_axis_zeroing:
+  enabled: true
+  reference_event: "TKEO_AGLR_emg_onset_timing"
+
+# === 플롯 스타일 ===
+plot_style:
+  # 공통 설정 (모든 신호 타입에 적용)
+  common:
+    # === 표시여부 ===
+    show_suptitle: true                # figure-level suptitle 표시 여부
+    show_subplot_titles: true          # 각 subplot title(채널명 등) 표시 여부
+    show_grid: true                    # grid 표시 여부
+    show_legend: true                  # legend 표시 여부
+    show_xlabel: true                  # x축 라벨 표시 여부
+    show_ylabel: true                  # y축 라벨 표시 여부
+    show_xtick_labels: true            # x축 tick label 표시 여부
+    show_ytick_labels: true            # y축 tick label 표시 여부
+    show_event_vlines: true            # event_vlines 표시 여부(및 event 기반 xtick 보강)
+    show_windows: true                 # windows span 표시 여부(및 windows legend)
+    show_max_marker: false             # 최댓값 마커 표시 여부
+    
+    # === 시각 스타일 ===
+    dpi: 300
+    grid_alpha: 0.3                    # 격자선 투명도 (0=완전투명, 1=완전불투명)
+    tick_labelsize: 7                  # 축 눈금 폰트 크기 (포인트)
+    title_fontsize: 14                 # 제목 폰트 크기
+    title_fontweight: "bold"           # 제목 굵기 ("bold", "normal")
+    title_pad: 5                       # 제목과 그래프 사이 간격 (포인트)
+    label_fontsize: 8                  # 축 라벨 폰트 크기
+    legend_loc: "best"                 # legend 위치 ("best", "upper left", "lower right" 등)
+    legend_framealpha: 0.8             # legend 배경 투명도
+    legend_label_threshold: 6          # groupby column의 unique 값이 이 값 이상이면 legend에서 제외
+    tight_layout_rect: [0, 0, 1, 0.99] # 레이아웃 여백 [left, bottom, right, top]
+    savefig_bbox_inches: "tight"       # 저장 시 테두리 처리 ("tight"로 여백 최소화)
+    savefig_facecolor: "white"         # 배경색 ("white", "gray" 등)
+    font_family: "NanumGothic"         # 폰트 ("NanumGothic", "Arial" 등)
+    # show_* options: controls visibility of plot elements (not visual styling).
+    # Defaults are defined to preserve current behavior when running `conda run -n module python main.py`.
+    use_group_colors: false            # 그룹별 색상 사용 여부 (true=색상, false=라인스타일만)
+    window_colors:                     # 각 윈도우 기간별 색상 (p1~p4)
+      p1: "#4E79A7"                    # 0-200ms (파란색)
+      p2: "#F28E2B"                    # 200-400ms (주황색)
+      p3: "#E15759"                    # 400-600ms (빨간색)
+      p4: "#59A14F"                    # 600-800ms (초록색)
+    # group_linestyles 사용법:
+    # - 기본 값: "-", "--", ":", "-."
+    # - 커스텀 dash: [offset, [on, off, on, off, ...]] 형태
+    group_linestyles: ["-", "--", ":", "-.", [0, [1, 1]], [0, [3, 1, 1, 1]]]
+
+  # EMG 신호 전용 설정
+  emg:
+    subplot_size: [18, 9]              # 그리드 크기 (가로, 세로) 인치. 예: [18,9]는 18"x9" 캔버스
+    line_color: "gray"                 # 라인 색상 (RGB 색상명 또는 16진수 "#0000FF")
+    line_width: 1.2                    # 라인 두께 (포인트)
+    line_alpha: 0.8                    # 라인 투명도 (0=투명, 1=불투명)
+    window_span_alpha: 0.15            # 윈도우 배경 투명도 (p1,p2,p3,p4 구간 표시용)
+    max_marker_color: "orange"         # 최댓값 마커 색상
+    max_marker_linestyle: "--"         # 최댓값 마커 스타일
+    max_marker_linewidth: 1.5          # 최댓값 마커 두께
+    legend_fontsize: 4                 # legend 폰트 크기 (채널이 많아서 작게 설정)
+    x_label: "Aligned frame (onset=0)" # X축 라벨 (platform_onset 기준 frame)
+    y_label: "{channel}"               # Y축 라벨 ({channel}은 동적 치환: TA, RF 등)
+
+  # Forceplate 신호 전용 설정
+  # Note: Default colors are gray for all signals. Line differentiation uses linestyles.
+  # To restore original colors, set specific colors in line_colors for each channel.
+  forceplate:
+    subplot_size: [15, 10]             # 그리드 크기 (가로, 세로) 인치
+    line_colors:                       # 각 채널별 라인 색상 매핑
+      Fx: "gray"                       # 전후방향 힘 (회색)
+      Fy: "gray"                       # 좌우방향 힘 (회색)
+      Fz: "gray"                       # 수직 힘 (회색)
+    axis_labels:
+      Fx: "AP Force (Ant: + / Post: -)"
+      Fy: "ML Force (Left: + / Right: -)"
+      Fz: "Vertical Force (Down: + / Up: -)"
+      Mx: "Mx (Ant Down: + / Post Down: -)"
+      My: "My (Left Up: + / Right Up: -)"
+      Mz: "Mz (CW: + / CCW: -)"
+    line_width: 2                    # 라인 두께
+    line_alpha: 0.8                    # 라인 투명도
+    window_span_alpha: 0.15            # 윈도우 배경 투명도
+    legend_fontsize: 5                 # legend 폰트 크기 (채널 수가 적어서 크게)
+    x_label: "Aligned frame (onset=0)" # X축 라벨 (platform_onset 기준 frame)
+    y_label: "{axis_label}"            # Y축 라벨 (축 방향 설명)
+
+  # COP (Center of Pressure) 신호 전용 설정
+  cop:
+    subplot_size: [18, 5]              # 그리드 크기 (가로, 세로) 인치 (1×3 mixed plot)
+    scatter_size: 8                    # 산점도 점 크기 (마커 크기)
+    scatter_alpha: 0.7                 # 산점도 점 투명도 (궤적 시각화용)
+    background_color: "lightgray"      # 배경 색상
+    background_alpha: 0.3              # 배경 투명도
+    background_size: 6                 # 배경 점 크기
+    window_span_alpha: 0.15            # 시계열 플롯의 윈도우 배경 투명도
+    line_colors:
+      Cx: "gray"
+      Cy: "gray"
+    line_width: 2
+    line_alpha: 0.8
+    max_marker_color: "#ED1C24"        # 최댓값 마커 색상 (빨강)
+    max_marker_size: 80                # 최댓값 마커 크기 (통상 점보다 큼)
+    max_marker_symbol: "*"             # 최댓값 마커 모양 ("*"=별, "o"=원, "s"=사각형)
+    max_marker_edgecolor: "white"      # 최댓값 마커 테두리 색상
+    max_marker_linewidth: 1            # 최댓값 마커 테두리 두께
+    max_marker_zorder: 10              # 최댓값 마커 겹침순서 (값 클수록 위에)
+    legend_fontsize: 5                 # legend 폰트 크기
+    x_label_time: "Aligned frame (onset=0)"
+    y_label_cx: "COP AP (Ant: + / Post: -)"
+    y_label_cy: "COP ML (Left: + / Right: -)"
+    x_label: "COP ML (Left: + / Right: -)"
+    y_label: "COP AP (Ant: + / Post: -)"
+    y_invert: false                    # Y축 반전 여부 (true면 위쪽이 음수)
+
+  # COM (Center of Mass) 신호 전용 설정
+  com:
+    y_label_comx: "COM AP (Ant: + / Post: -)"
+    y_label_comy: "COM ML (Left: + / Right: -)"
+    y_label_comz: "COMz"
+    x_label: "COM ML (Left: + / Right: -)"
+    y_label: "COM AP (Ant: + / Post: -)"
+
+# === Event Vertical Lines (data-driven annotations) ===
+# 참고:
+# - 입력 parquet에 해당 컬럼이 있으면, 값은 `data.id_columns.onset`(platform_onset; mocap frame)과 동일 도메인으로 해석 후 ms로 변환됩니다.
+# - 입력 parquet에 없고 `data.features_file`에만 있으면, 값은 platform_onset 기준 ms로 해석됩니다.
+# - 시각 스타일은 `event_vlines.style`(matplotlib `axvline` kwargs)로 제어합니다.
+# - 기본적으로 각 컬럼은 팔레트에서 서로 다른 색을 할당받습니다.
+# - 특정 컬럼 색을 고정하려면 `event_vlines.colors`에 지정하세요.
+event_vlines:
+  columns: ["platform_onset", "step_onset", "TKEO_AGLR_emg_onset_timing", "platform_offset"] # "platform_onset", "step_onset", "TKEO_AGLR_emg_onset_timing"
+  # Optional: legend display names (short labels)
+  event_labels:
+    TKEO_AGLR_emg_onset_timing: "onset"
+  # Optional:
+  # colors:
+  #   platform_onset: "black"
+  # Optional (default: matplotlib C0..C9):
+  # palette: ["C0", "C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9"]
+  style:
+    linestyle: "--"
+    linewidth: 1.5
+    alpha: 0.9
+  # Overlay plots can draw one vline per overlay group (e.g., step vs nonstep) for selected events.
+  overlay_group:
+    enabled: true    # 얘를 false해야 legend에 "TKEO_AGLR_emg_onset_timing"과 같은게 안 나옴 
+    mode: "linestyle"                 # currently supported: "linestyle" (keep colors identical)
+    columns: ["TKEO_AGLR_emg_onset_timing"]  # only these events are drawn per overlay group
+    linestyles: ["-", "--", ":", "-."]       # applied per overlay group (cycling)
+
+# === CoP Crossing-based EMG Analysis ===
+# NOTE: This analysis computes CoP(step vs nonstep) crossings from merged.parquet directly
+# and defines EMG windows based on those crossings (no precomputed feature reuse).
+cop_crossing_emg_analysis:
+  enabled: true
+  filter:
+    mixed: 1
+    age_group: "young"
+  cop_columns: ["Cx_zero", "Cy_zero"]
+  # If null, fallback to interpolation.start_ms / interpolation.end_ms
+  time_window_ms:
+    start_ms: null
+    end_ms: null
+  crossing:
+    # Moving-average smoothing (ms) applied to CoP diff curve for stable crossing detection.
+    smoothing_ms: 11
+    diff_epsilon: 0.0
+    min_segment_ms: 10
+    primary_crossing_policy: "first_after_onset"
+  crossing_window_ms: 50
+  # EMG may lag behind CoP changes. We scan a common lag (ms) applied to EMG windows:
+  # phase time t uses EMG at (t + lag).
+  emg_lag_scan_ms:
+    start_ms: 0
+    end_ms: 150
+    step_ms: 10
+  metrics: ["mean", "iemg", "peak"]
+  output_subdir: "cop_crossing_emg"
+  report_path: "report/cop_crossing_emg_report.md"

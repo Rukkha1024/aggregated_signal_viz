@@ -457,7 +457,7 @@ cop_crossing_emg_analysis:
 ## 13) 참고 구현(코드 위치)
 
 - 파이프라인 엔트리: `main.py`
-- 핵심 구현(aggregation/overlay/windows/vlines): `script/visualizer.py`
-- Plotly HTML export: `script/plotly_html_export.py`
-- EMG trial-grid Plotly export: `script/emg_trial_grid_by_channel.py`
-- 레거시 Plotly 참고(디자인/규칙): `script/onset/plotly_emg_sample.py`
+- 핵심 구현(aggregation/overlay/windows/vlines): `src/visualizer.py`
+- Plotly HTML export: `src/plotly_html_export.py`
+- EMG trial-grid Plotly export: `src/emg_trial_grid_by_channel.py`
+- 레거시 Plotly 참고(디자인/규칙): `scripts/onset/plotly_emg_sample.py`

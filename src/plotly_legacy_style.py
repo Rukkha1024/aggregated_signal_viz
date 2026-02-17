@@ -40,7 +40,7 @@ def resolve_subplot_layout(
     """
     Legacy-safe Plotly subplot sizing.
 
-    This mirrors the sizing logic used in `script/onset/plotly_emg_sample.py` so
+    This mirrors the sizing logic used in `scripts/onset/plotly_emg_sample.py` so
     that Plotly HTML outputs in the main pipeline match the legacy plot design.
     """
     rows_i = max(1, int(rows))
@@ -187,4 +187,3 @@ def apply_time_axes_style(
         fig.update_yaxes(showgrid=True, gridcolor=grid_color, automargin=True)
     except Exception:
         return
-

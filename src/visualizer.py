@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import argparse
 import concurrent.futures
 import os
 import re
@@ -11,24 +10,14 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 import numpy as np
 import polars as pl
 
-try:
-    from script.config_utils import (
-        bom_rename_map,
-        get_frame_ratio,
-        load_config,
-        resolve_output_dir,
-        resolve_path,
-        strip_bom_columns,
-    )
-except ModuleNotFoundError:  # Allows running as `python script/visualizer.py`
-    from config_utils import (
-        bom_rename_map,
-        get_frame_ratio,
-        load_config,
-        resolve_output_dir,
-        resolve_path,
-        strip_bom_columns,
-    )
+from .config_utils import (
+    bom_rename_map,
+    get_frame_ratio,
+    load_config,
+    resolve_output_dir,
+    resolve_path,
+    strip_bom_columns,
+)
 
 
 def ensure_output_dirs(base_path: Path, config: Dict[str, Any]) -> None:
@@ -1533,10 +1522,7 @@ def _maybe_export_plotly_html(task: Dict[str, Any], output_path: Path) -> None:
     if not bool(task.get("plotly_html", False)):
         return
 
-    try:
-        from script.plotly_html_export import export_task_html
-    except ModuleNotFoundError:  # Allows running as `python script/visualizer.py`
-        from plotly_html_export import export_task_html
+    from .plotly_html_export import export_task_html
 
     html_path = export_task_html(task, output_path=output_path)
     if html_path is not None:
@@ -3657,10 +3643,7 @@ class AggregatedSignalVisualizer:
         if self.x_norm is None:
             raise RuntimeError("x_norm is not initialized.")
 
-        try:
-            from script.emg_trial_grid_by_channel import write_emg_trial_grid_html
-        except ModuleNotFoundError:  # Allows running as `python script/visualizer.py`
-            from emg_trial_grid_by_channel import write_emg_trial_grid_html
+        from .emg_trial_grid_by_channel import write_emg_trial_grid_html
 
         subject_col = str(self.id_cfg.get("subject") or "subject")
         velocity_col = str(self.id_cfg.get("velocity") or "velocity")
@@ -5625,36 +5608,3 @@ class AggregatedSignalVisualizer:
         if exclude_cols:
             joined = joined.drop(exclude_cols)
         return joined
-
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Aggregated signal visualization")
-    default_config = Path(__file__).resolve().parent.parent / "config.yaml"
-    parser.add_argument("--config", type=str, default=str(default_config), help="Path to YAML config.")
-    parser.add_argument("--sample", action="store_true", help="Run on a single sample (first subject-velocity-trial group).")
-    parser.add_argument(
-        "--modes",
-        type=str,
-        nargs="*",
-        default=None,
-        help="Aggregation modes to run (default: all enabled).",
-    )
-    parser.add_argument(
-        "--groups",
-        type=str,
-        nargs="*",
-        default=None,
-        help="Signal groups to run (default: all).",
-    )
-    return parser.parse_args()
-
-
-def main() -> None:
-    args = parse_args()
-    visualizer = AggregatedSignalVisualizer(Path(args.config))
-    ensure_output_dirs(visualizer.base_dir, visualizer.config)
-    visualizer.run(modes=args.modes, signal_groups=args.groups, sample=args.sample)
-
-
-if __name__ == "__main__":
-    main()

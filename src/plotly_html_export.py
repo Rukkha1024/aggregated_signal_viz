@@ -5,24 +5,14 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 
-try:
-    from script.plotly_color import normalize_plotly_color
-    from script.plotly_annotation_legend import add_subplot_legend_annotation, build_legend_html
-    from script.plotly_legacy_style import (
-        apply_legacy_layout,
-        apply_subplot_title_font,
-        apply_time_axes_style,
-        resolve_subplot_layout,
-    )
-except ModuleNotFoundError:  # Allows running as `python script/plotly_html_export.py`
-    from plotly_color import normalize_plotly_color
-    from plotly_annotation_legend import add_subplot_legend_annotation, build_legend_html
-    from plotly_legacy_style import (
-        apply_legacy_layout,
-        apply_subplot_title_font,
-        apply_time_axes_style,
-        resolve_subplot_layout,
-    )
+from .plotly_annotation_legend import add_subplot_legend_annotation, build_legend_html
+from .plotly_color import normalize_plotly_color
+from .plotly_legacy_style import (
+    apply_legacy_layout,
+    apply_subplot_title_font,
+    apply_time_axes_style,
+    resolve_subplot_layout,
+)
 
 
 def _coerce_float(value: Any) -> Optional[float]:

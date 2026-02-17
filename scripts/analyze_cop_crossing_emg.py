@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,14 +13,13 @@ import numpy as np
 import polars as pl
 from scipy import stats
 
-try:
-    from script.config_utils import load_config as _load_config
-    from script.config_utils import resolve_path as _resolve_path
-    from script.config_utils import get_frame_ratio as _get_frame_ratio
-except ModuleNotFoundError:  # Allows running as `python script/analyze_cop_crossing_emg.py`
-    from config_utils import load_config as _load_config
-    from config_utils import resolve_path as _resolve_path
-    from config_utils import get_frame_ratio as _get_frame_ratio
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from src.config_utils import get_frame_ratio as _get_frame_ratio  # noqa: E402
+from src.config_utils import load_config as _load_config  # noqa: E402
+from src.config_utils import resolve_path as _resolve_path  # noqa: E402
 
 
 def _bh_fdr(pvals: np.ndarray) -> np.ndarray:

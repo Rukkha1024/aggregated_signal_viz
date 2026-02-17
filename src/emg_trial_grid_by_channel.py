@@ -6,24 +6,14 @@ from typing import Any, Dict, Optional, Sequence
 
 import numpy as np
 
-try:
-    from script.plotly_color import normalize_plotly_color
-    from script.plotly_annotation_legend import add_subplot_legend_annotation, build_legend_html
-    from script.plotly_legacy_style import (
-        apply_legacy_layout,
-        apply_subplot_title_font,
-        apply_time_axes_style,
-        resolve_subplot_layout,
-    )
-except ModuleNotFoundError:  # Allows running as `python script/emg_trial_grid_by_channel.py`
-    from plotly_color import normalize_plotly_color
-    from plotly_annotation_legend import add_subplot_legend_annotation, build_legend_html
-    from plotly_legacy_style import (
-        apply_legacy_layout,
-        apply_subplot_title_font,
-        apply_time_axes_style,
-        resolve_subplot_layout,
-    )
+from .plotly_annotation_legend import add_subplot_legend_annotation, build_legend_html
+from .plotly_color import normalize_plotly_color
+from .plotly_legacy_style import (
+    apply_legacy_layout,
+    apply_subplot_title_font,
+    apply_time_axes_style,
+    resolve_subplot_layout,
+)
 
 
 def _safe_filename(text: Any) -> str:

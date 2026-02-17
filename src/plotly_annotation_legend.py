@@ -3,10 +3,7 @@ from __future__ import annotations
 import html as _html
 from typing import Any, Dict, Sequence, Tuple
 
-try:
-    from script.plotly_color import normalize_plotly_color
-except ModuleNotFoundError:  # Allows running as `python script/plotly_annotation_legend.py`
-    from plotly_color import normalize_plotly_color
+from .plotly_color import normalize_plotly_color
 
 
 def build_legend_html(

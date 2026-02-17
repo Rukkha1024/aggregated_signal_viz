@@ -13,7 +13,7 @@ def main() -> None:
     import matplotlib.pyplot as plt
 
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from script.visualizer import (
+    from src.visualizer import (
         _apply_frame_tick_labels,
         _apply_window_definition_xticks,
         _ensure_time_zero_xtick,

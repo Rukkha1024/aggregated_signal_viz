@@ -112,7 +112,7 @@ def _import_repo_utils() -> Tuple[Any, Any, Any]:
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
 
-    from script.config_utils import get_frame_ratio, load_config, resolve_path
+    from src.config_utils import get_frame_ratio, load_config, resolve_path
 
     return load_config, resolve_path, get_frame_ratio
 
