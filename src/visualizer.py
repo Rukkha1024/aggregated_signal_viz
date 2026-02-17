@@ -4046,7 +4046,12 @@ class AggregatedSignalVisualizer:
             agg_exprs.append(pl.col(col).first().alias(col))
             agg_exprs.append(pl.col(col).n_unique().alias(f"__nuniq_{col}"))
 
-        grouped = lf_sel.group_by(group_cols, maintain_order=False).agg(agg_exprs)
+        # NOTE: Polars `group_by(..., maintain_order=False)` does not guarantee row order.
+        # The resulting group order can vary across process runs (hash-map iteration order),
+        # which can change downstream floating-point reduction order and make plots (notably COM)
+        # non-deterministic at the PNG-byte level.
+        # Sort by the trial key to ensure stable tensor row ordering and reproducible outputs.
+        grouped = lf_sel.group_by(group_cols, maintain_order=False).agg(agg_exprs).sort(group_cols)
         df = grouped.collect()
         if df.is_empty():
             raise ValueError("No data available after applying task or input filters.")
