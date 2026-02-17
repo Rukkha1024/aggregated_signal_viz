@@ -139,4 +139,3 @@ def normalize_plotly_color(value: Any, *, default: str = "#000000") -> str:
 
     # Fall back to whatever Plotly/CSS can interpret (e.g., "red", "black").
     return text
-

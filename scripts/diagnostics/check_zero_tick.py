@@ -5,6 +5,13 @@ from pathlib import Path
 
 import numpy as np
 
+_HERE = Path(__file__).resolve()
+_SCRIPTS_DIR = next(p for p in (_HERE.parent, *_HERE.parents) if p.name == "scripts")
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+
+from _repo import ensure_repo_on_path
+
 
 def main() -> None:
     import matplotlib
@@ -12,8 +19,8 @@ def main() -> None:
     matplotlib.use("Agg", force=True)
     import matplotlib.pyplot as plt
 
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from src.visualizer import (
+    ensure_repo_on_path()
+    from src.plotting.matplotlib.common import (
         _apply_frame_tick_labels,
         _apply_window_definition_xticks,
         _ensure_time_zero_xtick,

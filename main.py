@@ -1,4 +1,4 @@
-from scripts.run_visualizer import main
+from scripts.pipeline.run_visualizer import main
 
 
 if __name__ == "__main__":

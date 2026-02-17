@@ -3,7 +3,7 @@ from __future__ import annotations
 import html as _html
 from typing import Any, Dict, Sequence, Tuple
 
-from .plotly_color import normalize_plotly_color
+from .color import normalize_plotly_color
 
 
 def build_legend_html(

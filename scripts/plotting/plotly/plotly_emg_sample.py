@@ -16,6 +16,7 @@ This script is kept for reference/debugging only.
 from __future__ import annotations
 
 import argparse
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from string import Formatter
@@ -23,6 +24,13 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import polars as pl
+
+_HERE = Path(__file__).resolve()
+_SCRIPTS_DIR = next(p for p in (_HERE.parent, *_HERE.parents) if p.name == "scripts")
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+
+from _repo import ensure_repo_on_path
 
 # ============================================================
 # RULES (edit here; no CLI options)
@@ -96,23 +104,10 @@ RULES: Dict[str, Any] = {
 
 _EMG_CHANNEL_SPECIFIC_EVENTS = {"TKEO_AGLR_emg_onset_timing"}
 
-
-def _repo_root() -> Path:
-    here = Path(__file__).resolve()
-    for candidate in (here.parent, *here.parents):
-        if (candidate / "config.yaml").exists():
-            return candidate
-    return here.parents[2]
-
-
 def _import_repo_utils() -> Tuple[Any, Any, Any]:
-    import sys
+    ensure_repo_on_path()
 
-    root = _repo_root()
-    if str(root) not in sys.path:
-        sys.path.insert(0, str(root))
-
-    from src.config_utils import get_frame_ratio, load_config, resolve_path
+    from src.core.config import get_frame_ratio, load_config, resolve_path
 
     return load_config, resolve_path, get_frame_ratio
 

@@ -6,9 +6,9 @@ from typing import Any, Dict, Optional, Sequence
 
 import numpy as np
 
-from .plotly_annotation_legend import add_subplot_legend_annotation, build_legend_html
-from .plotly_color import normalize_plotly_color
-from .plotly_legacy_style import (
+from .annotation_legend import add_subplot_legend_annotation, build_legend_html
+from .color import normalize_plotly_color
+from .legacy_style import (
     apply_legacy_layout,
     apply_subplot_title_font,
     apply_time_axes_style,

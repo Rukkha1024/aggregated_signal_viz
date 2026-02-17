@@ -15,11 +15,17 @@ from matplotlib.ticker import MultipleLocator
 import numpy as np
 import polars as pl
 
-repo_root = Path(__file__).resolve().parents[2]
-if str(repo_root) not in sys.path:
-    sys.path.insert(0, str(repo_root))
+_HERE = Path(__file__).resolve()
+_SCRIPTS_DIR = next(p for p in (_HERE.parent, *_HERE.parents) if p.name == "scripts")
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
 
-from src.config_utils import load_config, resolve_path, strip_bom_columns  # noqa: E402
+from _repo import ensure_repo_on_path
+
+repo_root = ensure_repo_on_path()
+
+from src.core.config import load_config, resolve_path, strip_bom_columns  # noqa: E402
+from src.plotting.matplotlib.errorbar_onset import plot_onset_timing_errorbar  # noqa: E402
 
 # =============================================================================
 # 1. VISUALIZATION CONFIGURATION (CONSTANTS)
@@ -529,231 +535,19 @@ def plot_onset_timing(
     sort_by_mean: Optional[str] = None,
     filters: Optional[Dict[str, Any]] = None,
 ):
-    """Generate horizontal error-bar plot and save to output.
-    
-    Parameters
-    ----------
-    sort_by_mean : Optional[str]
-        Sort muscles by mean value: None (config order), "ascending", or "descending"
-    """
-    import matplotlib.pyplot as plt
-
-    plt.rcParams["font.family"] = VIZ_CFG.font_family
-    plt.rcParams["axes.unicode_minus"] = False
-    
-    # Build title from active filters
-    filter_title_parts = []
-    for col_name, col_value in (filters or {}).items():
-        filter_title_parts.append(f"{col_name}={col_value}")
-    filter_title = ", ".join(filter_title_parts) if filter_title_parts else "All Data"
-    
-    if facet_col and facet_col in stats_df.columns:
-        facets = sorted(stats_df[facet_col].unique().to_list())
-    else:
-        facets = [filter_title]
-        stats_df = stats_df.with_columns(pl.lit(filter_title).alias("_facet_dummy"))
-        facet_col = "_facet_dummy"
-
-    if hue_col and hue_col in stats_df.columns:
-        hues = sorted(stats_df[hue_col].unique().to_list())
-    else:
-        hues = ["_single_hue"]
-    
-    n_facets = len(facets)
-    n_hues = len(hues)
-
-    grid_rows, grid_cols = resolve_summary_grid_layout(
-        n_panels=n_facets,
+    # Keep VizConfig / visualization constants in the script; delegate rendering to `src/`.
+    plot_onset_timing_errorbar(
+        stats_df=stats_df,
+        muscle_order=muscle_order,
+        facet_col=facet_col,
+        hue_col=hue_col,
+        output_dir=output_dir,
+        output_filename=output_filename,
+        viz_cfg=VIZ_CFG,
+        max_cols=int(ONSET_SUMMARY_MAX_COLS),
+        sort_by_mean=sort_by_mean,
+        filters=filters,
     )
-    
-    fig, axes = plt.subplots(
-        grid_rows,
-        grid_cols,
-        figsize=(
-            VIZ_CFG.figure_size[0] * (grid_cols / 2 + 0.5),
-            VIZ_CFG.figure_size[1] * grid_rows,
-        ),
-        dpi=VIZ_CFG.dpi, 
-        sharey=True,
-        squeeze=False
-    )
-    axes_flat = axes.flatten()
-
-    group_height = VIZ_CFG.bar_width / n_hues
-    
-    existing_muscles = set(stats_df[VIZ_CFG.muscle_column_in_feature].unique().to_list())
-    valid_muscles = [m for m in muscle_order if m in existing_muscles]
-
-    for ax, facet_val in zip(axes_flat, facets):
-        facet_data = stats_df.filter(pl.col(facet_col) == facet_val)
-        
-        # Sort muscles by mean value if requested (per facet)
-        if sort_by_mean in ["ascending", "descending"]:
-            # Compute mean across all hues for this facet
-            facet_means = (
-                facet_data
-                .group_by(VIZ_CFG.muscle_column_in_feature)
-                .agg(pl.col("mean").mean().alias("avg_mean"))
-            )
-            muscle_mean_dict = dict(zip(
-                facet_means[VIZ_CFG.muscle_column_in_feature].to_list(),
-                facet_means["avg_mean"].to_list()
-            ))
-            
-            # Sort valid_muscles by mean value
-            sorted_muscles = sorted(
-                valid_muscles,
-                key=lambda m: muscle_mean_dict.get(m, float('inf')),
-                reverse=(sort_by_mean == "descending")
-            )
-            valid_muscles_reversed = sorted_muscles[::-1]
-        else:
-            # Use original order from config
-            valid_muscles_reversed = valid_muscles[::-1]
-        
-        y_indices = np.arange(len(valid_muscles_reversed))
-        muscle_to_y = {m: i for i, m in enumerate(valid_muscles_reversed)}
-        
-        for hue_idx, hue_val in enumerate(hues):
-            if hue_col:
-                subset = facet_data.filter(pl.col(hue_col) == hue_val)
-                label = f"{hue_col}: {hue_val}"
-            else:
-                subset = facet_data
-                label = None
-                
-            if subset.is_empty():
-                continue
-                
-            muscles = subset[VIZ_CFG.muscle_column_in_feature].to_list()
-            means = subset["mean"].to_numpy()
-            stds = subset["std"].to_numpy()
-            counts = subset["count"].to_numpy()  # valid count
-            total_counts = subset["total_count"].to_numpy()  # total count
-            
-            offset = -1 * (hue_idx - (n_hues - 1) / 2) * group_height
-
-            ys = [muscle_to_y[m] + offset for m in muscles]
-            color = VIZ_CFG.colors[hue_idx % len(VIZ_CFG.colors)]
-            
-            # Auto-assign marker from palette (same logic as colors)
-            marker = VIZ_CFG.marker_palette[hue_idx % len(VIZ_CFG.marker_palette)]
-            
-            # Plot errorbar and get handles to set separate alphas
-            line, caps, bars = ax.errorbar(
-                means,
-                ys,
-                xerr=stds,
-                fmt=marker,
-                markersize=VIZ_CFG.marker_size,
-                capsize=VIZ_CFG.cap_size,
-                capthick=VIZ_CFG.errorbar_capthick,
-                elinewidth=VIZ_CFG.errorbar_linewidth,
-                color=color,
-                label=""  # No label in errorbar (use proxy artist for legend)
-            )
-            
-            # Set separate alphas for marker and errorbars
-            line.set_alpha(VIZ_CFG.marker_alpha)
-            for bar in bars:
-                bar.set_alpha(VIZ_CFG.errorbar_alpha)
-            for cap in caps:
-                cap.set_alpha(VIZ_CFG.errorbar_alpha)
-            
-            if VIZ_CFG.show_counts_text:
-                for idx, (x, y, c, tc) in enumerate(zip(means, ys, counts, total_counts)):
-                    if np.isnan(x):
-                        continue
-                    text_x = x + stds[idx] + VIZ_CFG.text_offset_x
-                    ax.text(
-                        text_x,
-                        y,
-                        f"{int(c)}/{int(tc)}",
-                        va="center",
-                        ha="left",
-                        fontsize=VIZ_CFG.text_fontsize,
-                        color=color,
-                        fontfamily=VIZ_CFG.font_family,
-                    )
-
-        default_title = f"{facet_val}" if facet_col != "_facet_dummy" else filter_title
-        title = VIZ_CFG.title or default_title
-        if VIZ_CFG.show_title:
-            ax.set_title(
-                title,
-                fontsize=VIZ_CFG.title_fontsize,
-                fontweight="bold",
-                fontfamily=VIZ_CFG.font_family,
-            )
-        ax.set_yticks(y_indices)
-        if VIZ_CFG.show_ytick_labels:
-            ax.set_yticklabels(
-                valid_muscles_reversed,
-                fontsize=VIZ_CFG.tick_labelsize,
-                fontfamily=VIZ_CFG.font_family,
-            )
-        else:
-            ax.tick_params(axis="y", labelleft=False)
-        if VIZ_CFG.show_xlabel:
-            ax.set_xlabel(
-                VIZ_CFG.x_label,
-                fontsize=VIZ_CFG.xlabel_fontsize,
-                fontfamily=VIZ_CFG.font_family,
-            )
-        ax.tick_params(axis="x", labelsize=VIZ_CFG.xtick_labelsize)
-        if not VIZ_CFG.show_xtick_labels:
-            ax.tick_params(axis="x", labelbottom=False)
-        ax.xaxis.set_major_locator(MultipleLocator(20))
-        ax.grid(
-            True, 
-            axis="x", 
-            alpha=VIZ_CFG.grid_alpha, 
-            linestyle=VIZ_CFG.grid_linestyle,
-            linewidth=VIZ_CFG.grid_linewidth,
-            color=VIZ_CFG.grid_color
-        )
-        
-        ax.spines["top"].set_visible(False)
-        ax.spines["right"].set_visible(False)
-
-    for ax in axes_flat[len(facets):]:
-        ax.axis("off")
-
-    if hue_col and VIZ_CFG.show_legend:
-        # Create proxy artists for legend (marker only, no errorbar)
-        legend_handles = []
-        for hue_idx, hue_val in enumerate(hues):
-            color = VIZ_CFG.colors[hue_idx % len(VIZ_CFG.colors)]
-            marker = VIZ_CFG.marker_palette[hue_idx % len(VIZ_CFG.marker_palette)]
-            label = f"{hue_col}: {hue_val}"
-
-            # Create proxy artist with marker only
-            proxy_artist = mlines.Line2D(
-                [], [],
-                marker=marker,
-                color=color,
-                markersize=VIZ_CFG.marker_size,
-                linestyle='None',
-                label=label
-            )
-            legend_handles.append(proxy_artist)
-
-        # Add legend to first facet only
-        first_ax = axes_flat[0]
-        first_ax.legend(
-            handles=legend_handles,
-            loc="best",
-            frameon=False,
-            prop={"family": VIZ_CFG.font_family, "size": VIZ_CFG.legend_fontsize},
-        )
-
-    plt.tight_layout(rect=VIZ_CFG.layout_rect)
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    out_path = output_dir / output_filename
-    print(f"Saving plot to: {out_path}")
-    plt.savefig(out_path, dpi=VIZ_CFG.dpi, bbox_inches="tight", facecolor="white")
-    plt.close(fig)
 
 # 4. MAIN EXECUTION
 
