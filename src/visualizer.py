@@ -3452,6 +3452,7 @@ class AggregatedSignalVisualizer:
         self._feature_event_cache_cols: Tuple[str, ...] = ()
         self._feature_event_cache_key_sig: Tuple[Tuple[str, str], ...] = ()
         self._feature_event_logged: bool = False
+        self._x_axis_zeroing_missing_logged: bool = False
         self._windows_reference_event_logged: bool = False
         self._window_event_warning_logged: set[str] = set()
 
@@ -4529,10 +4530,13 @@ class AggregatedSignalVisualizer:
         vals = meta_df[ms_col].to_numpy()
         mean_ms = _nanmean_ignore_nan(vals[indices])
         if mean_ms is None:
-            raise ValueError(
-                "[x_axis_zeroing] reference_event has no valid values in this plot context: "
-                f"reference_event='{ref_col}', mode='{mode_name}', signal_group='{signal_group}', key='{key_label}'"
-            )
+            if not self._x_axis_zeroing_missing_logged:
+                print(
+                    "[x_axis_zeroing] Warning: reference_event has no valid values; falling back to 0. "
+                    f"reference_event='{ref_col}', mode='{mode_name}', signal_group='{signal_group}', key='{key_label}'"
+                )
+                self._x_axis_zeroing_missing_logged = True
+            return 0.0
         return self._ms_to_frame(float(mean_ms))
 
     def _resolve_time_zero_frame_by_channel(
