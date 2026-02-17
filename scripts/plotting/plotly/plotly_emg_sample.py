@@ -32,6 +32,8 @@ if str(_SCRIPTS_DIR) not in sys.path:
 
 from _repo import ensure_repo_on_path
 
+_REPO_ROOT = ensure_repo_on_path()
+
 # ============================================================
 # RULES (edit here; no CLI options)
 # ============================================================
@@ -1592,6 +1594,12 @@ def _parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         description="Render Plotly EMG onset figures from merged parquet/config."
     )
     parser.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        help="Path to config.yaml (default: <repo_root>/config.yaml).",
+    )
+    parser.add_argument(
         "--sample",
         action="store_true",
         help="Generate exactly one HTML+PNG pair under a 'sample' output subfolder.",
@@ -1605,8 +1613,19 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
 
     load_config, resolve_path, _ = _import_repo_utils()
 
-    cfg_path = RULES.get("config_path")
-    config_path = Path(cfg_path) if cfg_path else (_repo_root() / "config.yaml")
+    cli_config = getattr(args, "config", None)
+    if cli_config:
+        config_path = Path(str(cli_config))
+        if not config_path.is_absolute():
+            config_path = (_REPO_ROOT / config_path).resolve()
+    else:
+        cfg_path = RULES.get("config_path")
+        if cfg_path:
+            config_path = Path(str(cfg_path))
+            if not config_path.is_absolute():
+                config_path = (_REPO_ROOT / config_path).resolve()
+        else:
+            config_path = _REPO_ROOT / "config.yaml"
     cfg = load_config(config_path)
     base_dir = config_path.parent
 
