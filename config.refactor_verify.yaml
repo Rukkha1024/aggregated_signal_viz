@@ -143,7 +143,7 @@ windows:
 # === X-axis Zeroing ===
 # 기준값은 각 플롯(또는 파일)에 포함된 trial들의 `reference_event` 평균 시점입니다.
 x_axis_zeroing:
-  enabled: true
+  enabled: false
   reference_event: "TKEO_AGLR_emg_onset_timing"
 
 # === 플롯 스타일 ===

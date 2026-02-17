@@ -71,4 +71,5 @@ The primary goal is to centralize shared values across multiple scripts. This en
 ## Environment Notes (Non-code)
 - Path resolution: relative paths in `config.yaml` are resolved relative to the config file directory (`base_dir = config_path.parent`). If you copy a config to `/tmp`, `data/merged.parquet` will resolve to `/tmp/data/merged.parquet` and fail.
 - Tooling: in this execution environment, the `rm` command was blocked by policy, so temporary config files created during verification may need to remain untracked.
+- Plot rendering: running all onset aggregation modes in one pass can hit X11 `BadAlloc` in WSL2; use `MPLBACKEND=Agg` and/or run one mode at a time for stable verification.
 
