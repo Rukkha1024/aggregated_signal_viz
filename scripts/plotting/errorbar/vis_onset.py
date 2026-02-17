@@ -1,3 +1,9 @@
+"""Generate onset-timing error-bar (forest) plots.
+
+Merges parquet data with a features CSV, computes per-muscle onset statistics,
+and renders error-bar figures grouped by facet/hue from config.yaml aggregation_modes.
+Classes: VizConfig. Key functions: load_and_merge_data(), process_stats(), main().
+"""
 from __future__ import annotations
 
 import argparse

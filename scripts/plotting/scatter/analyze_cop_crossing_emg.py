@@ -1,3 +1,9 @@
+"""CoP zero-crossing based EMG phase analysis.
+
+Detects zero-crossings in the CoP difference curve, segments trials into A/B
+phases, and computes EMG statistics (mean, iEMG, peak) per phase×lag×muscle.
+Applies cluster-robust regression with BH-FDR correction. Outputs histograms and heatmaps.
+"""
 from __future__ import annotations
 
 import argparse

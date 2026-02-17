@@ -1,3 +1,9 @@
+"""Entry point for the AggregatedSignalVisualizer pipeline.
+
+Reads config.yaml and runs the EMG / Forceplate signal visualization pipeline.
+CLI args: --config, --sample, --modes, --groups.
+Functions: parse_args(), main().
+"""
 from __future__ import annotations
 
 import argparse

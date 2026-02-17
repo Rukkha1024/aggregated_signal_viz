@@ -1,3 +1,9 @@
+"""Validate matplotlib x-axis tick rendering for the '0' label.
+
+Ensures that when 0 ms falls within the time window, the tick label '0'
+is correctly displayed on the x-axis.
+Functions: main() – runs a dummy time-series check and prints pass/fail.
+"""
 from __future__ import annotations
 
 import sys
