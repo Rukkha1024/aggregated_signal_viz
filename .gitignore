@@ -1,4 +1,6 @@
 __pycache__/
 *.pyc
 output/
+output_refactor_verify/
 data/
+md5_*.txt
