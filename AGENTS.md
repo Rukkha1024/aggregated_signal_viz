@@ -24,7 +24,7 @@ When writing complex features or significant refactors, use an ExecPlan (as desc
 Use `.codex/REQUIREMENTS_TEMPLATE.md` to guide a discovery session with the user. Ask questions in batches of 3-5. If answers are vague, push back. Do NOT proceed until the user confirms the completed brief.
 
 ## Phase 2: Plan Authoring
-Write an ExecPlan(`.codex\execplans`) per `.codex/PLANS.md`. Present it to the user. Do NOT implement until the user approves.
+Write an ExecPlan(`.codex\execplans`, korean & english ver.) per `.codex/PLANS.md`. Present it to the user. Do NOT implement until the user approves.
 
 ## Phase 3: Implementation
 Follow the approved ExecPlan. Proceed through milestones autonomously without prompting the user. Keep all living document sections up to date. Commit frequently. If blocked, stop and ask.
