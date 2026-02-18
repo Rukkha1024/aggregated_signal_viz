@@ -3,9 +3,13 @@ Always follow this procedure when performing tasks:
 1. **Plan the changes**: Before making any code modifications, create a detailed plan outlining what will be changed and why
 2. **Get user confirmation**: Present the plan to the user and wait for explicit confirmation before proceeding
 3. **Modify code**: Make the necessary code changes according to the confirmed plan
-4. **Git Commit**: Commit changes with a Korean commit message specifically.
+4. **Git Commit**: Commit changes with a Korean commit message that reflects the user's intent, at least **3 lines** long.
 5. **Run and Verify**: Execute the code and perform MD5 checksum comparison between new outputs and reference files if pipelines or logic were changed.
-6. **Finalize**: Record any non-code environment issues in `.codex/skills` or `AGENTS.md` and clearly specify which skills were used in the final response.
+6. **Finalize**:
+   - Record **issues/problems** in `.codex\issue.md` (issue only).
+   - Record **solutions/workarounds** in the global skill: `$troubleshooting`.
+   - Clearly specify which skills were used in the final response.
+   - Remove unnecessary files and folders.
 
 ---
 ## Environment rules
@@ -17,8 +21,7 @@ Always follow this procedure when performing tasks:
 
 - Do not restore or roll back files/code that you did not modify yourself. Never attempt to "fix" or revert changes in files unrelated to your current task, including using `git checkout`.
 - Use `polars` then `pandas` library.
-- **Leverage Parallel Agent Execution**: In WSL2, multiple agents can run in parallel. Proactively launch multiple independent tasks (search, read, validation) simultaneously to reduce turnaround time.
-- you can use multiple agents to handle different parts of the task concurrently. 
+- Leverage Parallel Agent Execution: you can use multiple agents to handle different parts of the task concurrently. Proactively launch multiple independent tasks (search, read, validation) simultaneously to reduce turnaround time.
 
 ### **Core Principle: Centralized Control**
 The primary goal is to centralize shared values across multiple scripts. This ensures consistency and minimizes code modifications when parameters change.
@@ -30,9 +33,6 @@ The primary goal is to centralize shared values across multiple scripts. This en
 4.  **Fixed Processing Constants:** Define constants derived from the experimental setup (e.g., `FRAME_RATIO`, `FORCEPLATE_DATA_START`).
 5.  **Tunable Analysis Parameters:** Specify parameters that researchers might adjust (e.g., filter cutoffs, normalization methods).
 6.  **Shared Texts:** Centralize common log messages or report headers (e.g., `STAGE03_SUMMARY_HEADER`).
-
-### **Exclusion Rule:**
-- **Visualization Settings:** Do not include settings related to the visual appearance of plots (e.g., colors, fonts, line styles). These should be managed within the visualization code itself.
 
 ---
 
@@ -66,10 +66,3 @@ The primary goal is to centralize shared values across multiple scripts. This en
 - `subject`, `velocity`, `trial_num` non-null
 - time index monotonic per `subject-velocity-trial`
 - window event values exist and are within the corresponding trial range
-
----
-## Environment Notes (Non-code)
-- Path resolution: relative paths in `config.yaml` are resolved relative to the config file directory (`base_dir = config_path.parent`). If you copy a config to `/tmp`, `data/merged.parquet` will resolve to `/tmp/data/merged.parquet` and fail.
-- Tooling: in this execution environment, the `rm` command was blocked by policy, so temporary config files created during verification may need to remain untracked.
-- Plot rendering: running all onset aggregation modes in one pass can hit X11 `BadAlloc` in WSL2; use `MPLBACKEND=Agg` and/or run one mode at a time for stable verification.
-
