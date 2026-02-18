@@ -1,8 +1,193 @@
 from __future__ import annotations
 
-"""Line-graph style plots (timeseries grids and overlays)."""
+"""Line-graph style plots (timeseries grids and overlays).
 
-from .common import _plot_emg as plot_emg
-from .common import _plot_forceplate as plot_forceplate
-from .common import _plot_overlay_timeseries_grid as plot_overlay_timeseries_grid
+This module owns the line/timeseries-facing matplotlib API and routes calls to
+the legacy-tested implementation in ``common.py``.
+"""
 
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Sequence, Tuple
+
+import numpy as np
+
+from . import common as _common
+from .shared import as_ndarray, as_output_path, as_tuple_key, as_tuple_keys
+
+
+def plot_emg(
+    *,
+    aggregated: Dict[str, np.ndarray],
+    output_path: Path,
+    key: Tuple[Any, ...],
+    mode_name: str,
+    group_fields: List[str],
+    markers: Dict[str, Any],
+    event_vlines: List[Dict[str, Any]],
+    event_vlines_by_channel: Optional[Dict[str, List[Dict[str, Any]]]],
+    event_vline_style: Dict[str, Any],
+    event_vline_order: Sequence[str],
+    x: np.ndarray,
+    channels: List[str],
+    grid_layout: List[int],
+    window_spans: List[Dict[str, Any]],
+    window_spans_by_channel: Optional[Dict[str, List[Dict[str, Any]]]],
+    window_span_alpha: float,
+    emg_style: Dict[str, Any],
+    common_style: Dict[str, Any],
+    time_start_ms: float,
+    time_end_ms: float,
+    time_start_frame: Optional[float],
+    time_end_frame: Optional[float],
+    time_zero_frame: float = 0.0,
+    time_zero_frame_by_channel: Optional[Dict[str, float]] = None,
+) -> None:
+    _common._plot_emg(
+        aggregated=aggregated,
+        output_path=as_output_path(output_path),
+        key=as_tuple_key(key),
+        mode_name=mode_name,
+        group_fields=group_fields,
+        markers=markers,
+        event_vlines=event_vlines,
+        event_vlines_by_channel=event_vlines_by_channel,
+        event_vline_style=event_vline_style,
+        event_vline_order=event_vline_order,
+        x=as_ndarray(x),
+        channels=channels,
+        grid_layout=grid_layout,
+        window_spans=window_spans,
+        window_spans_by_channel=window_spans_by_channel,
+        window_span_alpha=window_span_alpha,
+        emg_style=emg_style,
+        common_style=common_style,
+        time_start_ms=time_start_ms,
+        time_end_ms=time_end_ms,
+        time_start_frame=time_start_frame,
+        time_end_frame=time_end_frame,
+        time_zero_frame=time_zero_frame,
+        time_zero_frame_by_channel=time_zero_frame_by_channel,
+    )
+
+
+def plot_overlay_timeseries_grid(
+    *,
+    aggregated_by_key: Dict[Tuple[Any, ...], Dict[str, np.ndarray]],
+    markers_by_key: Dict[Tuple[Any, ...], Dict[str, Any]],
+    event_vlines_by_key: Dict[Tuple[Any, ...], List[Dict[str, Any]]],
+    event_vlines_by_key_by_channel: Optional[Dict[Tuple[Any, ...], Dict[str, List[Dict[str, Any]]]]],
+    pooled_event_vlines: Sequence[Dict[str, Any]],
+    pooled_event_vlines_by_channel: Optional[Dict[str, List[Dict[str, Any]]]],
+    event_vline_style: Dict[str, Any],
+    event_vline_overlay_cfg: Optional[Dict[str, Any]],
+    event_vline_order: Sequence[str],
+    output_path: Path,
+    mode_name: str,
+    signal_group: str,
+    group_fields: List[str],
+    sorted_keys: List[Tuple[Any, ...]],
+    x: np.ndarray,
+    channels: List[str],
+    grid_layout: List[int],
+    window_spans: List[Dict[str, Any]],
+    window_spans_by_channel: Optional[Dict[str, List[Dict[str, Any]]]],
+    window_span_alpha: float,
+    style: Dict[str, Any],
+    common_style: Dict[str, Any],
+    time_start_ms: float,
+    time_end_ms: float,
+    time_start_frame: Optional[float] = None,
+    time_end_frame: Optional[float] = None,
+    filtered_group_fields: Optional[List[str]] = None,
+    time_zero_frame: float = 0.0,
+    time_zero_frame_by_channel: Optional[Dict[str, float]] = None,
+    color_by_fields: Optional[List[str]] = None,
+) -> None:
+    _common._plot_overlay_timeseries_grid(
+        aggregated_by_key=aggregated_by_key,
+        markers_by_key=markers_by_key,
+        event_vlines_by_key=event_vlines_by_key,
+        event_vlines_by_key_by_channel=event_vlines_by_key_by_channel,
+        pooled_event_vlines=pooled_event_vlines,
+        pooled_event_vlines_by_channel=pooled_event_vlines_by_channel,
+        event_vline_style=event_vline_style,
+        event_vline_overlay_cfg=event_vline_overlay_cfg,
+        event_vline_order=event_vline_order,
+        output_path=as_output_path(output_path),
+        mode_name=mode_name,
+        signal_group=signal_group,
+        group_fields=group_fields,
+        sorted_keys=as_tuple_keys(sorted_keys),
+        x=as_ndarray(x),
+        channels=channels,
+        grid_layout=grid_layout,
+        window_spans=window_spans,
+        window_spans_by_channel=window_spans_by_channel,
+        window_span_alpha=window_span_alpha,
+        style=style,
+        common_style=common_style,
+        time_start_ms=time_start_ms,
+        time_end_ms=time_end_ms,
+        time_start_frame=time_start_frame,
+        time_end_frame=time_end_frame,
+        filtered_group_fields=filtered_group_fields or [],
+        time_zero_frame=time_zero_frame,
+        time_zero_frame_by_channel=time_zero_frame_by_channel,
+        color_by_fields=color_by_fields,
+    )
+
+
+def plot_forceplate(
+    *,
+    aggregated: Dict[str, np.ndarray],
+    output_path: Path,
+    key: Tuple[Any, ...],
+    mode_name: str,
+    group_fields: List[str],
+    markers: Dict[str, Any],
+    event_vlines: List[Dict[str, Any]],
+    event_vline_style: Dict[str, Any],
+    event_vline_order: Sequence[str],
+    x: np.ndarray,
+    channels: List[str],
+    grid_layout: List[int],
+    window_spans: List[Dict[str, Any]],
+    window_span_alpha: float,
+    forceplate_style: Dict[str, Any],
+    common_style: Dict[str, Any],
+    time_start_ms: float,
+    time_end_ms: float,
+    time_start_frame: Optional[float],
+    time_end_frame: Optional[float],
+    time_zero_frame: float = 0.0,
+) -> None:
+    _common._plot_forceplate(
+        aggregated=aggregated,
+        output_path=as_output_path(output_path),
+        key=as_tuple_key(key),
+        mode_name=mode_name,
+        group_fields=group_fields,
+        markers=markers,
+        event_vlines=event_vlines,
+        event_vline_style=event_vline_style,
+        event_vline_order=event_vline_order,
+        x=as_ndarray(x),
+        channels=channels,
+        grid_layout=grid_layout,
+        window_spans=window_spans,
+        window_span_alpha=window_span_alpha,
+        forceplate_style=forceplate_style,
+        common_style=common_style,
+        time_start_ms=time_start_ms,
+        time_end_ms=time_end_ms,
+        time_start_frame=time_start_frame,
+        time_end_frame=time_end_frame,
+        time_zero_frame=time_zero_frame,
+    )
+
+
+__all__ = [
+    "plot_emg",
+    "plot_forceplate",
+    "plot_overlay_timeseries_grid",
+]
