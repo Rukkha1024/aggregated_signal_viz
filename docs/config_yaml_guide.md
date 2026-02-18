@@ -16,12 +16,6 @@
 conda run -n module python main.py
 ```
 
-### B. 특정 config로 실행
-
-```bash
-conda run -n module python main.py --config config.yaml
-```
-
 ### C. `--sample` / `--modes` / `--groups` (빠른 디버그용)
 
 CLI 옵션 요약:
@@ -39,8 +33,11 @@ CLI 옵션 요약:
 예시(EMG만, 특정 mode만, sample로 빠르게 확인):
 
 ```bash
-conda run -n module python main.py --sample --modes diff_step_TF_subject --groups emg
+conda run -n module python main.py --sample --modes diff_step_TF_subject_mean --groups emg
 ```
+
+> 참고: `diff_step_TF_subject`(trial-level, subject/velocity/trial 단위)는 현재 `config.yaml`에 **주석처리**되어 있습니다.
+> trial-level 개별 파일 출력이 필요하면 해당 모드를 config에서 주석 해제하여 활성화하세요.
 
 ### D. Plotly HTML 같이 저장하기 (PNG 옆에 `.html` 생성)
 
@@ -64,23 +61,6 @@ output:
 
 ---
 
-## 1) 경로/파일 해석 규칙 (제일 자주 헷갈리는 부분)
-
-### 1.1 상대 경로는 “config 파일 위치 기준”
-
-예를 들어 `config.yaml`에 아래가 있으면,
-
-```yaml
-data:
-  input_file: "data/merged.parquet"
-```
-
-실제 경로는 **`config.yaml`이 있는 폴더** 기준의 `data/merged.parquet` 입니다.
-
-- 따라서 `config.yaml`을 `/tmp/config.yaml` 같은 곳으로 복사하면,
-  - `data/merged.parquet`가 `/tmp/data/merged.parquet`로 해석되어 실패할 수 있습니다.
-
----
 
 ## 2) `data:` (입력/메타/샘플링 설정)
 
@@ -162,19 +142,22 @@ output:
 
 - `true`이면 EMG에 대해 다음 HTML을 추가 생성합니다:
   - 위치: `<mode output_dir>/trial_grid_by_channel/`
-  - 파일: `diff_step_TF_subject_<subject>_<emg_channel>_trial_grid_emg.html`
+  - 파일: `<mode>_<subject>_<emg_channel>_trial_grid_emg.html`
   - 단위: **subject × emg_channel**
-  - 내용: 한 채널(예: TA)만 고정하고, subplot을 “trial”로 배치
+  - 내용: 한 채널(예: TA)만 고정하고, subplot을 "trial"로 배치
 
 #### (중요) Trial-level 모드만 허용
 
-이 옵션은 “trial-grid”의 정의상 **trial 단위가 보장되어야** 하므로, 아래 컬럼들이 `groupby`에 포함되어야 합니다.
+이 옵션은 "trial-grid"의 정의상 **trial 단위가 보장되어야** 하므로, 아래 컬럼들이 `groupby`에 포함되어야 합니다.
 
 - `data.id_columns.subject`
 - `data.id_columns.velocity`
 - `data.id_columns.trial`
 
 미포함 시 실행이 중단됩니다(안전장치).
+
+> ⚠️ 현재 `config.yaml`에서 trial-level 모드인 `diff_step_TF_subject`는 **주석처리(비활성)** 상태입니다.
+> 이 기능을 사용하려면 먼저 `aggregation_modes`에서 trial-level 모드를 활성화해야 합니다.
 
 ---
 
@@ -230,19 +213,84 @@ interpolation:
 
 ### 6.1 기본 구조
 
+현재 `config.yaml`에 정의된 active 모드 목록:
+
+| 모드 | groupby | 설명 |
+|------|---------|------|
+| `step_TF_mean` | `["step_TF"]` | step/nonstep 전체 평균 overlay |
+| `nonstep_age_group_mean` | `["age_group"]` | nonstep 데이터의 연령그룹(young/old) 비교 |
+| `step_age_group_mean` | `["age_group"]` | step 데이터의 연령그룹(young/old) 비교 |
+| `diff_step_TF_subject_mean` | `["step_TF","subject"]` | subject별 step/nonstep 평균 overlay |
+| ~~`diff_step_TF_subject`~~ | `["step_TF","subject","velocity","trial_num"]` | ⚠️ 현재 **주석처리됨** (trial-level) |
+
+예시 구조:
+
 ```yaml
 aggregation_modes:
-  diff_step_TF_subject:
+  # ── 전체 평균: step vs nonstep ──
+  step_TF_mean:
     enabled: true
     filter:
       mixed: 1
       age_group: "young"
-    groupby: ["step_TF", "subject", "velocity", "trial_num"]
+    groupby: ["step_TF"]
     color_by: ["step_TF"]
     overlay: true
     overlay_within: ["step_TF"]
-    output_dir: "step_TF_subject"
-    filename_pattern: "step_TF_{subject}_v{velocity}_{trial_num}_{signal_group}.png"
+    output_dir: "step_TF"
+    filename_pattern: "step_TF_mean_{signal_group}.png"
+
+  # ── 연령그룹 비교: nonstep ──
+  nonstep_age_group_mean:
+    enabled: true
+    filter:
+      mixed: 1
+      step_TF: "nonstep"
+    groupby: ["age_group"]
+    color_by: ["age_group"]
+    overlay: true
+    overlay_within: ["age_group"]
+    output_dir: "age_group"
+    filename_pattern: "nonstep_●노인 vs. ▲성인_{signal_group}.png"
+
+  # ── 연령그룹 비교: step ──
+  step_age_group_mean:
+    enabled: true
+    filter:
+      mixed: 1
+      step_TF: "step"
+    groupby: ["age_group"]
+    color_by: ["age_group"]
+    overlay: true
+    overlay_within: ["age_group"]
+    output_dir: "age_group"
+    filename_pattern: "step_●노인 vs. ▲성인_{signal_group}.png"
+
+  # ── subject별 평균: step vs nonstep ──
+  diff_step_TF_subject_mean:
+    enabled: true
+    filter:
+      mixed: 1
+      age_group: "young"
+    groupby: ["step_TF", "subject"]
+    color_by: ["step_TF"]
+    overlay: true
+    overlay_within: ["step_TF"]
+    output_dir: "step_TF_subject_mean"
+    filename_pattern: "step_TF_{subject}_mean_{signal_group}.png"
+
+  # ── trial-level (현재 주석처리 / 비활성) ──
+  # diff_step_TF_subject:
+  #   enabled: true
+  #   filter:
+  #     mixed: 1
+  #     age_group: "young"
+  #   groupby: ["step_TF", "subject", "velocity", "trial_num"]
+  #   color_by: ["step_TF"]
+  #   overlay: true
+  #   overlay_within: ["step_TF"]
+  #   output_dir: "step_TF_subject"
+  #   filename_pattern: "step_TF_{subject}_v{velocity}_{trial_num}_{signal_group}.png"
 ```
 
 ### 6.2 `filter`
@@ -254,10 +302,14 @@ aggregation_modes:
 
 ### 6.3 `groupby`
 
-- “그림/파일 생성의 기본 단위”를 정의합니다.
-- 이 프로젝트의 핵심 단위는 `subject-velocity-trial` 입니다.
+- "그림/파일 생성의 기본 단위"를 정의합니다.
+- 현재 active 모드 예시:
+  - `step_TF_mean`: `["step_TF"]` — step/nonstep 두 그룹이 하나의 파일로 합쳐짐
+  - `diff_step_TF_subject_mean`: `["step_TF","subject"]` — subject별로 파일 분리
+  - (비활성) `diff_step_TF_subject`: `["step_TF","subject","velocity","trial_num"]` — trial-level 개별 파일
 - `output.emg_trial_grid_by_channel: true`를 켰다면 `groupby`에
   - subject/velocity/trial이 반드시 포함되어야 합니다(안전장치로 강제).
+  - 현재 active 모드 중에는 해당 조건을 만족하는 모드가 없으므로, trial-level 모드를 별도로 활성화해야 합니다.
 
 ### 6.4 `overlay` + `overlay_within` (중요)
 
