@@ -17,6 +17,19 @@ Always follow this procedure when performing tasks:
 - Always run Python/pip as: `conda run -n module python` / `conda run -n module pip`.
 
 ---
+# ExecPlans
+When writing complex features or significant refactors, use an ExecPlan (as described in .agent/PLANS.md) from design to implementation.
+
+## Phase 1: Requirements Discovery
+Use `.codex/REQUIREMENTS_TEMPLATE.md` to guide a discovery session with the user. Ask questions in batches of 3-5. If answers are vague, push back. Do NOT proceed until the user confirms the completed brief.
+
+## Phase 2: Plan Authoring
+Write an ExecPlan per `.codex/PLANS.md`. Present it to the user. Do NOT implement until the user approves.
+
+## Phase 3: Implementation
+Follow the approved ExecPlan. Proceed through milestones autonomously without prompting the user. Keep all living document sections up to date. Commit frequently. If blocked, stop and ask.
+
+---
 ## **Codebase Rule: Configuration Management**
 
 - Do not restore or roll back files/code that you did not modify yourself. Never attempt to "fix" or revert changes in files unrelated to your current task, including using `git checkout`.
