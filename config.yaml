@@ -66,50 +66,50 @@ aggregation_modes:
     overlay_within: ["step_TF"]
     output_dir: "step_TF"
     filename_pattern: "step_TF_mean_{signal_group}.png"
-  # nonstep_age_group_mean:
-  #   enabled: true
-  #   filter:
-  #     mixed: 1
-  #     step_TF: "nonstep"
-  #   groupby: ["age_group"]
-  #   color_by: ["age_group"]
-  #   overlay: true
-  #   overlay_within: ["age_group"]
-  #   output_dir: "age_group"
-  #   filename_pattern: "nonstep_●노인 vs. ▲성인_{signal_group}.png"
-  # step_age_group_mean:
-  #   enabled: true
-  #   filter:
-  #     mixed: 1
-  #     step_TF: "step"
-  #   groupby: ["age_group"]
-  #   color_by: ["age_group"]
-  #   overlay: true
-  #   overlay_within: ["age_group"]
-  #   output_dir: "age_group"
-  #   filename_pattern: "step_●노인 vs. ▲성인_{signal_group}.png"
-  # diff_step_TF_subject_mean:
-  #   enabled: true
-  #   filter:
-  #     mixed: 1
-  #     age_group: "young"
-  #   groupby: ["step_TF","subject"]
-  #   color_by: ["step_TF"]
-  #   overlay: true
-  #   overlay_within: ["step_TF"]
-  #   output_dir: "step_TF_subject_mean"
-  #   filename_pattern: "step_TF_{subject}_mean_{signal_group}.png"
-  diff_step_TF_subject:
+  nonstep_age_group_mean:
+    enabled: true
+    filter:
+      mixed: 1
+      step_TF: "nonstep"
+    groupby: ["age_group"]
+    color_by: ["age_group"]
+    overlay: true
+    overlay_within: ["age_group"]
+    output_dir: "age_group"
+    filename_pattern: "nonstep_●노인 vs. ▲성인_{signal_group}.png"
+  step_age_group_mean:
+    enabled: true
+    filter:
+      mixed: 1
+      step_TF: "step"
+    groupby: ["age_group"]
+    color_by: ["age_group"]
+    overlay: true
+    overlay_within: ["age_group"]
+    output_dir: "age_group"
+    filename_pattern: "step_●노인 vs. ▲성인_{signal_group}.png"
+  diff_step_TF_subject_mean:
     enabled: true
     filter:
       mixed: 1
       age_group: "young"
-    groupby: ["step_TF", "subject", "velocity", "trial_num"]
+    groupby: ["step_TF","subject"]
     color_by: ["step_TF"]
     overlay: true
     overlay_within: ["step_TF"]
-    output_dir: "step_TF_subject"
-    filename_pattern: "step_TF_{subject}_v{velocity}_{trial_num}_{signal_group}.png"
+    output_dir: "step_TF_subject_mean"
+    filename_pattern: "step_TF_{subject}_mean_{signal_group}.png"
+  # diff_step_TF_subject:
+  #   enabled: true
+  #   filter:
+  #     mixed: 1
+  #     age_group: "young"
+  #   groupby: ["step_TF", "subject", "velocity", "trial_num"]
+  #   color_by: ["step_TF"]
+  #   overlay: true
+  #   overlay_within: ["step_TF"]
+  #   output_dir: "step_TF_subject"
+  #   filename_pattern: "step_TF_{subject}_v{velocity}_{trial_num}_{signal_group}.png"
 
 # === Window Definitions (ms) ===
 # 참고:
